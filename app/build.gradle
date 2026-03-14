@@ -1,0 +1,87 @@
+// build.gradle для модуля app
+// Здесь описаны все зависимости и параметры сборки приложения
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.vlessvpn.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.vlessvpn.app"
+        minSdk 26          // Android 8.0 — минимум для нормальной работы VPN API
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+
+        // Поддержка нативных библиотек (libv2ray собран для этих архитектур)
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false   // Не обфусцируем, чтобы проще дебажить
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    // Папка с .aar файлами (libv2ray.aar нужно скачать отдельно — см. README)
+    repositories {
+        flatDir {
+            dirs 'libs'
+        }
+    }
+
+    packagingOptions {
+        // Исключаем дубликаты нативных библиотек
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+    }
+}
+
+dependencies {
+    // ========== ЛОКАЛЬНЫЕ БИБЛИОТЕКИ ==========
+    // libv2ray.aar — скачать с https://github.com/2dust/v2rayNG/releases
+    // Поместить файл в папку app/libs/
+    implementation(name: 'libv2ray', ext: 'aar')
+
+    // ========== ANDROID JETPACK ==========
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+
+    // ViewModel + LiveData (для реактивного UI)
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.7.0'
+    implementation 'androidx.lifecycle:lifecycle-livedata:2.7.0'
+
+    // ========== ROOM DATABASE ==========
+    // Локальная база данных для хранения серверов
+    implementation 'androidx.room:room-runtime:2.6.1'
+    annotationProcessor 'androidx.room:room-compiler:2.6.1'
+
+    // ========== WORKMANAGER ==========
+    // Надёжный планировщик фоновых задач (тест серверов каждый час)
+    implementation 'androidx.work:work-runtime:2.9.0'
+
+    // ========== СЕТЬ ==========
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // ========== JSON ==========
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // ========== PREFERENCES ==========
+    implementation 'androidx.preference:preference:1.2.1'
+}

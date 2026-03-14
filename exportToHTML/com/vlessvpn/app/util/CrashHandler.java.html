@@ -1,0 +1,153 @@
+<html>
+<head>
+<title>CrashHandler.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #808080;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+CrashHandler.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.util</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">android.app.Activity</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.ClipData</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.ClipboardManager</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.Context</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.Intent</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.Build</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.util.Log</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">java.io.File</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.io.FileWriter</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.io.PrintWriter</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.io.StringWriter</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.text.SimpleDateFormat</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.util.Date</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.util.Locale</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* CrashHandler — перехватывает краши и показывает их на экране.</span>
+ <span class="s2">*</span>
+ <span class="s2">* При краше:</span>
+ <span class="s2">* 1. Сохраняет стектрейс в файл</span>
+ <span class="s2">* 2. Запускает CrashActivity — экран с текстом ошибки</span>
+ <span class="s2">* 3. На экране: кнопка &quot;Скопировать&quot; → вставить в Telegram/email</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">CrashHandler </span><span class="s0">implements </span><span class="s1">Thread.UncaughtExceptionHandler {</span>
+
+    <span class="s0">private static final </span><span class="s1">String TAG = </span><span class="s3">&quot;CrashHandler&quot;</span><span class="s0">;</span>
+    <span class="s0">private static final </span><span class="s1">String CRASH_FILE = </span><span class="s3">&quot;crash_log.txt&quot;</span><span class="s0">;</span>
+
+    <span class="s0">private final </span><span class="s1">Context context</span><span class="s0">;</span>
+    <span class="s0">private final </span><span class="s1">Thread.UncaughtExceptionHandler defaultHandler</span><span class="s0">;</span>
+
+    <span class="s0">public static void </span><span class="s1">install(Context context) {</span>
+        <span class="s1">CrashHandler handler = </span><span class="s0">new </span><span class="s1">CrashHandler(</span>
+            <span class="s1">context.getApplicationContext()</span><span class="s0">,</span>
+            <span class="s1">Thread.getDefaultUncaughtExceptionHandler()</span>
+        <span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">Thread.setDefaultUncaughtExceptionHandler(handler)</span><span class="s0">;</span>
+        <span class="s1">Log.i(TAG</span><span class="s0">, </span><span class="s3">&quot;CrashHandler установлен&quot;</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private </span><span class="s1">CrashHandler(Context context</span><span class="s0">, </span><span class="s1">Thread.UncaughtExceptionHandler defaultHandler) {</span>
+        <span class="s0">this</span><span class="s1">.context = context</span><span class="s0">;</span>
+        <span class="s0">this</span><span class="s1">.defaultHandler = defaultHandler</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">public void </span><span class="s1">uncaughtException(Thread thread</span><span class="s0">, </span><span class="s1">Throwable throwable) {</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">String report = buildReport(thread</span><span class="s0">, </span><span class="s1">throwable)</span><span class="s0">;</span>
+
+            <span class="s4">// Сохраняем в файл</span>
+            <span class="s1">File file = </span><span class="s0">new </span><span class="s1">File(context.getFilesDir()</span><span class="s0">, </span><span class="s1">CRASH_FILE)</span><span class="s0">;</span>
+            <span class="s0">try </span><span class="s1">(FileWriter fw = </span><span class="s0">new </span><span class="s1">FileWriter(file</span><span class="s0">, false</span><span class="s1">)) {</span>
+                <span class="s1">fw.write(report)</span><span class="s0">;</span>
+            <span class="s1">}</span>
+            <span class="s1">Log.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Краш сохранён: &quot; </span><span class="s1">+ file.getAbsolutePath())</span><span class="s0">;</span>
+
+            <span class="s4">// Запускаем CrashActivity — показываем текст на экране</span>
+            <span class="s1">Intent intent = </span><span class="s0">new </span><span class="s1">Intent(context</span><span class="s0">, </span><span class="s1">CrashActivity.</span><span class="s0">class</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">intent.putExtra(</span><span class="s3">&quot;crash_text&quot;</span><span class="s0">, </span><span class="s1">report)</span><span class="s0">;</span>
+            <span class="s1">intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)</span><span class="s0">;</span>
+            <span class="s1">context.startActivity(intent)</span><span class="s0">;</span>
+
+            <span class="s1">Thread.sleep(</span><span class="s5">500</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">Log.e(TAG</span><span class="s0">, </span><span class="s3">&quot;CrashHandler itself crashed&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">// Вызываем стандартный обработчик (завершает процесс)</span>
+        <span class="s0">if </span><span class="s1">(defaultHandler != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">defaultHandler.uncaughtException(thread</span><span class="s0">, </span><span class="s1">throwable)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private </span><span class="s1">String buildReport(Thread thread</span><span class="s0">, </span><span class="s1">Throwable t) {</span>
+        <span class="s1">StringWriter sw = </span><span class="s0">new </span><span class="s1">StringWriter()</span><span class="s0">;</span>
+        <span class="s1">PrintWriter pw = </span><span class="s0">new </span><span class="s1">PrintWriter(sw)</span><span class="s0">;</span>
+
+        <span class="s1">SimpleDateFormat sdf = </span><span class="s0">new </span><span class="s1">SimpleDateFormat(</span><span class="s3">&quot;yyyy-MM-dd HH:mm:ss&quot;</span><span class="s0">, </span><span class="s1">Locale.getDefault())</span><span class="s0">;</span>
+
+        <span class="s1">pw.println(</span><span class="s3">&quot;═══════════════════════════════════&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;  CRASH REPORT — VlessVPN&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;═══════════════════════════════════&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;Время:      &quot; </span><span class="s1">+ sdf.format(</span><span class="s0">new </span><span class="s1">Date()))</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;Устройство: &quot; </span><span class="s1">+ Build.MANUFACTURER + </span><span class="s3">&quot; &quot; </span><span class="s1">+ Build.MODEL)</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;Android:    &quot; </span><span class="s1">+ Build.VERSION.RELEASE + </span><span class="s3">&quot; (API &quot; </span><span class="s1">+ Build.VERSION.SDK_INT + </span><span class="s3">&quot;)&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;Поток:      &quot; </span><span class="s1">+ thread.getName())</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;───────────────────────────────────&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">pw.println(</span><span class="s3">&quot;ИСКЛЮЧЕНИЕ:&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">pw.println()</span><span class="s0">;</span>
+        <span class="s1">t.printStackTrace(pw)</span><span class="s0">;</span>
+
+        <span class="s4">// Цепочка причин</span>
+        <span class="s1">Throwable cause = t.getCause()</span><span class="s0">;</span>
+        <span class="s0">int </span><span class="s1">depth = </span><span class="s5">0</span><span class="s0">;</span>
+        <span class="s0">while </span><span class="s1">(cause != </span><span class="s0">null </span><span class="s1">&amp;&amp; depth &lt; </span><span class="s5">5</span><span class="s1">) {</span>
+            <span class="s1">pw.println()</span><span class="s0">;</span>
+            <span class="s1">pw.println(</span><span class="s3">&quot;ПРИЧИНА (cause &quot; </span><span class="s1">+ (depth + </span><span class="s5">1</span><span class="s1">) + </span><span class="s3">&quot;):&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">cause.printStackTrace(pw)</span><span class="s0">;</span>
+            <span class="s1">cause = cause.getCause()</span><span class="s0">;</span>
+            <span class="s1">depth++</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s4">// Последние строки FileLogger если есть</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">File logFile = </span><span class="s0">new </span><span class="s1">File(context.getFilesDir()</span><span class="s0">, </span><span class="s3">&quot;app_log.txt&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">if </span><span class="s1">(logFile.exists()) {</span>
+                <span class="s1">pw.println()</span><span class="s0">;</span>
+                <span class="s1">pw.println(</span><span class="s3">&quot;───────────────────────────────────&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">pw.println(</span><span class="s3">&quot;ПОСЛЕДНИЕ СТРОКИ app_log.txt:&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">String[] lines = </span><span class="s0">new </span><span class="s1">java.io.FileInputStream(logFile)</span>
+                    <span class="s1">.toString().split(</span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s4">// Читаем последние 30 строк через RandomAccessFile</span>
+                <span class="s1">java.io.RandomAccessFile raf = </span><span class="s0">new </span><span class="s1">java.io.RandomAccessFile(logFile</span><span class="s0">, </span><span class="s3">&quot;r&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">long </span><span class="s1">len = raf.length()</span><span class="s0">;</span>
+                <span class="s0">long </span><span class="s1">pos = Math.max(</span><span class="s5">0</span><span class="s0">, </span><span class="s1">len - </span><span class="s5">3000</span><span class="s1">)</span><span class="s0">; </span><span class="s4">// последние ~3000 байт</span>
+                <span class="s1">raf.seek(pos)</span><span class="s0">;</span>
+                <span class="s0">byte</span><span class="s1">[] buf = </span><span class="s0">new byte</span><span class="s1">[(</span><span class="s0">int</span><span class="s1">)(len - pos)]</span><span class="s0">;</span>
+                <span class="s1">raf.readFully(buf)</span><span class="s0">;</span>
+                <span class="s1">raf.close()</span><span class="s0">;</span>
+                <span class="s1">pw.println(</span><span class="s0">new </span><span class="s1">String(buf</span><span class="s0">, </span><span class="s3">&quot;UTF-8&quot;</span><span class="s1">))</span><span class="s0">;</span>
+            <span class="s1">}</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception ignored) {}</span>
+
+        <span class="s1">pw.println(</span><span class="s3">&quot;═══════════════════════════════════&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">sw.toString()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

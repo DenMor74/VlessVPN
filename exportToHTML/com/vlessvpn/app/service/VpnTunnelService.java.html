@@ -1,0 +1,565 @@
+<html>
+<head>
+<title>VpnTunnelService.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+VpnTunnelService.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.service</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">android.app.Notification</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.app.NotificationChannel</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.app.NotificationManager</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.app.PendingIntent</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.Intent</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.net.ConnectivityManager</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.net.Network</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.net.NetworkCapabilities</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.net.NetworkRequest</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.net.VpnService</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.Build</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.Handler</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.Looper</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.ParcelFileDescriptor</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">androidx.core.app.NotificationCompat</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">com.google.gson.Gson</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.R</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.core.V2RayConfigBuilder</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.core.V2RayManager</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.model.VlessServer</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.ui.MainActivity</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.util.FileLogger</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.util.StatusBus</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">java.net.InetAddress</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.util.ArrayList</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.util.List</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* VpnTunnelService — основной VPN сервис.</span>
+ <span class="s2">*</span>
+ <span class="s2">* СХЕМА ТРАФИКА (hev режим, точно как v2rayNG):</span>
+ <span class="s2">* ══════════════════════════════════════════════</span>
+ <span class="s2">*</span>
+ <span class="s2">*   Приложение → TUN (tun0, 10.10.14.1/24)</span>
+ <span class="s2">*       → hev-socks5-tunnel читает IP пакеты из TUN fd</span>
+ <span class="s2">*       → конвертирует в SOCKS5</span>
+ <span class="s2">*       → отправляет на 127.0.0.1:10808</span>
+ <span class="s2">*       → v2ray SOCKS5 inbound</span>
+ <span class="s2">*       → VLESS outbound</span>
+ <span class="s2">*       → сервер</span>
+ <span class="s2">*</span>
+ <span class="s2">* startup() в V2RayManager возвращает 0 (fd не нужен v2ray в hev режиме).</span>
+ <span class="s2">* hev-socks5-tunnel получает fd через TProxyStartService(configPath, fd).</span>
+ <span class="s2">*</span>
+ <span class="s2">* ПОРЯДОК ЗАПУСКА:</span>
+ <span class="s2">*   1. Создать TUN (VpnService.Builder)</span>
+ <span class="s2">*   2. Запустить v2ray (startLoop с socks inbound 10808)</span>
+ <span class="s2">*   3. Дождаться &quot;V2Ray started&quot;</span>
+ <span class="s2">*   4. Запустить hev-socks5-tunnel (TProxyStartService)</span>
+ <span class="s2">*</span>
+ <span class="s2">* ПОРЯДОК ОСТАНОВКИ:</span>
+ <span class="s2">*   1. Остановить hev (TProxyStopService)</span>
+ <span class="s2">*   2. Остановить v2ray (stopLoop)</span>
+ <span class="s2">*   3. Закрыть TUN</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">VpnTunnelService </span><span class="s0">extends </span><span class="s1">VpnService {</span>
+
+    <span class="s0">private static final </span><span class="s1">String TAG = </span><span class="s3">&quot;VpnTunnelService&quot;</span><span class="s0">;</span>
+    <span class="s0">private static final </span><span class="s1">String CHANNEL_ID = </span><span class="s3">&quot;vpn_channel&quot;</span><span class="s0">;</span>
+    <span class="s0">private static final int </span><span class="s1">NOTIF_ID = </span><span class="s4">1001</span><span class="s0">;</span>
+
+    <span class="s0">public static final </span><span class="s1">String ACTION_CONNECT    = </span><span class="s3">&quot;com.vlessvpn.CONNECT&quot;</span><span class="s0">;</span>
+    <span class="s0">public static final </span><span class="s1">String ACTION_DISCONNECT = </span><span class="s3">&quot;com.vlessvpn.DISCONNECT&quot;</span><span class="s0">;</span>
+    <span class="s0">public static final </span><span class="s1">String EXTRA_SERVER      = </span><span class="s3">&quot;server&quot;</span><span class="s0">;</span>
+
+    <span class="s5">// Статический доступ для V2RayManager.startup() — в hev режиме НЕ используется</span>
+    <span class="s5">// (оставляем для совместимости, startup() вернёт 0)</span>
+    <span class="s0">private static volatile </span><span class="s1">VpnTunnelService instance</span><span class="s0">;</span>
+    <span class="s2">/** Статическое поле — быстрая проверка из UI без bind */</span>
+    <span class="s0">public static volatile boolean </span><span class="s1">isRunning = </span><span class="s0">false;</span>
+    <span class="s2">/** Текущий подключённый сервер — для MainViewModel */</span>
+    <span class="s0">public static volatile </span><span class="s1">VlessServer connectedServer = </span><span class="s0">null;</span>
+
+    <span class="s2">/** Статистика трафика (байты суммарно с момента подключения) */</span>
+    <span class="s0">public static volatile long </span><span class="s1">totalUp   = </span><span class="s4">0</span><span class="s0">;</span>
+    <span class="s0">public static volatile long </span><span class="s1">totalDown = </span><span class="s4">0</span><span class="s0">;</span>
+
+    <span class="s0">private final </span><span class="s1">Handler statsHandler = </span><span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper())</span><span class="s0">;</span>
+    <span class="s0">private final </span><span class="s1">Runnable statsPoller = </span><span class="s0">new </span><span class="s1">Runnable() {</span>
+        <span class="s1">@Override </span><span class="s0">public void </span><span class="s1">run() {</span>
+            <span class="s1">V2RayManager mgr = v2RayManager</span><span class="s0">;</span>
+            <span class="s0">if </span><span class="s1">(mgr != </span><span class="s0">null </span><span class="s1">&amp;&amp; isRunning) {</span>
+                <span class="s0">long</span><span class="s1">[] s = mgr.getStats()</span><span class="s0">;</span>
+                <span class="s1">totalUp   = s[</span><span class="s4">0</span><span class="s1">]</span><span class="s0">;</span>
+                <span class="s1">totalDown = s[</span><span class="s4">1</span><span class="s1">]</span><span class="s0">;</span>
+                <span class="s5">// Обновляем уведомление с трафиком</span>
+                <span class="s1">VlessServer srv = connectedServer</span><span class="s0">;</span>
+                <span class="s0">if </span><span class="s1">(srv != </span><span class="s0">null</span><span class="s1">) {</span>
+                    <span class="s1">updateNotification(</span><span class="s3">&quot;↑ &quot; </span><span class="s1">+ fmtBytes(totalUp) + </span><span class="s3">&quot;  ↓ &quot; </span><span class="s1">+ fmtBytes(totalDown)</span><span class="s0">,</span>
+                        <span class="s1">srv.host)</span><span class="s0">;</span>
+                <span class="s1">}</span>
+                <span class="s5">// Рассылаем статус в UI</span>
+                <span class="s1">StatusBus.post(</span><span class="s3">&quot;↑ &quot; </span><span class="s1">+ fmtBytes(totalUp) + </span><span class="s3">&quot;  ↓ &quot; </span><span class="s1">+ fmtBytes(totalDown)</span><span class="s0">, true</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">statsHandler.postDelayed(</span><span class="s0">this, </span><span class="s4">3_000</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span><span class="s0">;</span>
+    <span class="s0">private </span><span class="s1">ParcelFileDescriptor vpnInterface</span><span class="s0">;</span>
+
+    <span class="s0">private </span><span class="s1">V2RayManager v2RayManager</span><span class="s0">;</span>
+    <span class="s0">private </span><span class="s1">HevTunnel    hevTunnel</span><span class="s0">;</span>
+    <span class="s0">private </span><span class="s1">Thread       v2rayThread</span><span class="s0">;</span>
+    <span class="s0">private </span><span class="s1">VlessServer  currentServer</span><span class="s0">;</span>
+
+    <span class="s0">private </span><span class="s1">ConnectivityManager connectivityManager</span><span class="s0">;</span>
+    <span class="s0">private </span><span class="s1">ConnectivityManager.NetworkCallback networkCallback</span><span class="s0">;</span>
+
+    <span class="s5">// Защита от одновременных connect() — только последний запрос выигрывает</span>
+    <span class="s0">private final </span><span class="s1">Object connectLock = </span><span class="s0">new </span><span class="s1">Object()</span><span class="s0">;</span>
+    <span class="s0">private volatile long </span><span class="s1">activeConnectId = </span><span class="s4">0</span><span class="s0">;</span>
+
+    <span class="s5">// ── статические методы для V2RayManager ──────────────────────────────────</span>
+
+    <span class="s2">/** startup() возвращает 0 в hev режиме — v2ray не читает TUN напрямую */</span>
+    <span class="s0">public static int </span><span class="s1">getTunFd() {</span>
+        <span class="s0">return </span><span class="s4">0</span><span class="s0">; </span><span class="s5">// hev режим: fd не нужен v2ray</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/** protect() для исходящих сокетов v2ray — нужен чтобы сокет v2ray не шёл в TUN */</span>
+    <span class="s0">public static boolean </span><span class="s1">protectSocket(</span><span class="s0">int </span><span class="s1">fd) {</span>
+        <span class="s1">VpnTunnelService svc = instance</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(svc == </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;protectSocket: instance=null&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">return false;</span>
+        <span class="s1">}</span>
+        <span class="s0">boolean </span><span class="s1">ok = svc.protect(fd)</span><span class="s0">;</span>
+        <span class="s1">FileLogger.d(TAG</span><span class="s0">, </span><span class="s3">&quot;protectSocket(fd=&quot; </span><span class="s1">+ fd + </span><span class="s3">&quot;)=&quot; </span><span class="s1">+ ok)</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">ok</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s5">// ── lifecycle ─────────────────────────────────────────────────────────────</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">public void </span><span class="s1">onCreate() {</span>
+        <span class="s0">super</span><span class="s1">.onCreate()</span><span class="s0">;</span>
+        <span class="s1">instance = </span><span class="s0">this;</span>
+        <span class="s1">connectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE)</span><span class="s0">;</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;=== onCreate ===&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">createNotificationChannel()</span><span class="s0">;</span>
+        <span class="s1">V2RayManager.initEnvOnce(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">public int </span><span class="s1">onStartCommand(Intent intent</span><span class="s0">, int </span><span class="s1">flags</span><span class="s0">, int </span><span class="s1">startId) {</span>
+        <span class="s1">String action = intent != </span><span class="s0">null </span><span class="s1">? intent.getAction() : </span><span class="s0">null;</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;onStartCommand: &quot; </span><span class="s1">+ action)</span><span class="s0">;</span>
+
+        <span class="s0">if </span><span class="s1">(ACTION_DISCONNECT.equals(action)) {</span>
+            <span class="s1">disconnect()</span><span class="s0">;</span>
+            <span class="s0">return </span><span class="s1">START_NOT_STICKY</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">VlessServer server = </span><span class="s0">null;</span>
+        <span class="s0">if </span><span class="s1">(intent != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">String json = intent.getStringExtra(EXTRA_SERVER)</span><span class="s0">;</span>
+            <span class="s0">if </span><span class="s1">(json != </span><span class="s0">null</span><span class="s1">) {</span>
+                <span class="s0">try </span><span class="s1">{</span>
+                    <span class="s1">server = </span><span class="s0">new </span><span class="s1">Gson().fromJson(json</span><span class="s0">, </span><span class="s1">VlessServer.</span><span class="s0">class</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+                    <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка десериализации сервера: &quot; </span><span class="s1">+ e.getMessage())</span><span class="s0">;</span>
+                <span class="s1">}</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+        <span class="s0">if </span><span class="s1">(server == </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;No server in intent&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">stopSelf()</span><span class="s0">;</span>
+            <span class="s0">return </span><span class="s1">START_NOT_STICKY</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">startForeground(NOTIF_ID</span><span class="s0">, </span><span class="s1">buildNotification(</span><span class="s3">&quot;Подключение...&quot;</span><span class="s0">, </span><span class="s1">server.host))</span><span class="s0">;</span>
+        <span class="s5">// Запускаем в фоне — fullStop() внутри connect() блокирует поток</span>
+        <span class="s0">final </span><span class="s1">VlessServer serverFinal = server</span><span class="s0">;</span>
+        <span class="s0">final long </span><span class="s1">connectId = System.currentTimeMillis()</span><span class="s0">;</span>
+        <span class="s1">activeConnectId = connectId</span><span class="s0">;</span>
+        <span class="s0">new </span><span class="s1">Thread(() -&gt; connect(serverFinal</span><span class="s0">, </span><span class="s1">connectId)</span><span class="s0">, </span><span class="s3">&quot;connect-thread&quot;</span><span class="s1">).start()</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">START_STICKY</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">public void </span><span class="s1">onDestroy() {</span>
+        <span class="s0">super</span><span class="s1">.onDestroy()</span><span class="s0">;</span>
+        <span class="s1">instance = </span><span class="s0">null;</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;onDestroy&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">disconnect()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">public void </span><span class="s1">onRevoke() {</span>
+        <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;onRevoke — разрешение отозвано&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">disconnect()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s5">// ── connect / disconnect ──────────────────────────────────────────────────</span>
+
+    <span class="s0">private void </span><span class="s1">connect(VlessServer server</span><span class="s0">, long </span><span class="s1">connectId) {</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;connect() id=&quot; </span><span class="s1">+ connectId + </span><span class="s3">&quot; server=&quot; </span><span class="s1">+ server.host)</span><span class="s0">;</span>
+        <span class="s0">synchronized </span><span class="s1">(connectLock) {</span>
+            <span class="s5">// Если пришёл более новый запрос — этот уже устарел</span>
+            <span class="s0">if </span><span class="s1">(connectId != activeConnectId) {</span>
+                <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;connect отменён — пришёл новый запрос&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">return;</span>
+            <span class="s1">}</span>
+            <span class="s5">// Останавливаем предыдущее соединение синхронно</span>
+            <span class="s0">if </span><span class="s1">(isRunning || v2RayManager != </span><span class="s0">null </span><span class="s1">|| hevTunnel != </span><span class="s0">null</span><span class="s1">) {</span>
+                <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;Переключение сервера → fullStop&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">fullStop()</span><span class="s0">;</span>
+            <span class="s1">}</span>
+            <span class="s5">// Снова проверяем — вдруг за время fullStop пришёл новый запрос</span>
+            <span class="s0">if </span><span class="s1">(connectId != activeConnectId) {</span>
+                <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;connect отменён после fullStop&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">return;</span>
+            <span class="s1">}</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;connect: fullStop завершён, создаём TUN для &quot; </span><span class="s1">+ server.host)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+        <span class="s1">currentServer = server</span><span class="s0">;</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;connectToServer: &quot; </span><span class="s1">+ server.host + </span><span class="s3">&quot;:&quot; </span><span class="s1">+ server.port)</span><span class="s0">;</span>
+
+        <span class="s5">// 1. Создаём TUN на main thread (Samsung требует main thread для establish())</span>
+        <span class="s0">final </span><span class="s1">java.util.concurrent.CountDownLatch tunLatch = </span><span class="s0">new </span><span class="s1">java.util.concurrent.CountDownLatch(</span><span class="s4">1</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(() -&gt; {</span>
+            <span class="s1">vpnInterface = buildTun(server)</span><span class="s0">;</span>
+            <span class="s1">tunLatch.countDown()</span><span class="s0">;</span>
+        <span class="s1">})</span><span class="s0">;</span>
+        <span class="s0">try </span><span class="s1">{ tunLatch.await(</span><span class="s4">5</span><span class="s0">, </span><span class="s1">java.util.concurrent.TimeUnit.SECONDS)</span><span class="s0">; </span><span class="s1">}</span>
+        <span class="s0">catch </span><span class="s1">(InterruptedException e) { Thread.currentThread().interrupt()</span><span class="s0">; return; </span><span class="s1">}</span>
+
+        <span class="s0">if </span><span class="s1">(vpnInterface == </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Не удалось создать TUN&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(() -&gt; StatusBus.done(</span><span class="s3">&quot;Не удалось создать TUN&quot;</span><span class="s1">))</span><span class="s0">;</span>
+            <span class="s1">stopSelf()</span><span class="s0">;</span>
+            <span class="s0">return;</span>
+        <span class="s1">}</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;TUN создан fd=&quot; </span><span class="s1">+ vpnInterface.getFd())</span><span class="s0">;</span>
+
+        <span class="s5">// 2. NetworkCallback — setUnderlyingNetworks (критично для трафика)</span>
+        <span class="s1">registerNetworkCallback()</span><span class="s0">;</span>
+
+        <span class="s5">// 3. Запускаем v2ray + hev в фоновом потоке</span>
+        <span class="s1">v2rayThread = </span><span class="s0">new </span><span class="s1">Thread(() -&gt; {</span>
+            <span class="s0">try </span><span class="s1">{</span>
+                <span class="s1">startV2RayAndHev(server)</span><span class="s0">;</span>
+            <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+                <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка в v2ray потоке&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+                <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(() -&gt; {</span>
+                    <span class="s1">StatusBus.done(e.getMessage())</span><span class="s0">;</span>
+                    <span class="s1">stopSelf()</span><span class="s0">;</span>
+                <span class="s1">})</span><span class="s0">;</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span><span class="s0">, </span><span class="s3">&quot;v2ray-thread&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">v2rayThread.setDaemon(</span><span class="s0">true</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">v2rayThread.start()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">startV2RayAndHev(VlessServer server) </span><span class="s0">throws </span><span class="s1">Exception {</span>
+        <span class="s5">// 3a. Инициализируем v2ray manager</span>
+        <span class="s1">v2RayManager = </span><span class="s0">new </span><span class="s1">V2RayManager(</span><span class="s0">this, new </span><span class="s1">V2RayManager.StatusCallback() {</span>
+            <span class="s1">@Override </span><span class="s0">public void </span><span class="s1">onStarted(VlessServer s) {</span>
+                <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;✔ v2ray запущен → запускаем hev&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s5">// 3b. Запускаем hev ПОСЛЕ старта v2ray</span>
+                <span class="s1">startHev()</span><span class="s0">;</span>
+                <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(() -&gt; {</span>
+                    <span class="s1">updateNotification(</span><span class="s3">&quot;Подключено&quot;</span><span class="s0">, </span><span class="s1">s.host)</span><span class="s0">;</span>
+                    <span class="s1">isRunning = </span><span class="s0">true;</span>
+                    <span class="s1">connectedServer = s</span><span class="s0">;</span>
+                    <span class="s1">totalUp = </span><span class="s4">0</span><span class="s0">; </span><span class="s1">totalDown = </span><span class="s4">0</span><span class="s0">;</span>
+                    <span class="s1">StatusBus.post(</span><span class="s3">&quot;Подключено: &quot; </span><span class="s1">+ s.host</span><span class="s0">, true</span><span class="s1">)</span><span class="s0">;</span>
+                    <span class="s1">statsHandler.postDelayed(statsPoller</span><span class="s0">, </span><span class="s4">3_000</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">})</span><span class="s0">;</span>
+            <span class="s1">}</span>
+            <span class="s1">@Override </span><span class="s0">public void </span><span class="s1">onStopped() {</span>
+                <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;v2ray остановлен&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(() -&gt; {</span>
+                    <span class="s1">StatusBus.done(</span><span class="s3">&quot;Отключено&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">})</span><span class="s0">;</span>
+            <span class="s1">}</span>
+            <span class="s1">@Override </span><span class="s0">public void </span><span class="s1">onError(String error) {</span>
+                <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;v2ray error: &quot; </span><span class="s1">+ error)</span><span class="s0">;</span>
+                <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(() -&gt; {</span>
+                    <span class="s1">StatusBus.done(error)</span><span class="s0">;</span>
+                    <span class="s1">stopSelf()</span><span class="s0">;</span>
+                <span class="s1">})</span><span class="s0">;</span>
+            <span class="s1">}</span>
+            <span class="s1">@Override </span><span class="s0">public void </span><span class="s1">onStatsUpdate(</span><span class="s0">long </span><span class="s1">up</span><span class="s0">, long </span><span class="s1">down) {</span>
+                <span class="s1">totalUp   = up</span><span class="s0">;</span>
+                <span class="s1">totalDown = down</span><span class="s0">;</span>
+            <span class="s1">}</span>
+        <span class="s1">})</span><span class="s0">;</span>
+
+        <span class="s5">// start() блокирует поток пока v2ray работает</span>
+        <span class="s1">v2RayManager.start(server)</span><span class="s0">;</span>
+
+        <span class="s5">// v2ray завершился — если новое подключение уже запущено (переключение сервера),</span>
+        <span class="s5">// то не останавливаем сервис — fullStop() уже вызван из connect()</span>
+        <span class="s0">if </span><span class="s1">(!isRunning) {</span>
+            <span class="s1">stopHev()</span><span class="s0">;</span>
+            <span class="s0">new </span><span class="s1">Handler(Looper.getMainLooper()).post(</span><span class="s0">this</span><span class="s1">::stopSelf)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">startHev() {</span>
+        <span class="s0">if </span><span class="s1">(vpnInterface == </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;startHev: vpnInterface=null&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">return;</span>
+        <span class="s1">}</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">hevTunnel = </span><span class="s0">new </span><span class="s1">HevTunnel(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">hevTunnel.start(vpnInterface)</span><span class="s0">;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel запущен&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка запуска hev&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">stopHev() {</span>
+        <span class="s1">HevTunnel hev = hevTunnel</span><span class="s0">;</span>
+        <span class="s1">hevTunnel = </span><span class="s0">null;</span>
+        <span class="s0">if </span><span class="s1">(hev != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s0">try </span><span class="s1">{ hev.stop()</span><span class="s0">; </span><span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+                <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка остановки hev: &quot; </span><span class="s1">+ e.getMessage())</span><span class="s0">;</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Полная синхронная остановка hev + v2ray + TUN.</span>
+     <span class="s2">* НЕ вызывает stopForeground/stopSelf — используется при переключении сервера.</span>
+     <span class="s2">*/</span>
+    <span class="s0">private void </span><span class="s1">fullStop() {</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;fullStop()&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">isRunning = </span><span class="s0">false;</span>
+        <span class="s1">connectedServer = </span><span class="s0">null;</span>
+        <span class="s5">// removeCallbacks — только из main thread</span>
+        <span class="s0">if </span><span class="s1">(Looper.myLooper() == Looper.getMainLooper()) {</span>
+            <span class="s1">statsHandler.removeCallbacks(statsPoller)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">else </span><span class="s1">{</span>
+            <span class="s1">statsHandler.post(() -&gt; statsHandler.removeCallbacks(statsPoller))</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">unregisterNetworkCallback()</span><span class="s0">;</span>
+
+        <span class="s5">// 1. Останавливаем hev первым — он держит ссылку на fd</span>
+        <span class="s1">stopHev()</span><span class="s0">;</span>
+
+        <span class="s5">// 2. Ждём немного чтобы hev точно освободил fd (нативный поток)</span>
+        <span class="s0">try </span><span class="s1">{ Thread.sleep(</span><span class="s4">150</span><span class="s1">)</span><span class="s0">; </span><span class="s1">} </span><span class="s0">catch </span><span class="s1">(InterruptedException ignored) {}</span>
+
+        <span class="s5">// 3. Останавливаем v2ray</span>
+        <span class="s1">V2RayManager mgr = v2RayManager</span><span class="s0">;</span>
+        <span class="s1">v2RayManager = </span><span class="s0">null;</span>
+        <span class="s0">if </span><span class="s1">(mgr != </span><span class="s0">null</span><span class="s1">) mgr.stop()</span><span class="s0">;</span>
+
+        <span class="s5">// 4. Прерываем поток v2ray</span>
+        <span class="s1">Thread t = v2rayThread</span><span class="s0">;</span>
+        <span class="s1">v2rayThread = </span><span class="s0">null;</span>
+        <span class="s0">if </span><span class="s1">(t != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">t.interrupt()</span><span class="s0">;</span>
+            <span class="s0">try </span><span class="s1">{ t.join(</span><span class="s4">500</span><span class="s1">)</span><span class="s0">; </span><span class="s1">} </span><span class="s0">catch </span><span class="s1">(InterruptedException ignored) {}</span>
+        <span class="s1">}</span>
+
+        <span class="s5">// 5. Закрываем TUN — только после полной остановки hev и v2ray</span>
+        <span class="s0">if </span><span class="s1">(vpnInterface != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s0">try </span><span class="s1">{ vpnInterface.close()</span><span class="s0">; </span><span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+                <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка закрытия TUN: &quot; </span><span class="s1">+ e.getMessage())</span><span class="s0">;</span>
+            <span class="s1">}</span>
+            <span class="s1">vpnInterface = </span><span class="s0">null;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">disconnect() {</span>
+        <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;disconnect()&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">fullStop()</span><span class="s0">;</span>
+        <span class="s1">StatusBus.done(</span><span class="s3">&quot;Отключено&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">stopForeground(</span><span class="s0">true</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s5">// ── TUN builder ───────────────────────────────────────────────────────────</span>
+
+    <span class="s0">private </span><span class="s1">ParcelFileDescriptor buildTun(VlessServer server) {</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">Builder builder = </span><span class="s0">new </span><span class="s1">Builder()</span><span class="s0">;</span>
+            <span class="s1">builder.setSession(</span><span class="s3">&quot;VlessVPN&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">builder.setMtu(</span><span class="s4">1500</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">builder.addAddress(</span><span class="s3">&quot;10.10.14.1&quot;</span><span class="s0">, </span><span class="s4">24</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">builder.addDnsServer(</span><span class="s3">&quot;8.8.8.8&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">builder.addDnsServer(</span><span class="s3">&quot;8.8.4.4&quot;</span><span class="s1">)</span><span class="s0">;</span>
+
+            <span class="s5">// Split tunnel: весь трафик через VPN, кроме IP сервера</span>
+            <span class="s1">addRoutesExcluding(builder</span><span class="s0">, </span><span class="s1">server.host)</span><span class="s0">;</span>
+
+            <span class="s5">// Не пускать трафик самого приложения через TUN (иначе петля)</span>
+            <span class="s0">try </span><span class="s1">{ builder.addDisallowedApplication(getPackageName())</span><span class="s0">; </span><span class="s1">}</span>
+            <span class="s0">catch </span><span class="s1">(Exception e) { FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;addDisallowedApplication: &quot; </span><span class="s1">+ e.getMessage())</span><span class="s0">; </span><span class="s1">}</span>
+
+            <span class="s0">if </span><span class="s1">(Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.Q) {</span>
+                <span class="s1">builder.setMetered(</span><span class="s0">false</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">}</span>
+
+            <span class="s0">return </span><span class="s1">builder.establish()</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;buildTun error&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+            <span class="s0">return null;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">addRoutesExcluding(Builder builder</span><span class="s0">, </span><span class="s1">String serverHost) {</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">InetAddress addr = InetAddress.getByName(serverHost)</span><span class="s0">;</span>
+            <span class="s0">byte</span><span class="s1">[] ip = addr.getAddress()</span><span class="s0">;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;Split tunnel: исключаем &quot; </span><span class="s1">+ serverHost)</span><span class="s0">;</span>
+
+            <span class="s5">// Все маршруты 0.0.0.0/0 минус IP сервера</span>
+            <span class="s1">List&lt;String[]&gt; routes = subtractRoute(</span><span class="s3">&quot;0.0.0.0&quot;</span><span class="s0">, </span><span class="s4">0</span><span class="s0">, </span><span class="s1">ip)</span><span class="s0">;</span>
+            <span class="s0">for </span><span class="s1">(String[] r : routes) {</span>
+                <span class="s1">builder.addRoute(r[</span><span class="s4">0</span><span class="s1">]</span><span class="s0">, </span><span class="s1">Integer.parseInt(r[</span><span class="s4">1</span><span class="s1">]))</span><span class="s0">;</span>
+            <span class="s1">}</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;addRoutesExcluding error, используем 0.0.0.0/0: &quot; </span><span class="s1">+ e.getMessage())</span><span class="s0">;</span>
+            <span class="s1">builder.addRoute(</span><span class="s3">&quot;0.0.0.0&quot;</span><span class="s0">, </span><span class="s4">0</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/** Вычитает один /32 адрес из CIDR блока, возвращает список оставшихся маршрутов */</span>
+    <span class="s0">private </span><span class="s1">List&lt;String[]&gt; subtractRoute(String baseIp</span><span class="s0">, int </span><span class="s1">prefix</span><span class="s0">, byte</span><span class="s1">[] excludeIp) {</span>
+        <span class="s1">List&lt;String[]&gt; result = </span><span class="s0">new </span><span class="s1">ArrayList&lt;&gt;()</span><span class="s0">;</span>
+        <span class="s0">long </span><span class="s1">base = ipToLong(baseIp)</span><span class="s0">;</span>
+        <span class="s0">long </span><span class="s1">excl = bytesToLong(excludeIp)</span><span class="s0">;</span>
+
+        <span class="s0">for </span><span class="s1">(</span><span class="s0">int </span><span class="s1">p = prefix</span><span class="s0">; </span><span class="s1">p &lt; </span><span class="s4">32</span><span class="s0">; </span><span class="s1">p++) {</span>
+            <span class="s0">long </span><span class="s1">blockSize = </span><span class="s4">1L </span><span class="s1">&lt;&lt; (</span><span class="s4">32 </span><span class="s1">- p - </span><span class="s4">1</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">long </span><span class="s1">blockStart = (excl &gt;&gt; (</span><span class="s4">32 </span><span class="s1">- p - </span><span class="s4">1</span><span class="s1">)) * blockSize</span><span class="s0">;</span>
+            <span class="s0">long </span><span class="s1">otherStart = blockStart ^ blockSize</span><span class="s0">;</span>
+            <span class="s1">result.add(</span><span class="s0">new </span><span class="s1">String[]{longToIp(otherStart)</span><span class="s0">, </span><span class="s1">String.valueOf(p + </span><span class="s4">1</span><span class="s1">)})</span><span class="s0">;</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s1">result</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private long </span><span class="s1">ipToLong(String ip) {</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s0">byte</span><span class="s1">[] b = InetAddress.getByName(ip).getAddress()</span><span class="s0">;</span>
+            <span class="s0">return </span><span class="s1">bytesToLong(b)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) { </span><span class="s0">return </span><span class="s4">0</span><span class="s0">; </span><span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private long </span><span class="s1">bytesToLong(</span><span class="s0">byte</span><span class="s1">[] b) {</span>
+        <span class="s0">return </span><span class="s1">((b[</span><span class="s4">0</span><span class="s1">] &amp; </span><span class="s4">0xFFL</span><span class="s1">) &lt;&lt; </span><span class="s4">24</span><span class="s1">) | ((b[</span><span class="s4">1</span><span class="s1">] &amp; </span><span class="s4">0xFFL</span><span class="s1">) &lt;&lt; </span><span class="s4">16</span><span class="s1">) |</span>
+               <span class="s1">((b[</span><span class="s4">2</span><span class="s1">] &amp; </span><span class="s4">0xFFL</span><span class="s1">) &lt;&lt; </span><span class="s4">8</span><span class="s1">)  |  (b[</span><span class="s4">3</span><span class="s1">] &amp; </span><span class="s4">0xFFL</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private </span><span class="s1">String longToIp(</span><span class="s0">long </span><span class="s1">ip) {</span>
+        <span class="s0">return </span><span class="s1">((ip &gt;&gt; </span><span class="s4">24</span><span class="s1">) &amp; </span><span class="s4">0xFF</span><span class="s1">) + </span><span class="s3">&quot;.&quot; </span><span class="s1">+ ((ip &gt;&gt; </span><span class="s4">16</span><span class="s1">) &amp; </span><span class="s4">0xFF</span><span class="s1">) + </span><span class="s3">&quot;.&quot; </span><span class="s1">+</span>
+               <span class="s1">((ip &gt;&gt; </span><span class="s4">8</span><span class="s1">) &amp; </span><span class="s4">0xFF</span><span class="s1">)  + </span><span class="s3">&quot;.&quot; </span><span class="s1">+ (ip &amp; </span><span class="s4">0xFF</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s5">// ── NetworkCallback ───────────────────────────────────────────────────────</span>
+
+    <span class="s0">private void </span><span class="s1">registerNetworkCallback() {</span>
+        <span class="s0">if </span><span class="s1">(connectivityManager == </span><span class="s0">null</span><span class="s1">) </span><span class="s0">return;</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">NetworkRequest req = </span><span class="s0">new </span><span class="s1">NetworkRequest.Builder()</span>
+                <span class="s1">.addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)</span>
+                <span class="s1">.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)</span>
+                <span class="s1">.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)</span>
+                <span class="s1">.build()</span><span class="s0">;</span>
+
+            <span class="s1">networkCallback = </span><span class="s0">new </span><span class="s1">ConnectivityManager.NetworkCallback() {</span>
+                <span class="s1">@Override</span>
+                <span class="s0">public void </span><span class="s1">onAvailable(Network network) {</span>
+                    <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;setUnderlyingNetworks: &quot; </span><span class="s1">+ network)</span><span class="s0">;</span>
+                    <span class="s1">setUnderlyingNetworks(</span><span class="s0">new </span><span class="s1">Network[]{network})</span><span class="s0">;</span>
+                <span class="s1">}</span>
+                <span class="s1">@Override</span>
+                <span class="s0">public void </span><span class="s1">onCapabilitiesChanged(Network network</span><span class="s0">, </span><span class="s1">NetworkCapabilities caps) {</span>
+                    <span class="s1">setUnderlyingNetworks(</span><span class="s0">new </span><span class="s1">Network[]{network})</span><span class="s0">;</span>
+                <span class="s1">}</span>
+                <span class="s1">@Override</span>
+                <span class="s0">public void </span><span class="s1">onLost(Network network) {</span>
+                    <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;Network lost&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                    <span class="s1">setUnderlyingNetworks(</span><span class="s0">null</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">}</span>
+            <span class="s1">}</span><span class="s0">;</span>
+            <span class="s1">connectivityManager.requestNetwork(req</span><span class="s0">, </span><span class="s1">networkCallback)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;registerNetworkCallback error&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">unregisterNetworkCallback() {</span>
+        <span class="s0">if </span><span class="s1">(connectivityManager != </span><span class="s0">null </span><span class="s1">&amp;&amp; networkCallback != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s0">try </span><span class="s1">{ connectivityManager.unregisterNetworkCallback(networkCallback)</span><span class="s0">; </span><span class="s1">}</span>
+            <span class="s0">catch </span><span class="s1">(Exception e) { FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;unregisterNetworkCallback: &quot; </span><span class="s1">+ e.getMessage())</span><span class="s0">; </span><span class="s1">}</span>
+            <span class="s1">networkCallback = </span><span class="s0">null;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s5">// ── Notification ──────────────────────────────────────────────────────────</span>
+
+    <span class="s2">/** Форматирование байт: 1.2 MB, 345 KB, etc. */</span>
+    <span class="s0">private static </span><span class="s1">String fmtBytes(</span><span class="s0">long </span><span class="s1">bytes) {</span>
+        <span class="s0">if </span><span class="s1">(bytes &lt; </span><span class="s4">1024</span><span class="s1">)             </span><span class="s0">return </span><span class="s1">bytes + </span><span class="s3">&quot; B&quot;</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(bytes &lt; </span><span class="s4">1024 </span><span class="s1">* </span><span class="s4">1024</span><span class="s1">)      </span><span class="s0">return </span><span class="s1">String.format(</span><span class="s3">&quot;%.1f KB&quot;</span><span class="s0">, </span><span class="s1">bytes / </span><span class="s4">1024.0</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(bytes &lt; </span><span class="s4">1024 </span><span class="s1">* </span><span class="s4">1024 </span><span class="s1">* </span><span class="s4">1024</span><span class="s1">) </span><span class="s0">return </span><span class="s1">String.format(</span><span class="s3">&quot;%.1f MB&quot;</span><span class="s0">, </span><span class="s1">bytes / (</span><span class="s4">1024.0 </span><span class="s1">* </span><span class="s4">1024</span><span class="s1">))</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">String.format(</span><span class="s3">&quot;%.2f GB&quot;</span><span class="s0">, </span><span class="s1">bytes / (</span><span class="s4">1024.0 </span><span class="s1">* </span><span class="s4">1024 </span><span class="s1">* </span><span class="s4">1024</span><span class="s1">))</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">createNotificationChannel() {</span>
+        <span class="s1">NotificationChannel ch = </span><span class="s0">new </span><span class="s1">NotificationChannel(</span>
+            <span class="s1">CHANNEL_ID</span><span class="s0">, </span><span class="s3">&quot;VPN&quot;</span><span class="s0">, </span><span class="s1">NotificationManager.IMPORTANCE_LOW)</span><span class="s0">;</span>
+        <span class="s1">ch.setDescription(</span><span class="s3">&quot;VPN статус&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private </span><span class="s1">Notification buildNotification(String title</span><span class="s0">, </span><span class="s1">String text) {</span>
+        <span class="s1">Intent intent = </span><span class="s0">new </span><span class="s1">Intent(</span><span class="s0">this, </span><span class="s1">MainActivity.</span><span class="s0">class</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">PendingIntent pi = PendingIntent.getActivity(</span><span class="s0">this, </span><span class="s4">0</span><span class="s0">, </span><span class="s1">intent</span><span class="s0">,</span>
+            <span class="s1">PendingIntent.FLAG_IMMUTABLE)</span><span class="s0">;</span>
+
+        <span class="s1">Intent disconnIntent = </span><span class="s0">new </span><span class="s1">Intent(</span><span class="s0">this, </span><span class="s1">VpnTunnelService.</span><span class="s0">class</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">disconnIntent.setAction(ACTION_DISCONNECT)</span><span class="s0">;</span>
+        <span class="s1">PendingIntent disconnPi = PendingIntent.getService(</span><span class="s0">this, </span><span class="s4">0</span><span class="s0">, </span><span class="s1">disconnIntent</span><span class="s0">,</span>
+            <span class="s1">PendingIntent.FLAG_IMMUTABLE)</span><span class="s0">;</span>
+
+        <span class="s0">return new </span><span class="s1">NotificationCompat.Builder(</span><span class="s0">this, </span><span class="s1">CHANNEL_ID)</span>
+            <span class="s1">.setSmallIcon(R.drawable.ic_vpn_notify)</span>
+            <span class="s1">.setContentTitle(title)</span>
+            <span class="s1">.setContentText(text)</span>
+            <span class="s1">.setContentIntent(pi)</span>
+            <span class="s1">.addAction(</span><span class="s4">0</span><span class="s0">, </span><span class="s3">&quot;Отключить&quot;</span><span class="s0">, </span><span class="s1">disconnPi)</span>
+            <span class="s1">.setOngoing(</span><span class="s0">true</span><span class="s1">)</span>
+            <span class="s1">.setPriority(NotificationCompat.PRIORITY_LOW)</span>
+            <span class="s1">.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)</span>
+            <span class="s1">.build()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">updateNotification(String title</span><span class="s0">, </span><span class="s1">String text) {</span>
+        <span class="s1">NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE)</span><span class="s0">;</span>
+        <span class="s1">nm.notify(NOTIF_ID</span><span class="s0">, </span><span class="s1">buildNotification(title</span><span class="s0">, </span><span class="s1">text))</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

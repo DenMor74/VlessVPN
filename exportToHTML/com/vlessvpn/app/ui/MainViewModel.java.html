@@ -1,0 +1,189 @@
+<html>
+<head>
+<title>MainViewModel.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+MainViewModel.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.ui</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">android.app.Application</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">androidx.annotation.NonNull</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">androidx.lifecycle.AndroidViewModel</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">androidx.lifecycle.LiveData</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">androidx.lifecycle.MutableLiveData</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.model.VlessServer</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.service.VpnTunnelService</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.storage.ServerRepository</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.util.StatusBus</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">java.util.List</span><span class="s0">;</span>
+
+<span class="s0">public class </span><span class="s1">MainViewModel </span><span class="s0">extends </span><span class="s1">AndroidViewModel {</span>
+
+    <span class="s0">private final </span><span class="s1">ServerRepository repository</span><span class="s0">;</span>
+
+    <span class="s2">// Список топ серверов из БД</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;List&lt;VlessServer&gt;&gt; topServers</span><span class="s0">;</span>
+
+    <span class="s2">// VPN статус</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;Boolean&gt; connectionStatus = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s0">false</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;Boolean&gt; isConnected = connectionStatus</span><span class="s0">;</span>
+
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;VlessServer&gt; currentServer = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s0">null</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;VlessServer&gt; connectedServer = currentServer</span><span class="s0">;</span>
+
+    <span class="s2">// ── Прогресс тестирования ───────────────────────────────</span>
+
+    <span class="s3">/** Заголовок текущего этапа: &quot;📥 Скачиваем...&quot;, &quot;🔍 Тестируем 5/20&quot; и т.д. */</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;String&gt; progressTitle = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;String&gt; getProgressTitle() { </span><span class="s0">return </span><span class="s1">progressTitle</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** Детальная строка: имя сервера, ошибка и т.д. */</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;String&gt; progressDetail = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;String&gt; getProgressDetail() { </span><span class="s0">return </span><span class="s1">progressDetail</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** true = процесс идёт (показываем спиннер и панель) */</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;Boolean&gt; isWorking = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s0">false</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;Boolean&gt; getIsWorking() { </span><span class="s0">return </span><span class="s1">isWorking</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** Прогресс 0..100 для горизонтальной полоски */</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;Integer&gt; progressPercent = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s5">0</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;Integer&gt; getProgressPercent() { </span><span class="s0">return </span><span class="s1">progressPercent</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** Статистика: [total, ok, fail] */</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;</span><span class="s0">int</span><span class="s1">[]&gt; progressCounts = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s0">new int</span><span class="s1">[]{</span><span class="s5">0</span><span class="s0">,</span><span class="s5">0</span><span class="s0">,</span><span class="s5">0</span><span class="s1">})</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;</span><span class="s0">int</span><span class="s1">[]&gt; getProgressCounts() { </span><span class="s0">return </span><span class="s1">progressCounts</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** Последнее завершённое сообщение (показывается когда панель скрыта) */</span>
+    <span class="s0">private final </span><span class="s1">MutableLiveData&lt;String&gt; lastStatusMessage = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;(</span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+    <span class="s0">public final </span><span class="s1">LiveData&lt;String&gt; getLastStatusMessage() { </span><span class="s0">return </span><span class="s1">lastStatusMessage</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** События по конкретным серверам — для обновления строк в списке */</span>
+    <span class="s0">public </span><span class="s1">LiveData&lt;StatusBus.ServerEvent&gt; getServerEvents() { </span><span class="s0">return </span><span class="s1">StatusBus.getServerEvents()</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s0">public </span><span class="s1">MainViewModel(@NonNull Application application) {</span>
+        <span class="s0">super</span><span class="s1">(application)</span><span class="s0">;</span>
+        <span class="s1">repository = </span><span class="s0">new </span><span class="s1">ServerRepository(application)</span><span class="s0">;</span>
+        <span class="s1">topServers = repository.getTopServersLiveData()</span><span class="s0">;</span>
+
+        <span class="s2">// Сканирование при запуске (если включено в настройках)</span>
+        <span class="s0">if </span><span class="s1">(repository.isScanOnStart()) {</span>
+            <span class="s1">forceRefreshServers()</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// Подписываемся на StatusBus — получаем обновления из Worker</span>
+        <span class="s1">StatusBus.get().observeForever(event -&gt; {</span>
+            <span class="s0">if </span><span class="s1">(event == </span><span class="s0">null</span><span class="s1">) </span><span class="s0">return;</span>
+            <span class="s1">parseAndUpdate(event)</span><span class="s0">;</span>
+        <span class="s1">})</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">/**</span>
+     <span class="s3">* Разбирает сообщение из StatusBus и обновляет все LiveData.</span>
+     <span class="s3">* Формат сообщений от TestWorker:</span>
+     <span class="s3">*   &quot;📥 Скачиваем списки с 2 источников...&quot;</span>
+     <span class="s3">*   &quot;📋 Загружено 150 серверов с\nhttp://...&quot;</span>
+     <span class="s3">*   &quot;✅ 5/20  ✓3 рабочих\nhost.com — 120ms&quot;</span>
+     <span class="s3">*   &quot;⏳ 5/20  ✓3 рабочих\nhost.com — недоступен&quot;</span>
+     <span class="s3">*   &quot;📊 Тест завершён: ✓ 8 рабочих / ✗ 12 недоступных&quot;</span>
+     <span class="s3">*   &quot;✅ Готово! В базе 8 рабочих серверов&quot;</span>
+     <span class="s3">*/</span>
+    <span class="s0">private void </span><span class="s1">parseAndUpdate(StatusBus.StatusEvent event) {</span>
+        <span class="s1">String msg = event.message</span><span class="s0">;</span>
+        <span class="s0">boolean </span><span class="s1">running = event.isRunning</span><span class="s0">;</span>
+
+        <span class="s1">isWorking.postValue(running)</span><span class="s0">;</span>
+
+        <span class="s0">if </span><span class="s1">(!running) {</span>
+            <span class="s2">// Процесс завершён</span>
+            <span class="s1">refreshInProgress = </span><span class="s0">false;</span>
+            <span class="s1">lastStatusMessage.postValue(msg)</span><span class="s0">;</span>
+            <span class="s1">progressTitle.postValue(msg)</span><span class="s0">;</span>
+            <span class="s1">progressDetail.postValue(</span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">progressPercent.postValue(</span><span class="s5">100</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">return;</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// Разбираем прогресс вида &quot;✅ 5/20  ✓3 рабочих\nhost...&quot;</span>
+        <span class="s0">int </span><span class="s1">tested = </span><span class="s5">0</span><span class="s0">, </span><span class="s1">total = </span><span class="s5">0</span><span class="s0">, </span><span class="s1">ok = </span><span class="s5">0</span><span class="s0">, </span><span class="s1">fail = </span><span class="s5">0</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(msg.contains(</span><span class="s4">&quot;/&quot;</span><span class="s1">)) {</span>
+            <span class="s0">try </span><span class="s1">{</span>
+                <span class="s2">// Ищем паттерн &quot;N/M&quot;</span>
+                <span class="s1">String[] parts = msg.split(</span><span class="s4">&quot;[</span><span class="s0">\\</span><span class="s4">s</span><span class="s0">\\</span><span class="s4">n]&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">for </span><span class="s1">(String p : parts) {</span>
+                    <span class="s0">if </span><span class="s1">(p.matches(</span><span class="s4">&quot;</span><span class="s0">\\</span><span class="s4">d+/</span><span class="s0">\\</span><span class="s4">d+&quot;</span><span class="s1">)) {</span>
+                        <span class="s1">String[] nm = p.split(</span><span class="s4">&quot;/&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                        <span class="s1">tested = Integer.parseInt(nm[</span><span class="s5">0</span><span class="s1">])</span><span class="s0">;</span>
+                        <span class="s1">total  = Integer.parseInt(nm[</span><span class="s5">1</span><span class="s1">])</span><span class="s0">;</span>
+                    <span class="s1">}</span>
+                    <span class="s2">// &quot;✓3&quot; или &quot;✓ 3&quot;</span>
+                    <span class="s0">if </span><span class="s1">(p.startsWith(</span><span class="s4">&quot;✓&quot;</span><span class="s1">) &amp;&amp; p.length() &gt; </span><span class="s5">1</span><span class="s1">) {</span>
+                        <span class="s0">try </span><span class="s1">{ ok = Integer.parseInt(p.substring(</span><span class="s5">1</span><span class="s1">))</span><span class="s0">; </span><span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception ignored) {}</span>
+                    <span class="s1">}</span>
+                <span class="s1">}</span>
+                <span class="s1">fail = tested - ok</span><span class="s0">;</span>
+                <span class="s0">if </span><span class="s1">(total &gt; </span><span class="s5">0</span><span class="s1">) {</span>
+                    <span class="s1">progressPercent.postValue(tested * </span><span class="s5">100 </span><span class="s1">/ total)</span><span class="s0">;</span>
+                    <span class="s1">progressCounts.postValue(</span><span class="s0">new int</span><span class="s1">[]{total</span><span class="s0">, </span><span class="s1">ok</span><span class="s0">, </span><span class="s1">fail})</span><span class="s0">;</span>
+                <span class="s1">}</span>
+            <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception ignored) {}</span>
+        <span class="s1">}</span>
+
+        <span class="s2">// Разделяем заголовок и детали по \n</span>
+        <span class="s0">if </span><span class="s1">(msg.contains(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s1">)) {</span>
+            <span class="s1">String[] lines = msg.split(</span><span class="s4">&quot;</span><span class="s0">\n</span><span class="s4">&quot;</span><span class="s0">, </span><span class="s5">2</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">progressTitle.postValue(lines[</span><span class="s5">0</span><span class="s1">])</span><span class="s0">;</span>
+            <span class="s1">progressDetail.postValue(lines[</span><span class="s5">1</span><span class="s1">])</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">else </span><span class="s1">{</span>
+            <span class="s1">progressTitle.postValue(msg)</span><span class="s0">;</span>
+            <span class="s1">progressDetail.postValue(</span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">public void </span><span class="s1">refreshVpnStatus() {</span>
+        <span class="s2">// postValue работает из любого потока (в т.ч. из BroadcastReceiver)</span>
+        <span class="s1">connectionStatus.postValue(VpnTunnelService.isRunning)</span><span class="s0">;</span>
+        <span class="s1">currentServer.postValue(VpnTunnelService.connectedServer)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">// Защита от двойного запуска</span>
+    <span class="s0">private boolean </span><span class="s1">refreshInProgress = </span><span class="s0">false;</span>
+
+    <span class="s0">public void </span><span class="s1">forceRefreshServers() {</span>
+        <span class="s0">if </span><span class="s1">(refreshInProgress) </span><span class="s0">return;</span>
+        <span class="s1">refreshInProgress = </span><span class="s0">true;</span>
+
+        <span class="s2">// Сбрасываем время → isUpdateNeeded() вернёт true → серверы скачаются заново</span>
+        <span class="s1">repository.resetUpdateTime()</span><span class="s0">;</span>
+
+        <span class="s1">isWorking.setValue(</span><span class="s0">true</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">progressTitle.setValue(</span><span class="s4">&quot;🔄 Запуск проверки...&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">progressDetail.setValue(</span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">progressPercent.setValue(</span><span class="s5">0</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">progressCounts.setValue(</span><span class="s0">new int</span><span class="s1">[]{</span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s1">})</span><span class="s0">;</span>
+        <span class="s1">com.vlessvpn.app.service.BackgroundMonitorService.runImmediately(getApplication())</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">public </span><span class="s1">ServerRepository getRepository() { </span><span class="s0">return </span><span class="s1">repository</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s3">/** Количество серверов в топе из настроек */</span>
+    <span class="s0">public int </span><span class="s1">getTopCount() { </span><span class="s0">return </span><span class="s1">repository.getTopCount()</span><span class="s0">; </span><span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

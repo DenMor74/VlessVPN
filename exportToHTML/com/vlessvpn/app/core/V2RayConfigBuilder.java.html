@@ -1,0 +1,319 @@
+<html>
+<head>
+<title>V2RayConfigBuilder.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #808080;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+V2RayConfigBuilder.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.core</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.model.VlessServer</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">org.json.JSONArray</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">org.json.JSONException</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">org.json.JSONObject</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* V2RayConfigBuilder — строит JSON конфиг для libv2ray.</span>
+ <span class="s2">*</span>
+ <span class="s2">* КЛЮЧЕВОЕ ОТКРЫТИЕ из логов:</span>
+ <span class="s2">*   protocol=&quot;tun&quot; → ошибка &quot;Listen on AnyIP but no Port(s) set&quot;</span>
+ <span class="s2">*   Libv2ray v5.47 использует V4 конфиг-парсер который НЕ знает &quot;tun&quot; inbound.</span>
+ <span class="s2">*</span>
+ <span class="s2">* ПРАВИЛЬНАЯ СХЕМА:</span>
+ <span class="s2">*   - TUN fd передаётся через startup() → libv2ray сам читает пакеты</span>
+ <span class="s2">*   - В конфиге НЕТ tun inbound вообще</span>
+ <span class="s2">*   - Только socks inbound для measureDelay</span>
+ <span class="s2">*   - Routing: всё через proxy (v2ray получает пакеты от ОС через fd напрямую)</span>
+ <span class="s2">*</span>
+ <span class="s2">* Аналог: v2rayNG v2ray_config_with_tun.json содержит tun inbound с xray-специфичными</span>
+ <span class="s2">* полями, но в нашей сборке libv2ray это не поддерживается — fd передаётся через startup().</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">V2RayConfigBuilder {</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Строит конфиг для основного VPN подключения.</span>
+     <span class="s2">* TUN fd передаётся через startup() — не нужен inbound в конфиге.</span>
+     <span class="s2">*/</span>
+    <span class="s0">public static </span><span class="s1">String build(VlessServer server</span><span class="s0">, int </span><span class="s1">socksPort) {</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">JSONObject config = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+
+            <span class="s3">// ── LOG ──────────────────────────────────────────────────────────</span>
+            <span class="s1">JSONObject log = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">log.put(</span><span class="s4">&quot;loglevel&quot;</span><span class="s0">, </span><span class="s4">&quot;debug&quot;</span><span class="s1">)</span><span class="s0">;  </span><span class="s3">// debug для диагностики</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;log&quot;</span><span class="s0">, </span><span class="s1">log)</span><span class="s0">;</span>
+
+            <span class="s3">// ── INBOUNDS ─────────────────────────────────────────────────────</span>
+            <span class="s3">// ВАЖНО: НЕТ &quot;tun&quot; inbound — libv2ray не поддерживает его в v4 формате.</span>
+            <span class="s3">// TUN fd libv2ray получает через startup() и сам читает IP пакеты.</span>
+            <span class="s3">// Оставляем только socks для measureDelay и диагностики.</span>
+            <span class="s1">JSONArray inbounds = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+
+            <span class="s3">// SOCKS5 — для measureDelay и диагностики через curl/adb</span>
+            <span class="s1">JSONObject socksInbound = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;tag&quot;</span><span class="s0">, </span><span class="s4">&quot;socks&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;port&quot;</span><span class="s0">, </span><span class="s1">socksPort)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;listen&quot;</span><span class="s0">, </span><span class="s4">&quot;127.0.0.1&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;protocol&quot;</span><span class="s0">, </span><span class="s4">&quot;socks&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">JSONObject socksSettings = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">socksSettings.put(</span><span class="s4">&quot;auth&quot;</span><span class="s0">, </span><span class="s4">&quot;noauth&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksSettings.put(</span><span class="s4">&quot;udp&quot;</span><span class="s0">, true</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;settings&quot;</span><span class="s0">, </span><span class="s1">socksSettings)</span><span class="s0">;</span>
+            <span class="s3">// sniffing ОТКЛЮЧЁН — ломает Reality TLS handshake</span>
+            <span class="s1">JSONObject sniffOff = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">sniffOff.put(</span><span class="s4">&quot;enabled&quot;</span><span class="s0">, false</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;sniffing&quot;</span><span class="s0">, </span><span class="s1">sniffOff)</span><span class="s0">;</span>
+            <span class="s1">inbounds.put(socksInbound)</span><span class="s0">;</span>
+
+            <span class="s1">config.put(</span><span class="s4">&quot;inbounds&quot;</span><span class="s0">, </span><span class="s1">inbounds)</span><span class="s0">;</span>
+
+            <span class="s3">// ── OUTBOUNDS ────────────────────────────────────────────────────</span>
+            <span class="s1">JSONArray outbounds = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+            <span class="s1">outbounds.put(buildVlessOutbound(server))</span><span class="s0">;</span>
+
+            <span class="s1">JSONObject freedom = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">freedom.put(</span><span class="s4">&quot;tag&quot;</span><span class="s0">, </span><span class="s4">&quot;direct&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">freedom.put(</span><span class="s4">&quot;protocol&quot;</span><span class="s0">, </span><span class="s4">&quot;freedom&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">freedom.put(</span><span class="s4">&quot;settings&quot;</span><span class="s0">, new </span><span class="s1">JSONObject())</span><span class="s0">;</span>
+            <span class="s1">outbounds.put(freedom)</span><span class="s0">;</span>
+
+            <span class="s1">JSONObject blackhole = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">blackhole.put(</span><span class="s4">&quot;tag&quot;</span><span class="s0">, </span><span class="s4">&quot;block&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">blackhole.put(</span><span class="s4">&quot;protocol&quot;</span><span class="s0">, </span><span class="s4">&quot;blackhole&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">blackhole.put(</span><span class="s4">&quot;settings&quot;</span><span class="s0">, new </span><span class="s1">JSONObject())</span><span class="s0">;</span>
+            <span class="s1">outbounds.put(blackhole)</span><span class="s0">;</span>
+
+            <span class="s1">config.put(</span><span class="s4">&quot;outbounds&quot;</span><span class="s0">, </span><span class="s1">outbounds)</span><span class="s0">;</span>
+
+            <span class="s3">// ── ROUTING ──────────────────────────────────────────────────────</span>
+            <span class="s3">// Libv2ray читает TUN fd через startup() и маршрутизирует пакеты</span>
+            <span class="s3">// через proxy outbound — это НЕ требует routing rules для TUN.</span>
+            <span class="s3">// Правила нужны только для socks inbound.</span>
+            <span class="s1">JSONObject routing = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">routing.put(</span><span class="s4">&quot;domainStrategy&quot;</span><span class="s0">, </span><span class="s4">&quot;AsIs&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">JSONArray rules = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+
+            <span class="s3">// socks → proxy (для measureDelay)</span>
+            <span class="s1">JSONObject socksRule = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">socksRule.put(</span><span class="s4">&quot;type&quot;</span><span class="s0">, </span><span class="s4">&quot;field&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksRule.put(</span><span class="s4">&quot;inboundTag&quot;</span><span class="s0">, new </span><span class="s1">JSONArray().put(</span><span class="s4">&quot;socks&quot;</span><span class="s1">))</span><span class="s0">;</span>
+            <span class="s1">socksRule.put(</span><span class="s4">&quot;outboundTag&quot;</span><span class="s0">, </span><span class="s4">&quot;proxy&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">rules.put(socksRule)</span><span class="s0">;</span>
+
+            <span class="s1">routing.put(</span><span class="s4">&quot;rules&quot;</span><span class="s0">, </span><span class="s1">rules)</span><span class="s0">;</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;routing&quot;</span><span class="s0">, </span><span class="s1">routing)</span><span class="s0">;</span>
+
+            <span class="s3">// ── POLICY ───────────────────────────────────────────────────────</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;policy&quot;</span><span class="s0">, </span><span class="s1">buildPolicy())</span><span class="s0">;</span>
+
+            <span class="s3">// ── STATS ────────────────────────────────────────────────────────</span>
+            <span class="s3">// Нужен для queryStats(&quot;proxy&quot;, &quot;uplink&quot;)</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;stats&quot;</span><span class="s0">, new </span><span class="s1">JSONObject())</span><span class="s0">;</span>
+
+            <span class="s0">return </span><span class="s1">config.toString(</span><span class="s5">2</span><span class="s1">)</span><span class="s0">;</span>
+
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(JSONException e) {</span>
+            <span class="s0">throw new </span><span class="s1">RuntimeException(</span><span class="s4">&quot;Ошибка генерации конфига: &quot; </span><span class="s1">+ e.getMessage()</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Конфиг для measureDelay — без TUN, без socks даже.</span>
+     <span class="s2">* Только outbound и минимальный inbound.</span>
+     <span class="s2">*/</span>
+    <span class="s0">public static </span><span class="s1">String buildForTest(VlessServer server</span><span class="s0">, int </span><span class="s1">socksPort) {</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">JSONObject config = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+
+            <span class="s1">JSONObject log = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">log.put(</span><span class="s4">&quot;loglevel&quot;</span><span class="s0">, </span><span class="s4">&quot;error&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;log&quot;</span><span class="s0">, </span><span class="s1">log)</span><span class="s0">;</span>
+
+            <span class="s1">JSONArray inbounds = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+            <span class="s1">JSONObject socksInbound = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;tag&quot;</span><span class="s0">, </span><span class="s4">&quot;socks&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;port&quot;</span><span class="s0">, </span><span class="s1">socksPort)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;listen&quot;</span><span class="s0">, </span><span class="s4">&quot;127.0.0.1&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;protocol&quot;</span><span class="s0">, </span><span class="s4">&quot;socks&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">JSONObject socksSettings = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">socksSettings.put(</span><span class="s4">&quot;auth&quot;</span><span class="s0">, </span><span class="s4">&quot;noauth&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksSettings.put(</span><span class="s4">&quot;udp&quot;</span><span class="s0">, false</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;settings&quot;</span><span class="s0">, </span><span class="s1">socksSettings)</span><span class="s0">;</span>
+            <span class="s1">JSONObject sniffOff = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">sniffOff.put(</span><span class="s4">&quot;enabled&quot;</span><span class="s0">, false</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">socksInbound.put(</span><span class="s4">&quot;sniffing&quot;</span><span class="s0">, </span><span class="s1">sniffOff)</span><span class="s0">;</span>
+            <span class="s1">inbounds.put(socksInbound)</span><span class="s0">;</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;inbounds&quot;</span><span class="s0">, </span><span class="s1">inbounds)</span><span class="s0">;</span>
+
+            <span class="s1">JSONArray outbounds = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+            <span class="s1">outbounds.put(buildVlessOutbound(server))</span><span class="s0">;</span>
+            <span class="s1">JSONObject freedom = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">freedom.put(</span><span class="s4">&quot;tag&quot;</span><span class="s0">, </span><span class="s4">&quot;direct&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">freedom.put(</span><span class="s4">&quot;protocol&quot;</span><span class="s0">, </span><span class="s4">&quot;freedom&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">freedom.put(</span><span class="s4">&quot;settings&quot;</span><span class="s0">, new </span><span class="s1">JSONObject())</span><span class="s0">;</span>
+            <span class="s1">outbounds.put(freedom)</span><span class="s0">;</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;outbounds&quot;</span><span class="s0">, </span><span class="s1">outbounds)</span><span class="s0">;</span>
+
+            <span class="s1">JSONObject routing = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+            <span class="s1">routing.put(</span><span class="s4">&quot;domainStrategy&quot;</span><span class="s0">, </span><span class="s4">&quot;AsIs&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">config.put(</span><span class="s4">&quot;routing&quot;</span><span class="s0">, </span><span class="s1">routing)</span><span class="s0">;</span>
+
+            <span class="s0">return </span><span class="s1">config.toString(</span><span class="s5">2</span><span class="s1">)</span><span class="s0">;</span>
+
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(JSONException e) {</span>
+            <span class="s0">throw new </span><span class="s1">RuntimeException(</span><span class="s4">&quot;Ошибка генерации тестового конфига: &quot; </span><span class="s1">+ e.getMessage()</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s3">// ── VLESS outbound ───────────────────────────────────────────────────────</span>
+
+    <span class="s0">private static </span><span class="s1">JSONObject buildVlessOutbound(VlessServer server) </span><span class="s0">throws </span><span class="s1">JSONException {</span>
+        <span class="s1">JSONObject out = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">out.put(</span><span class="s4">&quot;tag&quot;</span><span class="s0">, </span><span class="s4">&quot;proxy&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">out.put(</span><span class="s4">&quot;protocol&quot;</span><span class="s0">, </span><span class="s4">&quot;vless&quot;</span><span class="s1">)</span><span class="s0">;</span>
+
+        <span class="s1">JSONObject settings = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">JSONArray vnext = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+        <span class="s1">JSONObject serverObj = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">serverObj.put(</span><span class="s4">&quot;address&quot;</span><span class="s0">, </span><span class="s1">server.host)</span><span class="s0">;</span>
+        <span class="s1">serverObj.put(</span><span class="s4">&quot;port&quot;</span><span class="s0">, </span><span class="s1">server.port)</span><span class="s0">;</span>
+
+        <span class="s1">JSONArray users = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+        <span class="s1">JSONObject user = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">user.put(</span><span class="s4">&quot;id&quot;</span><span class="s0">, </span><span class="s1">server.uuid)</span><span class="s0">;</span>
+        <span class="s1">user.put(</span><span class="s4">&quot;encryption&quot;</span><span class="s0">, </span><span class="s4">&quot;none&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(server.flow != </span><span class="s0">null </span><span class="s1">&amp;&amp; !server.flow.isEmpty()) {</span>
+            <span class="s1">user.put(</span><span class="s4">&quot;flow&quot;</span><span class="s0">, </span><span class="s1">server.flow)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+        <span class="s1">users.put(user)</span><span class="s0">;</span>
+        <span class="s1">serverObj.put(</span><span class="s4">&quot;users&quot;</span><span class="s0">, </span><span class="s1">users)</span><span class="s0">;</span>
+        <span class="s1">vnext.put(serverObj)</span><span class="s0">;</span>
+        <span class="s1">settings.put(</span><span class="s4">&quot;vnext&quot;</span><span class="s0">, </span><span class="s1">vnext)</span><span class="s0">;</span>
+        <span class="s1">out.put(</span><span class="s4">&quot;settings&quot;</span><span class="s0">, </span><span class="s1">settings)</span><span class="s0">;</span>
+
+        <span class="s1">out.put(</span><span class="s4">&quot;streamSettings&quot;</span><span class="s0">, </span><span class="s1">buildStreamSettings(server))</span><span class="s0">;</span>
+
+        <span class="s0">return </span><span class="s1">out</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">// ── streamSettings ───────────────────────────────────────────────────────</span>
+
+    <span class="s0">private static </span><span class="s1">JSONObject buildStreamSettings(VlessServer server) </span><span class="s0">throws </span><span class="s1">JSONException {</span>
+        <span class="s1">JSONObject stream = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+
+        <span class="s1">String network = (server.networkType == </span><span class="s0">null </span><span class="s1">|| server.networkType.isEmpty())</span>
+            <span class="s1">? </span><span class="s4">&quot;tcp&quot; </span><span class="s1">: server.networkType</span><span class="s0">;</span>
+        <span class="s1">stream.put(</span><span class="s4">&quot;network&quot;</span><span class="s0">, </span><span class="s1">network)</span><span class="s0">;</span>
+
+        <span class="s1">String sec = server.security == </span><span class="s0">null </span><span class="s1">? </span><span class="s4">&quot;&quot; </span><span class="s1">: server.security</span><span class="s0">;</span>
+        <span class="s0">switch </span><span class="s1">(sec) {</span>
+            <span class="s0">case </span><span class="s4">&quot;reality&quot;</span><span class="s1">: {</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;security&quot;</span><span class="s0">, </span><span class="s4">&quot;reality&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">JSONObject rs = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">rs.put(</span><span class="s4">&quot;serverName&quot;</span><span class="s0">,  </span><span class="s1">server.sni != </span><span class="s0">null </span><span class="s1">? server.sni : </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s3">// fingerprint: &quot;qq&quot; → заменяем на &quot;chrome&quot; если невалидный</span>
+                <span class="s1">String fp = server.fp</span><span class="s0">;</span>
+                <span class="s0">if </span><span class="s1">(fp == </span><span class="s0">null </span><span class="s1">|| fp.isEmpty()) fp = </span><span class="s4">&quot;qq&quot;</span><span class="s0">;</span>
+                <span class="s1">rs.put(</span><span class="s4">&quot;fingerprint&quot;</span><span class="s0">, </span><span class="s1">fp)</span><span class="s0">;</span>
+                <span class="s1">rs.put(</span><span class="s4">&quot;publicKey&quot;</span><span class="s0">,   </span><span class="s1">server.pbk != </span><span class="s0">null </span><span class="s1">? server.pbk : </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">rs.put(</span><span class="s4">&quot;shortId&quot;</span><span class="s0">,     </span><span class="s1">server.sid != </span><span class="s0">null </span><span class="s1">? server.sid : </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">rs.put(</span><span class="s4">&quot;spiderX&quot;</span><span class="s0">,     </span><span class="s4">&quot;/&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;realitySettings&quot;</span><span class="s0">, </span><span class="s1">rs)</span><span class="s0">;</span>
+                <span class="s0">break;</span>
+            <span class="s1">}</span>
+            <span class="s0">case </span><span class="s4">&quot;tls&quot;</span><span class="s1">: {</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;security&quot;</span><span class="s0">, </span><span class="s4">&quot;tls&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">JSONObject ts = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">ts.put(</span><span class="s4">&quot;serverName&quot;</span><span class="s0">,  </span><span class="s1">server.sni != </span><span class="s0">null </span><span class="s1">? server.sni : </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">String fp = server.fp</span><span class="s0">;</span>
+                <span class="s0">if </span><span class="s1">(fp == </span><span class="s0">null </span><span class="s1">|| fp.isEmpty()) fp = </span><span class="s4">&quot;qq&quot;</span><span class="s0">;</span>
+                <span class="s1">ts.put(</span><span class="s4">&quot;fingerprint&quot;</span><span class="s0">, </span><span class="s1">fp)</span><span class="s0">;</span>
+                <span class="s1">ts.put(</span><span class="s4">&quot;allowInsecure&quot;</span><span class="s0">, false</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;tlsSettings&quot;</span><span class="s0">, </span><span class="s1">ts)</span><span class="s0">;</span>
+                <span class="s0">break;</span>
+            <span class="s1">}</span>
+            <span class="s0">default</span><span class="s1">:</span>
+                <span class="s3">// none или пусто — не добавляем security поле</span>
+                <span class="s0">break;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">switch </span><span class="s1">(network) {</span>
+            <span class="s0">case </span><span class="s4">&quot;ws&quot;</span><span class="s1">: {</span>
+                <span class="s1">JSONObject ws = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">ws.put(</span><span class="s4">&quot;path&quot;</span><span class="s0">, </span><span class="s1">server.path != </span><span class="s0">null </span><span class="s1">&amp;&amp; !server.path.isEmpty() ? server.path : </span><span class="s4">&quot;/&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">if </span><span class="s1">(server.host2 != </span><span class="s0">null </span><span class="s1">&amp;&amp; !server.host2.isEmpty()) {</span>
+                    <span class="s1">JSONObject headers = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                    <span class="s1">headers.put(</span><span class="s4">&quot;Host&quot;</span><span class="s0">, </span><span class="s1">server.host2)</span><span class="s0">;</span>
+                    <span class="s1">ws.put(</span><span class="s4">&quot;headers&quot;</span><span class="s0">, </span><span class="s1">headers)</span><span class="s0">;</span>
+                <span class="s1">}</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;wsSettings&quot;</span><span class="s0">, </span><span class="s1">ws)</span><span class="s0">;</span>
+                <span class="s0">break;</span>
+            <span class="s1">}</span>
+            <span class="s0">case </span><span class="s4">&quot;grpc&quot;</span><span class="s1">: {</span>
+                <span class="s1">JSONObject grpc = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">grpc.put(</span><span class="s4">&quot;serviceName&quot;</span><span class="s0">, </span><span class="s1">server.path != </span><span class="s0">null </span><span class="s1">? server.path : </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;grpcSettings&quot;</span><span class="s0">, </span><span class="s1">grpc)</span><span class="s0">;</span>
+                <span class="s0">break;</span>
+            <span class="s1">}</span>
+            <span class="s0">case </span><span class="s4">&quot;h2&quot;</span><span class="s1">:</span>
+            <span class="s0">case </span><span class="s4">&quot;http&quot;</span><span class="s1">: {</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;network&quot;</span><span class="s0">, </span><span class="s4">&quot;h2&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">JSONObject h2 = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">h2.put(</span><span class="s4">&quot;path&quot;</span><span class="s0">, </span><span class="s1">server.path != </span><span class="s0">null </span><span class="s1">&amp;&amp; !server.path.isEmpty() ? server.path : </span><span class="s4">&quot;/&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s0">if </span><span class="s1">(server.host2 != </span><span class="s0">null </span><span class="s1">&amp;&amp; !server.host2.isEmpty()) {</span>
+                    <span class="s1">JSONArray hosts = </span><span class="s0">new </span><span class="s1">JSONArray()</span><span class="s0">;</span>
+                    <span class="s1">hosts.put(server.host2)</span><span class="s0">;</span>
+                    <span class="s1">h2.put(</span><span class="s4">&quot;host&quot;</span><span class="s0">, </span><span class="s1">hosts)</span><span class="s0">;</span>
+                <span class="s1">}</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;httpSettings&quot;</span><span class="s0">, </span><span class="s1">h2)</span><span class="s0">;</span>
+                <span class="s0">break;</span>
+            <span class="s1">}</span>
+            <span class="s0">default</span><span class="s1">: {</span>
+                <span class="s3">// TCP — для Reality/TLS</span>
+                <span class="s1">JSONObject tcp = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">JSONObject header = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+                <span class="s1">header.put(</span><span class="s4">&quot;type&quot;</span><span class="s0">, </span><span class="s4">&quot;none&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">tcp.put(</span><span class="s4">&quot;header&quot;</span><span class="s0">, </span><span class="s1">header)</span><span class="s0">;</span>
+                <span class="s1">stream.put(</span><span class="s4">&quot;tcpSettings&quot;</span><span class="s0">, </span><span class="s1">tcp)</span><span class="s0">;</span>
+                <span class="s0">break;</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+
+        <span class="s0">return </span><span class="s1">stream</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s3">// ── Policy ───────────────────────────────────────────────────────────────</span>
+
+    <span class="s0">private static </span><span class="s1">JSONObject buildPolicy() </span><span class="s0">throws </span><span class="s1">JSONException {</span>
+        <span class="s1">JSONObject policy = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">JSONObject levels = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">JSONObject level0 = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">level0.put(</span><span class="s4">&quot;handshake&quot;</span><span class="s0">, </span><span class="s5">4</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">level0.put(</span><span class="s4">&quot;connIdle&quot;</span><span class="s0">, </span><span class="s5">300</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">level0.put(</span><span class="s4">&quot;uplinkOnly&quot;</span><span class="s0">, </span><span class="s5">1</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">level0.put(</span><span class="s4">&quot;downlinkOnly&quot;</span><span class="s0">, </span><span class="s5">1</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">levels.put(</span><span class="s4">&quot;0&quot;</span><span class="s0">, </span><span class="s1">level0)</span><span class="s0">;</span>
+        <span class="s1">policy.put(</span><span class="s4">&quot;levels&quot;</span><span class="s0">, </span><span class="s1">levels)</span><span class="s0">;</span>
+        <span class="s1">JSONObject system = </span><span class="s0">new </span><span class="s1">JSONObject()</span><span class="s0">;</span>
+        <span class="s1">system.put(</span><span class="s4">&quot;statsOutboundUplink&quot;</span><span class="s0">, true</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">system.put(</span><span class="s4">&quot;statsOutboundDownlink&quot;</span><span class="s0">, true</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">policy.put(</span><span class="s4">&quot;system&quot;</span><span class="s0">, </span><span class="s1">system)</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">policy</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

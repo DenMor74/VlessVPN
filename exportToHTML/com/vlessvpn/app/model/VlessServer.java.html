@@ -1,0 +1,215 @@
+<html>
+<head>
+<title>VlessServer.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #629755; font-weight: bold; font-style: italic;}
+.s4 { color: #6a8759;}
+.s5 { color: #808080;}
+.s6 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+VlessServer.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.model</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">androidx.room.Entity</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">androidx.room.PrimaryKey</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">androidx.annotation.NonNull</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">java.net.URLDecoder</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.nio.charset.StandardCharsets</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.util.HashMap</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.util.Map</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* VlessServer — модель одного VLESS сервера.</span>
+ <span class="s2">*</span>
+ <span class="s2">* </span><span class="s3">@Entity </span><span class="s2">— говорит Room, что это таблица в базе данных.</span>
+ <span class="s2">* Каждое поле класса = колонка в таблице.</span>
+ <span class="s2">*</span>
+ <span class="s2">* Пример VLESS URI который мы парсим:</span>
+ <span class="s2">* vless://UUID@host:port?security=reality&amp;sni=example.com&amp;pbk=KEY#Название</span>
+ <span class="s2">*/</span>
+<span class="s1">@Entity(tableName = </span><span class="s4">&quot;servers&quot;</span><span class="s1">)</span>
+<span class="s0">public class </span><span class="s1">VlessServer {</span>
+
+    <span class="s5">// ========== ПОЛЯ БАЗЫ ДАННЫХ ==========</span>
+
+    <span class="s1">@PrimaryKey</span>
+    <span class="s1">@NonNull</span>
+    <span class="s0">public </span><span class="s1">String id = </span><span class="s4">&quot;&quot;</span><span class="s0">;          </span><span class="s5">// UUID сервера — уникальный ключ</span>
+
+    <span class="s0">public </span><span class="s1">String host = </span><span class="s4">&quot;&quot;</span><span class="s0">;        </span><span class="s5">// IP-адрес или домен сервера</span>
+    <span class="s0">public int </span><span class="s1">port = </span><span class="s6">443</span><span class="s0">;          </span><span class="s5">// Порт (обычно 443)</span>
+    <span class="s0">public </span><span class="s1">String uuid = </span><span class="s4">&quot;&quot;</span><span class="s0">;        </span><span class="s5">// UUID для аутентификации</span>
+
+    <span class="s5">// Параметры соединения</span>
+    <span class="s0">public </span><span class="s1">String security = </span><span class="s4">&quot;none&quot;</span><span class="s0">;   </span><span class="s5">// &quot;reality&quot;, &quot;tls&quot;, &quot;none&quot;</span>
+    <span class="s0">public </span><span class="s1">String networkType = </span><span class="s4">&quot;tcp&quot;</span><span class="s0">; </span><span class="s5">// &quot;tcp&quot;, &quot;xhttp&quot;, &quot;ws&quot;, &quot;grpc&quot;</span>
+    <span class="s0">public </span><span class="s1">String sni = </span><span class="s4">&quot;&quot;</span><span class="s0">;            </span><span class="s5">// Server Name Indication (для TLS/Reality)</span>
+    <span class="s0">public </span><span class="s1">String pbk = </span><span class="s4">&quot;&quot;</span><span class="s0">;            </span><span class="s5">// Public Key (только для Reality)</span>
+    <span class="s0">public </span><span class="s1">String fp = </span><span class="s4">&quot;chrome&quot;</span><span class="s0">;       </span><span class="s5">// Fingerprint браузера (маскировка)</span>
+    <span class="s0">public </span><span class="s1">String flow = </span><span class="s4">&quot;&quot;</span><span class="s0">;           </span><span class="s5">// Дополнительный поток: &quot;xtls-rprx-vision&quot;</span>
+    <span class="s0">public </span><span class="s1">String path = </span><span class="s4">&quot;/&quot;</span><span class="s0">;          </span><span class="s5">// HTTP path (для xhttp/ws)</span>
+    <span class="s0">public </span><span class="s1">String sid = </span><span class="s4">&quot;&quot;</span><span class="s0">;            </span><span class="s5">// Short ID (для Reality)</span>
+    <span class="s0">public </span><span class="s1">String host2 = </span><span class="s4">&quot;&quot;</span><span class="s0">;          </span><span class="s5">// HTTP host header</span>
+    <span class="s0">public </span><span class="s1">String remark = </span><span class="s4">&quot;&quot;</span><span class="s0">;         </span><span class="s5">// Отображаемое название сервера</span>
+
+    <span class="s0">public </span><span class="s1">String rawUri = </span><span class="s4">&quot;&quot;</span><span class="s0">;         </span><span class="s5">// Оригинальная строка vless://...</span>
+
+    <span class="s5">// ========== РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ==========</span>
+
+    <span class="s0">public long </span><span class="s1">pingMs = -</span><span class="s6">1</span><span class="s0">;           </span><span class="s5">// Пинг в миллисекундах (-1 = не тестирован)</span>
+    <span class="s0">public boolean </span><span class="s1">trafficOk = </span><span class="s0">false;  </span><span class="s5">// Прошёл ли тест трафика</span>
+    <span class="s0">public long </span><span class="s1">lastTestedAt = </span><span class="s6">0</span><span class="s0">;      </span><span class="s5">// Когда последний раз тестировали (Unix timestamp)</span>
+    <span class="s0">public </span><span class="s1">String sourceUrl = </span><span class="s4">&quot;&quot;</span><span class="s0">;      </span><span class="s5">// С какого URL был скачан этот сервер</span>
+
+    <span class="s5">// ========== СТАТИЧЕСКИЙ ПАРСЕР ==========</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Парсит строку VLESS URI в объект VlessServer.</span>
+     <span class="s2">*</span>
+     <span class="s2">* </span><span class="s3">@param </span><span class="s2">uri Строка вида vless://UUID@host:port?params#remark</span>
+     <span class="s2">* </span><span class="s3">@return </span><span class="s2">Объект VlessServer или null если строка невалидна</span>
+     <span class="s2">*/</span>
+    <span class="s0">public static </span><span class="s1">VlessServer parse(String uri) {</span>
+        <span class="s5">// Проверяем что строка начинается с vless://</span>
+        <span class="s0">if </span><span class="s1">(uri == </span><span class="s0">null </span><span class="s1">|| !uri.startsWith(</span><span class="s4">&quot;vless://&quot;</span><span class="s1">)) {</span>
+            <span class="s0">return null;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">VlessServer s = </span><span class="s0">new </span><span class="s1">VlessServer()</span><span class="s0">;</span>
+        <span class="s1">s.rawUri = uri.trim()</span><span class="s0">;</span>
+
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s5">// Убираем схему &quot;vless://&quot;</span>
+            <span class="s1">String body = uri.substring(</span><span class="s4">&quot;vless://&quot;</span><span class="s1">.length())</span><span class="s0">;</span>
+
+            <span class="s5">// ---- Шаг 1: Извлекаем REMARK (текст после символа #) ----</span>
+            <span class="s0">int </span><span class="s1">hashIdx = body.lastIndexOf(</span><span class="s4">'#'</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">if </span><span class="s1">(hashIdx &gt; </span><span class="s6">0</span><span class="s1">) {</span>
+                <span class="s5">// Декодируем URL-encoded текст: %F0%9F%87%AB → 🇫🇮</span>
+                <span class="s1">s.remark = URLDecoder.decode(</span>
+                    <span class="s1">body.substring(hashIdx + </span><span class="s6">1</span><span class="s1">)</span><span class="s0">,</span>
+                    <span class="s1">StandardCharsets.UTF_8.name()</span>
+                <span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">body = body.substring(</span><span class="s6">0</span><span class="s0">, </span><span class="s1">hashIdx)</span><span class="s0">;</span>
+            <span class="s1">}</span>
+
+            <span class="s5">// ---- Шаг 2: Извлекаем UUID (текст до символа @) ----</span>
+            <span class="s0">int </span><span class="s1">atIdx = body.indexOf(</span><span class="s4">'@'</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">if </span><span class="s1">(atIdx &lt; </span><span class="s6">0</span><span class="s1">) </span><span class="s0">return null; </span><span class="s5">// невалидный URI</span>
+            <span class="s1">s.uuid = body.substring(</span><span class="s6">0</span><span class="s0">, </span><span class="s1">atIdx)</span><span class="s0">;</span>
+            <span class="s5">// id = uuid+host+port — уникален даже если у серверов одинаковый UUID</span>
+            <span class="s5">// (UUID одного провайдера на разных серверах)</span>
+            <span class="s1">body = body.substring(atIdx + </span><span class="s6">1</span><span class="s1">)</span><span class="s0">;</span>
+
+            <span class="s5">// ---- Шаг 3: Извлекаем HOST и PORT (до символа ?) ----</span>
+            <span class="s0">int </span><span class="s1">qIdx = body.indexOf(</span><span class="s4">'?'</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">String hostPort = (qIdx &gt; </span><span class="s6">0</span><span class="s1">) ? body.substring(</span><span class="s6">0</span><span class="s0">, </span><span class="s1">qIdx) : body</span><span class="s0">;</span>
+
+            <span class="s5">// Обрабатываем IPv6 адреса вида [::1]:443</span>
+            <span class="s0">if </span><span class="s1">(hostPort.startsWith(</span><span class="s4">&quot;[&quot;</span><span class="s1">)) {</span>
+                <span class="s0">int </span><span class="s1">bracketEnd = hostPort.indexOf(</span><span class="s4">']'</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.host = hostPort.substring(</span><span class="s6">1</span><span class="s0">, </span><span class="s1">bracketEnd)</span><span class="s0">;</span>
+                <span class="s1">s.port = Integer.parseInt(hostPort.substring(bracketEnd + </span><span class="s6">2</span><span class="s1">))</span><span class="s0">;</span>
+            <span class="s1">} </span><span class="s0">else </span><span class="s1">{</span>
+                <span class="s0">int </span><span class="s1">colonIdx = hostPort.lastIndexOf(</span><span class="s4">':'</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.host = hostPort.substring(</span><span class="s6">0</span><span class="s0">, </span><span class="s1">colonIdx)</span><span class="s0">;</span>
+                <span class="s1">s.port = Integer.parseInt(hostPort.substring(colonIdx + </span><span class="s6">1</span><span class="s1">))</span><span class="s0">;</span>
+            <span class="s1">}</span>
+
+            <span class="s5">// ---- Шаг 4: Парсим QUERY PARAMS ----</span>
+            <span class="s0">if </span><span class="s1">(qIdx &gt; </span><span class="s6">0</span><span class="s1">) {</span>
+                <span class="s1">Map&lt;String</span><span class="s0">, </span><span class="s1">String&gt; params = parseQueryParams(body.substring(qIdx + </span><span class="s6">1</span><span class="s1">))</span><span class="s0">;</span>
+
+                <span class="s1">s.security     = params.getOrDefault(</span><span class="s4">&quot;security&quot;</span><span class="s0">, </span><span class="s4">&quot;none&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.networkType  = params.getOrDefault(</span><span class="s4">&quot;type&quot;</span><span class="s0">, </span><span class="s4">&quot;tcp&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.sni          = params.getOrDefault(</span><span class="s4">&quot;sni&quot;</span><span class="s0">, </span><span class="s1">s.host)</span><span class="s0">;</span>
+                <span class="s1">s.pbk          = params.getOrDefault(</span><span class="s4">&quot;pbk&quot;</span><span class="s0">, </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.fp           = params.getOrDefault(</span><span class="s4">&quot;fp&quot;</span><span class="s0">, </span><span class="s4">&quot;chrome&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.flow         = params.getOrDefault(</span><span class="s4">&quot;flow&quot;</span><span class="s0">, </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.path         = params.getOrDefault(</span><span class="s4">&quot;path&quot;</span><span class="s0">, </span><span class="s4">&quot;/&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.sid          = params.getOrDefault(</span><span class="s4">&quot;sid&quot;</span><span class="s0">, </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+                <span class="s1">s.host2        = params.getOrDefault(</span><span class="s4">&quot;host&quot;</span><span class="s0">, </span><span class="s4">&quot;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">}</span>
+
+            <span class="s5">// Уникальный ключ = uuid + host + port</span>
+            <span class="s1">s.id = s.uuid + </span><span class="s4">&quot;@&quot; </span><span class="s1">+ s.host + </span><span class="s4">&quot;:&quot; </span><span class="s1">+ s.port</span><span class="s0">;</span>
+
+            <span class="s5">// Фильтруем неподдерживаемые транспорты</span>
+            <span class="s5">// xhttp — новый протокол, отсутствует в libv2ray v5.45.x</span>
+            <span class="s0">if </span><span class="s1">(</span><span class="s4">&quot;xhttp&quot;</span><span class="s1">.equals(s.networkType)) {</span>
+                <span class="s0">return null; </span><span class="s5">// пропускаем</span>
+            <span class="s1">}</span>
+
+            <span class="s5">// Если remark пустой — используем host:port</span>
+            <span class="s0">if </span><span class="s1">(s.remark.isEmpty()) {</span>
+                <span class="s1">s.remark = s.host + </span><span class="s4">&quot;:&quot; </span><span class="s1">+ s.port</span><span class="s0">;</span>
+            <span class="s1">}</span>
+
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s5">// Если что-то пошло не так при парсинге — возвращаем null</span>
+            <span class="s0">return null;</span>
+        <span class="s1">}</span>
+
+        <span class="s0">return </span><span class="s1">s</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Разбирает строку query params в Map.</span>
+     <span class="s2">* Пример: &quot;security=reality&amp;sni=example.com&quot; → {&quot;security&quot;:&quot;reality&quot;, &quot;sni&quot;:&quot;example.com&quot;}</span>
+     <span class="s2">*/</span>
+    <span class="s0">private static </span><span class="s1">Map&lt;String</span><span class="s0">, </span><span class="s1">String&gt; parseQueryParams(String query) {</span>
+        <span class="s1">Map&lt;String</span><span class="s0">, </span><span class="s1">String&gt; map = </span><span class="s0">new </span><span class="s1">HashMap&lt;&gt;()</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(query == </span><span class="s0">null </span><span class="s1">|| query.isEmpty()) </span><span class="s0">return </span><span class="s1">map</span><span class="s0">;</span>
+
+        <span class="s1">String[] pairs = query.split(</span><span class="s4">&quot;&amp;&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">for </span><span class="s1">(String pair : pairs) {</span>
+            <span class="s0">int </span><span class="s1">eq = pair.indexOf(</span><span class="s4">'='</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">if </span><span class="s1">(eq &gt; </span><span class="s6">0</span><span class="s1">) {</span>
+                <span class="s0">try </span><span class="s1">{</span>
+                    <span class="s1">String key = URLDecoder.decode(pair.substring(</span><span class="s6">0</span><span class="s0">, </span><span class="s1">eq)</span><span class="s0">, </span><span class="s1">StandardCharsets.UTF_8.name())</span><span class="s0">;</span>
+                    <span class="s1">String val = URLDecoder.decode(pair.substring(eq + </span><span class="s6">1</span><span class="s1">)</span><span class="s0">, </span><span class="s1">StandardCharsets.UTF_8.name())</span><span class="s0">;</span>
+                    <span class="s1">map.put(key</span><span class="s0">, </span><span class="s1">val)</span><span class="s0">;</span>
+                <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception ignored) {}</span>
+            <span class="s1">}</span>
+        <span class="s1">}</span>
+        <span class="s0">return </span><span class="s1">map</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Проверяет, нужно ли тестировать этот сервер.</span>
+     <span class="s2">* Тестируем если: никогда не тестировали ИЛИ прошло больше 1 часа.</span>
+     <span class="s2">*/</span>
+    <span class="s0">public boolean </span><span class="s1">needsTesting() {</span>
+        <span class="s0">long </span><span class="s1">oneHour = </span><span class="s6">60 </span><span class="s1">* </span><span class="s6">60 </span><span class="s1">* </span><span class="s6">1000L</span><span class="s0">; </span><span class="s5">// 1 час в миллисекундах</span>
+        <span class="s0">return </span><span class="s1">lastTestedAt == </span><span class="s6">0 </span><span class="s1">|| (System.currentTimeMillis() - lastTestedAt) &gt; oneHour</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Текстовое представление пинга для UI.</span>
+     <span class="s2">*/</span>
+    <span class="s0">public </span><span class="s1">String getPingText() {</span>
+        <span class="s0">if </span><span class="s1">(pingMs &lt; </span><span class="s6">0</span><span class="s1">) </span><span class="s0">return </span><span class="s4">&quot;—&quot;</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(pingMs &lt; </span><span class="s6">100</span><span class="s1">) </span><span class="s0">return </span><span class="s1">pingMs + </span><span class="s4">&quot;ms ⚡&quot;</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(pingMs &lt; </span><span class="s6">300</span><span class="s1">) </span><span class="s0">return </span><span class="s1">pingMs + </span><span class="s4">&quot;ms ✓&quot;</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">pingMs + </span><span class="s4">&quot;ms ⚠&quot;</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">public </span><span class="s1">String toString() {</span>
+        <span class="s0">return </span><span class="s4">&quot;VlessServer{host=&quot; </span><span class="s1">+ host + </span><span class="s4">&quot;, port=&quot; </span><span class="s1">+ port + </span><span class="s4">&quot;, ping=&quot; </span><span class="s1">+ pingMs + </span><span class="s4">&quot;ms}&quot;</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Пути для FileProvider — нужен чтобы передавать файлы другим приложениям -->
+<paths>
+    <!-- files-path = context.getFilesDir() = /data/data/com.vlessvpn.app/files/ -->
+    <files-path name="logs" path="." />
+</paths>

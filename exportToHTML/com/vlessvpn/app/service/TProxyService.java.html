@@ -1,0 +1,140 @@
+<html>
+<head>
+<title>TProxyService.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #808080;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+TProxyService.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.service</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">android.content.Context</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.ParcelFileDescriptor</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.util.FileLogger</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">java.io.File</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.io.FileWriter</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* TProxyService — обёртка для запуска hev-socks5-tunnel.</span>
+ <span class="s2">*</span>
+ <span class="s2">* ВАЖНО: libhev-socks5-tunnel.so при загрузке ищет класс</span>
+ <span class="s2">* &quot;com.v2ray.ang.service.TProxyService&quot; (оригинальный пакет v2rayNG).</span>
+ <span class="s2">* Поэтому native методы объявлены в stub-классе com.v2ray.ang.service.TProxyService,</span>
+ <span class="s2">* а этот класс только управляет конфигом и вызывает stub.</span>
+ <span class="s2">*</span>
+ <span class="s2">* Цепочка:</span>
+ <span class="s2">*   Телефон → TUN fd → hev-socks5-tunnel → SOCKS5:10808 → v2ray → VLESS сервер</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">TProxyService {</span>
+
+    <span class="s0">private static final </span><span class="s1">String TAG = </span><span class="s3">&quot;TProxyService&quot;</span><span class="s0">;</span>
+
+    <span class="s0">private final </span><span class="s1">Context context</span><span class="s0">;</span>
+    <span class="s0">private final </span><span class="s1">ParcelFileDescriptor vpnInterface</span><span class="s0">;</span>
+    <span class="s0">private final int </span><span class="s1">socksPort</span><span class="s0">;</span>
+    <span class="s0">private volatile boolean </span><span class="s1">running = </span><span class="s0">false;</span>
+
+    <span class="s4">// ── Singleton для статического stop() ──────────────────────────────────</span>
+    <span class="s0">private static volatile </span><span class="s1">TProxyService currentInstance = </span><span class="s0">null;</span>
+
+    <span class="s2">/** true если libhev-socks5-tunnel.so успешно загружена */</span>
+    <span class="s0">public static boolean </span><span class="s1">isAvailable() {</span>
+        <span class="s0">return </span><span class="s1">com.v2ray.ang.service.TProxyService.isLoaded()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/** Останавливает текущий запущенный экземпляр */</span>
+    <span class="s0">public static void </span><span class="s1">stop() {</span>
+        <span class="s1">TProxyService inst = currentInstance</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(inst != </span><span class="s0">null</span><span class="s1">) {</span>
+            <span class="s1">inst.stopInstance()</span><span class="s0">;</span>
+            <span class="s1">currentInstance = </span><span class="s0">null;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s4">// ── Instance ────────────────────────────────────────────────────────────</span>
+    <span class="s0">public </span><span class="s1">TProxyService(Context context</span><span class="s0">, </span><span class="s1">ParcelFileDescriptor vpnInterface</span><span class="s0">, int </span><span class="s1">socksPort) {</span>
+        <span class="s0">this</span><span class="s1">.context      = context</span><span class="s0">;</span>
+        <span class="s0">this</span><span class="s1">.vpnInterface = vpnInterface</span><span class="s0">;</span>
+        <span class="s0">this</span><span class="s1">.socksPort    = socksPort</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/** Запускает hev-socks5-tunnel. Вызывать после запуска v2ray. */</span>
+    <span class="s0">public void </span><span class="s1">start() {</span>
+        <span class="s0">if </span><span class="s1">(!isAvailable()) {</span>
+            <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;start() пропущен — libhev-socks5-tunnel.so недоступна&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">return;</span>
+        <span class="s1">}</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">String configPath = writeConfig()</span><span class="s0">;</span>
+            <span class="s0">int </span><span class="s1">fd = vpnInterface.getFd()</span><span class="s0">;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;TProxyStartService fd=&quot; </span><span class="s1">+ fd + </span><span class="s3">&quot; socks=127.0.0.1:&quot; </span><span class="s1">+ socksPort)</span><span class="s0">;</span>
+            <span class="s1">com.v2ray.ang.service.TProxyService.TProxyStartService(configPath</span><span class="s0">, </span><span class="s1">fd)</span><span class="s0">;</span>
+            <span class="s1">running = </span><span class="s0">true;</span>
+            <span class="s1">currentInstance = </span><span class="s0">this;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel запущен ✓&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка запуска hev-socks5-tunnel&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private void </span><span class="s1">stopInstance() {</span>
+        <span class="s0">if </span><span class="s1">(!running) </span><span class="s0">return;</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">com.v2ray.ang.service.TProxyService.TProxyStopService()</span><span class="s0">;</span>
+            <span class="s1">running = </span><span class="s0">false;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel остановлен&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка остановки&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">public boolean </span><span class="s1">isRunning() { </span><span class="s0">return </span><span class="s1">running</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s2">/** Статистика: [0]=upload bytes, [1]=download bytes */</span>
+    <span class="s0">public long</span><span class="s1">[] getStats() {</span>
+        <span class="s0">if </span><span class="s1">(!running) </span><span class="s0">return new long</span><span class="s1">[]{</span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s1">}</span><span class="s0">;</span>
+        <span class="s0">try </span><span class="s1">{ </span><span class="s0">return </span><span class="s1">com.v2ray.ang.service.TProxyService.TProxyGetStats()</span><span class="s0">; </span><span class="s1">}</span>
+        <span class="s0">catch </span><span class="s1">(Exception e) { </span><span class="s0">return new long</span><span class="s1">[]{</span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s1">}</span><span class="s0">; </span><span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* YAML конфиг для hev-socks5-tunnel.</span>
+     <span class="s2">* tunnel.ipv4 ДОЛЖЕН совпадать с addAddress() в VpnTunnelService Builder (10.10.14.1).</span>
+     <span class="s2">*/</span>
+    <span class="s0">private </span><span class="s1">String writeConfig() </span><span class="s0">throws </span><span class="s1">Exception {</span>
+        <span class="s1">String cfg =</span>
+            <span class="s3">&quot;tunnel:</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  mtu: 1500</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  ipv4: 10.10.14.1</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;socks5:</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  port: &quot; </span><span class="s1">+ socksPort + </span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  address: 127.0.0.1</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  udp: 'udp'</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;misc:</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  tcp-read-write-timeout: 300000</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  udp-read-write-timeout: 60000</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+</span>
+            <span class="s3">&quot;  log-level: warn</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s0">;</span>
+
+        <span class="s1">File f = </span><span class="s0">new </span><span class="s1">File(context.getFilesDir()</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel.yaml&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">FileWriter w = </span><span class="s0">new </span><span class="s1">FileWriter(f)</span><span class="s0">;</span>
+        <span class="s1">w.write(cfg)</span><span class="s0">;</span>
+        <span class="s1">w.close()</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">f.getAbsolutePath()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

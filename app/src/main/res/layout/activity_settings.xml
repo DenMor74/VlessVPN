@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- URL конфигов -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="URL с конфигами серверов (каждый с новой строки):"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/et_config_urls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minLines="3"
+            android:maxLines="6"
+            android:inputType="textMultiLine|textUri"
+            android:hint="https://..."
+            android:background="@android:drawable/edit_text"
+            android:padding="8dp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Интервал обновления -->
+        <TextView
+            android:id="@+id/tv_interval_value"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Каждые 5 часов"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <SeekBar
+            android:id="@+id/seek_interval"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="23"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Количество серверов в топе -->
+        <TextView
+            android:id="@+id/tv_top_count_value"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Топ серверов: 10"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <SeekBar
+            android:id="@+id/seek_top_count"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="29"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Сканировать при запуске -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Сканировать серверы при запуске"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+
+            <Switch
+                android:id="@+id/switch_scan_on_start"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"/>
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Если выключено — при запуске показываются последние результаты из базы"
+            android:textSize="12sp"
+            android:textColor="#888888"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- Кнопки -->
+        <Button
+            android:id="@+id/btn_refresh_now"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Обновить серверы сейчас"
+            android:layout_marginBottom="8dp"/>
+
+        <Button
+            android:id="@+id/btn_save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Сохранить"/>
+
+    </LinearLayout>
+</ScrollView>

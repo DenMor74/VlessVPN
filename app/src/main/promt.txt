@@ -1,0 +1,52 @@
+Ключевые файлы:
+app/src/main/java/com/vlessvpn/app/core/V2RayConfigBuilder.java
+app/src/main/java/com/vlessvpn/app/core/V2RayManager.java
+app/src/main/java/com/vlessvpn/app/service/VpnTunnelService.java
+app/libs/libv2ray.aar  (Go-библиотека, не менять)
+
+========================================================================
+
+Android VPN приложение (Java, minSdk 26) использует libv2ray.aar (AndroidLibV2rayLite v5.47, Go).
+Реальный API libv2ray:
+java// startup() → возвращает TUN fd (long) — Go читает IP пакеты из этого fd
+// startLoop(String configJson) — ОДИН аргумент
+// onEmitStatus(long level, String msg) → "protect:FD" значит вызови VpnService.protect(FD)
+```
+
+**Архитектура трафика:**
+```
+Телефон → TUN fd → startup() возвращает fd → libv2ray читает IP пакеты → VLESS сервер
+Текущая проблема — трафик не идёт после подключения.
+TUN создаётся успешно (fd=151), v2ray стартует без ошибок, но интернет не работает.
+Что уже сделано правильно:
+
+VpnTunnelService создаёт TUN (addRoute 0.0.0.0/0, адрес 10.10.14.1/24, DNS 8.8.8.8)
+NetworkCallback → setUnderlyingNetworks(network) — зарегистрирован
+Split tunnel: IP сервера исключён из маршрутов TUN через CIDR-вычитание
+startup() возвращает VpnTunnelService.getTunFd() (статический метод)
+onEmitStatus("protect:FD") → VpnTunnelService.protectSocket(fd) → VpnService.protect(fd)
+protocol="tun" убран из конфига (v4 парсер не знает его — ошибка "no Port set")
+
+Конфиг который подаётся в startLoop():
+json{
+  "log": {"loglevel": "debug"},
+  "inbounds": [
+    {"tag":"socks","port":10808,"listen":"127.0.0.1","protocol":"socks",
+     "settings":{"auth":"noauth","udp":true},"sniffing":{"enabled":false}}
+  ],
+  "outbounds": [
+    {"tag":"proxy","protocol":"vless","settings":{...VLESS params...},
+     "streamSettings":{"network":"tcp","security":"reality","realitySettings":{...}}}
+  ],
+  "routing": {"domainStrategy":"AsIs","rules":[
+    {"type":"field","inboundTag":["socks"],"outboundTag":"proxy"}
+  ]}
+}
+Вопрос: Как libv2ray получает TUN трафик если в конфиге нет tun inbound? Нужно ли добавить специальный inbound? Или routing rule "network":"tcp,udp" → "outboundTag":"proxy" без inboundTag? Проверь V2RayConfigBuilder.java и V2RayManager.java — что нужно изменить чтобы трафик из TUN fd шёл через VLESS outbound.
+
+====================================================================
+
+еще раз логика работы программы: в режиме отключения в фоне периодически из настроек пытаться скачать листы и оставить 10-30 самых быстрых в доступе к подключению. последний лист при этом держать в кеше. если скачать не удалось все равно тестируем лист в кеше. в режиме подключения к серверу раз в 5 минут проверять работу, скачивая короткий фрагмент файла до первых байтов или ответ сайта типа google. если текущий сервер рабочий , то больше ничего не делаем, кроме 5-минутных проверок. если сервер не работает - нельзя ничего скачать, то меняем на следующий из списка готовых, проверяем  итд. нужно вести лог - доступный из меню с последними событиями проверок и переключений и тд, возможно с ограниченной глубиной времени - последние 3-5 часов. цель проги - при белых списках на мобильном инете всегда быть на связи.
+
+
+=============================================================

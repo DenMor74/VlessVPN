@@ -1,0 +1,87 @@
+<html>
+<head>
+<title>StatusBus.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #808080;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+StatusBus.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.util</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">androidx.lifecycle.LiveData</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">androidx.lifecycle.MutableLiveData</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* StatusBus — шина событий Worker → UI.</span>
+ <span class="s2">*</span>
+ <span class="s2">* Два вида событий:</span>
+ <span class="s2">* 1. StatusEvent — общий статус (заголовок, прогресс)</span>
+ <span class="s2">* 2. ServerEvent — статус конкретного сервера (для обновления строки в списке)</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">StatusBus {</span>
+
+    <span class="s3">// ── Общий статус ─────────────────────────────────</span>
+    <span class="s0">public static class </span><span class="s1">StatusEvent {</span>
+        <span class="s0">public final </span><span class="s1">String message</span><span class="s0">;</span>
+        <span class="s0">public final boolean </span><span class="s1">isRunning</span><span class="s0">;</span>
+        <span class="s0">public </span><span class="s1">StatusEvent(String message</span><span class="s0">, boolean </span><span class="s1">isRunning) {</span>
+            <span class="s0">this</span><span class="s1">.message = message</span><span class="s0">;</span>
+            <span class="s0">this</span><span class="s1">.isRunning = isRunning</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s3">// ── Статус конкретного сервера ────────────────────</span>
+    <span class="s0">public static class </span><span class="s1">ServerEvent {</span>
+        <span class="s0">public final </span><span class="s1">String serverId</span><span class="s0">;   </span><span class="s3">// id сервера (uuid@host:port)</span>
+        <span class="s0">public final </span><span class="s1">String host</span><span class="s0">;       </span><span class="s3">// для отображения</span>
+        <span class="s0">public final </span><span class="s1">String status</span><span class="s0">;     </span><span class="s3">// &quot;pinging&quot; | &quot;testing&quot; | &quot;ok&quot; | &quot;fail&quot;</span>
+        <span class="s0">public final long </span><span class="s1">pingMs</span><span class="s0">;       </span><span class="s3">// -1 если нет</span>
+        <span class="s0">public final </span><span class="s1">String detail</span><span class="s0">;     </span><span class="s3">// детальный текст</span>
+        <span class="s0">public final boolean </span><span class="s1">trafficOk</span><span class="s0">;</span>
+
+        <span class="s0">public </span><span class="s1">ServerEvent(String serverId</span><span class="s0">, </span><span class="s1">String host</span><span class="s0">, </span><span class="s1">String status</span><span class="s0">,</span>
+                           <span class="s0">long </span><span class="s1">pingMs</span><span class="s0">, boolean </span><span class="s1">trafficOk</span><span class="s0">, </span><span class="s1">String detail) {</span>
+            <span class="s0">this</span><span class="s1">.serverId  = serverId</span><span class="s0">;</span>
+            <span class="s0">this</span><span class="s1">.host      = host</span><span class="s0">;</span>
+            <span class="s0">this</span><span class="s1">.status    = status</span><span class="s0">;</span>
+            <span class="s0">this</span><span class="s1">.pingMs    = pingMs</span><span class="s0">;</span>
+            <span class="s0">this</span><span class="s1">.trafficOk = trafficOk</span><span class="s0">;</span>
+            <span class="s0">this</span><span class="s1">.detail    = detail</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">private static final </span><span class="s1">MutableLiveData&lt;StatusEvent&gt;  globalStatus = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;()</span><span class="s0">;</span>
+    <span class="s0">private static final </span><span class="s1">MutableLiveData&lt;ServerEvent&gt;  serverStatus = </span><span class="s0">new </span><span class="s1">MutableLiveData&lt;&gt;()</span><span class="s0">;</span>
+
+    <span class="s0">public static void </span><span class="s1">post(String message</span><span class="s0">, boolean </span><span class="s1">isRunning) {</span>
+        <span class="s1">globalStatus.postValue(</span><span class="s0">new </span><span class="s1">StatusEvent(message</span><span class="s0">, </span><span class="s1">isRunning))</span><span class="s0">;</span>
+        <span class="s1">FileLogger.i(</span><span class="s4">&quot;StatusBus&quot;</span><span class="s0">, </span><span class="s1">message)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+    <span class="s0">public static void </span><span class="s1">post(String message)  { post(message</span><span class="s0">, true</span><span class="s1">)</span><span class="s0">;  </span><span class="s1">}</span>
+    <span class="s0">public static void </span><span class="s1">done(String message)  { post(message</span><span class="s0">, false</span><span class="s1">)</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s0">public static void </span><span class="s1">postServer(String serverId</span><span class="s0">, </span><span class="s1">String host</span><span class="s0">, </span><span class="s1">String status</span><span class="s0">,</span>
+                                  <span class="s0">long </span><span class="s1">pingMs</span><span class="s0">, boolean </span><span class="s1">trafficOk</span><span class="s0">, </span><span class="s1">String detail) {</span>
+        <span class="s1">serverStatus.postValue(</span><span class="s0">new </span><span class="s1">ServerEvent(serverId</span><span class="s0">, </span><span class="s1">host</span><span class="s0">, </span><span class="s1">status</span><span class="s0">, </span><span class="s1">pingMs</span><span class="s0">, </span><span class="s1">trafficOk</span><span class="s0">, </span><span class="s1">detail))</span><span class="s0">;</span>
+        <span class="s1">FileLogger.d(</span><span class="s4">&quot;StatusBus&quot;</span><span class="s0">, </span><span class="s1">host + </span><span class="s4">&quot; → &quot; </span><span class="s1">+ status</span>
+            <span class="s1">+ (pingMs &gt; </span><span class="s5">0 </span><span class="s1">? </span><span class="s4">&quot; &quot; </span><span class="s1">+ pingMs + </span><span class="s4">&quot;ms&quot; </span><span class="s1">: </span><span class="s4">&quot;&quot;</span><span class="s1">)</span>
+            <span class="s1">+ (detail != </span><span class="s0">null </span><span class="s1">? </span><span class="s4">&quot; &quot; </span><span class="s1">+ detail : </span><span class="s4">&quot;&quot;</span><span class="s1">))</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s0">public static </span><span class="s1">LiveData&lt;StatusEvent&gt; get()            { </span><span class="s0">return </span><span class="s1">globalStatus</span><span class="s0">; </span><span class="s1">}</span>
+    <span class="s0">public static </span><span class="s1">LiveData&lt;ServerEvent&gt; getServerEvents(){ </span><span class="s0">return </span><span class="s1">serverStatus</span><span class="s0">; </span><span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<html>
+<head>
+<title>CrashActivity.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #808080;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+CrashActivity.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.util</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">android.app.Activity</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.ClipData</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.ClipboardManager</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.content.Intent</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.Bundle</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.widget.Button</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.widget.LinearLayout</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.widget.ScrollView</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.widget.TextView</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.widget.Toast</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* CrashActivity — показывает текст краша на экране.</span>
+ <span class="s2">* Полностью написана кодом — не требует XML layout.</span>
+ <span class="s2">* Две кнопки: &quot;Скопировать&quot; и &quot;Поделиться&quot;.</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">CrashActivity </span><span class="s0">extends </span><span class="s1">Activity {</span>
+
+    <span class="s1">@Override</span>
+    <span class="s0">protected void </span><span class="s1">onCreate(Bundle savedInstanceState) {</span>
+        <span class="s0">super</span><span class="s1">.onCreate(savedInstanceState)</span><span class="s0">;</span>
+
+        <span class="s1">String crashText = getIntent().getStringExtra(</span><span class="s3">&quot;crash_text&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">if </span><span class="s1">(crashText == </span><span class="s0">null</span><span class="s1">) crashText = </span><span class="s3">&quot;Текст краша не получен&quot;</span><span class="s0">;</span>
+
+        <span class="s0">final </span><span class="s1">String finalCrashText = crashText</span><span class="s0">;</span>
+
+        <span class="s4">// ── Строим UI программно ──────────────────────────────</span>
+        <span class="s1">LinearLayout root = </span><span class="s0">new </span><span class="s1">LinearLayout(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">root.setOrientation(LinearLayout.VERTICAL)</span><span class="s0">;</span>
+        <span class="s1">root.setPadding(</span><span class="s5">24</span><span class="s0">, </span><span class="s5">48</span><span class="s0">, </span><span class="s5">24</span><span class="s0">, </span><span class="s5">24</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">root.setBackgroundColor(</span><span class="s5">0xFF1A1A2E</span><span class="s1">)</span><span class="s0">;  </span><span class="s4">// тёмно-синий фон</span>
+
+        <span class="s4">// Заголовок</span>
+        <span class="s1">TextView title = </span><span class="s0">new </span><span class="s1">TextView(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">title.setText(</span><span class="s3">&quot;⚠️ Приложение упало&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">title.setTextSize(</span><span class="s5">20</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">title.setTextColor(</span><span class="s5">0xFFFF6B6B</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">title.setPadding(</span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">8</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">root.addView(title)</span><span class="s0">;</span>
+
+        <span class="s4">// Подсказка</span>
+        <span class="s1">TextView hint = </span><span class="s0">new </span><span class="s1">TextView(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">hint.setText(</span><span class="s3">&quot;Скопируй текст ниже и отправь разработчику:&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">hint.setTextSize(</span><span class="s5">14</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">hint.setTextColor(</span><span class="s5">0xFFAAAAAA</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">hint.setPadding(</span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">16</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">root.addView(hint)</span><span class="s0">;</span>
+
+        <span class="s4">// Кнопки</span>
+        <span class="s1">LinearLayout btnRow = </span><span class="s0">new </span><span class="s1">LinearLayout(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnRow.setOrientation(LinearLayout.HORIZONTAL)</span><span class="s0">;</span>
+        <span class="s1">btnRow.setPadding(</span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">16</span><span class="s1">)</span><span class="s0">;</span>
+
+        <span class="s1">Button btnCopy = </span><span class="s0">new </span><span class="s1">Button(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnCopy.setText(</span><span class="s3">&quot;📋 Скопировать&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnCopy.setBackgroundColor(</span><span class="s5">0xFF1A56DB</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnCopy.setTextColor(</span><span class="s5">0xFFFFFFFF</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">LinearLayout.LayoutParams lp = </span><span class="s0">new </span><span class="s1">LinearLayout.LayoutParams(</span><span class="s5">0</span><span class="s0">,</span>
+            <span class="s1">LinearLayout.LayoutParams.WRAP_CONTENT</span><span class="s0">, </span><span class="s5">1f</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">lp.setMarginEnd(</span><span class="s5">8</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnCopy.setLayoutParams(lp)</span><span class="s0">;</span>
+        <span class="s1">btnCopy.setOnClickListener(v -&gt; {</span>
+            <span class="s1">ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE)</span><span class="s0">;</span>
+            <span class="s1">cm.setPrimaryClip(ClipData.newPlainText(</span><span class="s3">&quot;VlessVPN Crash&quot;</span><span class="s0">, </span><span class="s1">finalCrashText))</span><span class="s0">;</span>
+            <span class="s1">Toast.makeText(</span><span class="s0">this, </span><span class="s3">&quot;Скопировано! Вставь в Telegram&quot;</span><span class="s0">, </span><span class="s1">Toast.LENGTH_LONG).show()</span><span class="s0">;</span>
+        <span class="s1">})</span><span class="s0">;</span>
+        <span class="s1">btnRow.addView(btnCopy)</span><span class="s0">;</span>
+
+        <span class="s1">Button btnShare = </span><span class="s0">new </span><span class="s1">Button(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnShare.setText(</span><span class="s3">&quot;📤 Поделиться&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnShare.setBackgroundColor(</span><span class="s5">0xFF16A34A</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnShare.setTextColor(</span><span class="s5">0xFFFFFFFF</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">LinearLayout.LayoutParams lp2 = </span><span class="s0">new </span><span class="s1">LinearLayout.LayoutParams(</span><span class="s5">0</span><span class="s0">,</span>
+            <span class="s1">LinearLayout.LayoutParams.WRAP_CONTENT</span><span class="s0">, </span><span class="s5">1f</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">btnShare.setLayoutParams(lp2)</span><span class="s0">;</span>
+        <span class="s1">btnShare.setOnClickListener(v -&gt; {</span>
+            <span class="s1">Intent share = </span><span class="s0">new </span><span class="s1">Intent(Intent.ACTION_SEND)</span><span class="s0">;</span>
+            <span class="s1">share.setType(</span><span class="s3">&quot;text/plain&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">share.putExtra(Intent.EXTRA_TEXT</span><span class="s0">, </span><span class="s1">finalCrashText)</span><span class="s0">;</span>
+            <span class="s1">share.putExtra(Intent.EXTRA_SUBJECT</span><span class="s0">, </span><span class="s3">&quot;VlessVPN Crash Report&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s1">startActivity(Intent.createChooser(share</span><span class="s0">, </span><span class="s3">&quot;Отправить лог&quot;</span><span class="s1">))</span><span class="s0">;</span>
+        <span class="s1">})</span><span class="s0">;</span>
+        <span class="s1">btnRow.addView(btnShare)</span><span class="s0">;</span>
+
+        <span class="s1">root.addView(btnRow)</span><span class="s0">;</span>
+
+        <span class="s4">// Текст краша в ScrollView</span>
+        <span class="s1">ScrollView scroll = </span><span class="s0">new </span><span class="s1">ScrollView(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">LinearLayout.LayoutParams scrollLp = </span><span class="s0">new </span><span class="s1">LinearLayout.LayoutParams(</span>
+            <span class="s1">LinearLayout.LayoutParams.MATCH_PARENT</span><span class="s0">, </span><span class="s5">0</span><span class="s0">, </span><span class="s5">1f</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">scroll.setLayoutParams(scrollLp)</span><span class="s0">;</span>
+        <span class="s1">scroll.setBackgroundColor(</span><span class="s5">0xFF0D1117</span><span class="s1">)</span><span class="s0">;</span>
+
+        <span class="s1">TextView tvCrash = </span><span class="s0">new </span><span class="s1">TextView(</span><span class="s0">this</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">tvCrash.setText(crashText)</span><span class="s0">;</span>
+        <span class="s1">tvCrash.setTextSize(</span><span class="s5">11</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">tvCrash.setTextColor(</span><span class="s5">0xFF98C379</span><span class="s1">)</span><span class="s0">;    </span><span class="s4">// зелёный как в терминале</span>
+        <span class="s1">tvCrash.setTypeface(android.graphics.Typeface.MONOSPACE)</span><span class="s0">;</span>
+        <span class="s1">tvCrash.setPadding(</span><span class="s5">16</span><span class="s0">, </span><span class="s5">16</span><span class="s0">, </span><span class="s5">16</span><span class="s0">, </span><span class="s5">16</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">tvCrash.setTextIsSelectable(</span><span class="s0">true</span><span class="s1">)</span><span class="s0">;   </span><span class="s4">// можно выделить текст пальцем</span>
+        <span class="s1">scroll.addView(tvCrash)</span><span class="s0">;</span>
+        <span class="s1">root.addView(scroll)</span><span class="s0">;</span>
+
+        <span class="s1">setContentView(root)</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

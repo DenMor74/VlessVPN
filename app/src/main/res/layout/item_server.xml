@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Элемент списка серверов — показывает статус теста и пинг -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/bg_card"
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginTop="6dp"
+    android:padding="12dp"
+    android:elevation="2dp">
+
+    <!-- Строка 1: иконка статуса + host + пинг -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Иконка статуса -->
+        <TextView
+            android:id="@+id/tv_server_icon"
+            android:layout_width="28dp"
+            android:layout_height="wrap_content"
+            android:text="⬜"
+            android:textSize="16sp"
+            android:gravity="center"/>
+
+        <!-- Host:port -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp">
+
+            <TextView
+                android:id="@+id/tv_server_host"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="server.example.com"
+                android:textSize="13sp"
+                android:textColor="#FFFFFF"
+                android:fontFamily="monospace"/>
+
+            <TextView
+                android:id="@+id/tv_server_remark"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Сервер"
+                android:textSize="11sp"
+                android:textColor="#7799BB"/>
+
+        </LinearLayout>
+
+        <!-- Пинг -->
+        <TextView
+            android:id="@+id/tv_server_ping"
+            android:layout_width="70dp"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textSize="12sp"
+            android:textColor="#4CAF50"
+            android:gravity="end"
+            android:fontFamily="monospace"/>
+
+        <!-- Кнопка подключить -->
+        <Button
+            android:id="@+id/btn_connect"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginStart="8dp"
+            android:text="▶"
+            android:textSize="14sp"
+            android:backgroundTint="#1A56DB"
+            android:textColor="#FFFFFF"
+            android:paddingHorizontal="12dp"
+            android:visibility="gone"/>
+
+    </LinearLayout>
+
+    <!-- Строка 2: статус теста -->
+    <TextView
+        android:id="@+id/tv_server_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginStart="34dp"
+        android:text=""
+        android:textSize="11sp"
+        android:textColor="#556677"
+        android:visibility="gone"/>
+
+</LinearLayout>

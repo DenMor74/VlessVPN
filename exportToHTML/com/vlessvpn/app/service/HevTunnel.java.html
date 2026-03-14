@@ -1,0 +1,126 @@
+<html>
+<head>
+<title>HevTunnel.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+HevTunnel.java</font>
+</center></td></tr></table>
+<pre><span class="s0">package </span><span class="s1">com.vlessvpn.app.service</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">android.content.Context</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">android.os.ParcelFileDescriptor</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">com.vlessvpn.app.util.FileLogger</span><span class="s0">;</span>
+
+<span class="s0">import </span><span class="s1">java.io.File</span><span class="s0">;</span>
+<span class="s0">import </span><span class="s1">java.io.FileWriter</span><span class="s0">;</span>
+
+<span class="s2">/**</span>
+ <span class="s2">* HevTunnel — обёртка над libhev-socks5-tunnel.so.</span>
+ <span class="s2">*</span>
+ <span class="s2">* ВАЖНО: libhev-socks5-tunnel.so скомпилирована для v2rayNG и при JNI_OnLoad</span>
+ <span class="s2">* ищет нативные методы в классе &quot;com.v2ray.ang.service.TProxyService&quot;.</span>
+ <span class="s2">* Поэтому мы делегируем вызовы туда через stub-класс.</span>
+ <span class="s2">*</span>
+ <span class="s2">* Схема трафика:</span>
+ <span class="s2">*   TUN fd → hev-socks5-tunnel → SOCKS5 127.0.0.1:10808 → v2ray → VLESS сервер</span>
+ <span class="s2">*/</span>
+<span class="s0">public class </span><span class="s1">HevTunnel {</span>
+
+    <span class="s0">private static final </span><span class="s1">String TAG = </span><span class="s3">&quot;HevTunnel&quot;</span><span class="s0">;</span>
+    <span class="s0">private static final int </span><span class="s1">SOCKS_PORT = </span><span class="s4">10808</span><span class="s0">;</span>
+
+    <span class="s0">private final </span><span class="s1">Context context</span><span class="s0">;</span>
+    <span class="s0">private volatile boolean </span><span class="s1">running = </span><span class="s0">false;</span>
+
+    <span class="s0">public </span><span class="s1">HevTunnel(Context context) {</span>
+        <span class="s0">this</span><span class="s1">.context = context</span><span class="s0">;</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* Запуск hev-socks5-tunnel.</span>
+     <span class="s2">* Вызывать ПОСЛЕ того как v2ray запущен и слушает SOCKS5 на 10808.</span>
+     <span class="s2">*/</span>
+    <span class="s0">public void </span><span class="s1">start(ParcelFileDescriptor vpnInterface) {</span>
+        <span class="s0">if </span><span class="s1">(running) {</span>
+            <span class="s1">FileLogger.w(TAG</span><span class="s0">, </span><span class="s3">&quot;Уже запущен&quot;</span><span class="s1">)</span><span class="s0">;</span>
+            <span class="s0">return;</span>
+        <span class="s1">}</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">String configPath = writeConfig()</span><span class="s0">;</span>
+            <span class="s0">int </span><span class="s1">fd = vpnInterface.getFd()</span><span class="s0">;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;TProxyStartService configPath=&quot; </span><span class="s1">+ configPath + </span><span class="s3">&quot; fd=&quot; </span><span class="s1">+ fd)</span><span class="s0">;</span>
+            <span class="s5">// Вызываем через stub — JNI ищет методы в com.v2ray.ang.service.TProxyService</span>
+            <span class="s1">com.v2ray.ang.service.TProxyService.TProxyStartService(configPath</span><span class="s0">, </span><span class="s1">fd)</span><span class="s0">;</span>
+            <span class="s1">running = </span><span class="s0">true;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel запущен ✔&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка запуска hev-socks5-tunnel&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">public void </span><span class="s1">stop() {</span>
+        <span class="s0">if </span><span class="s1">(!running) </span><span class="s0">return;</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s1">com.v2ray.ang.service.TProxyService.TProxyStopService()</span><span class="s0">;</span>
+            <span class="s1">running = </span><span class="s0">false;</span>
+            <span class="s1">FileLogger.i(TAG</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel остановлен&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s1">FileLogger.e(TAG</span><span class="s0">, </span><span class="s3">&quot;Ошибка остановки hev&quot;</span><span class="s0">, </span><span class="s1">e)</span><span class="s0">;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s0">public boolean </span><span class="s1">isRunning() { </span><span class="s0">return </span><span class="s1">running</span><span class="s0">; </span><span class="s1">}</span>
+
+    <span class="s0">public long</span><span class="s1">[] getStats() {</span>
+        <span class="s0">if </span><span class="s1">(!running) </span><span class="s0">return null;</span>
+        <span class="s0">try </span><span class="s1">{</span>
+            <span class="s0">return </span><span class="s1">com.v2ray.ang.service.TProxyService.TProxyGetStats()</span><span class="s0">;</span>
+        <span class="s1">} </span><span class="s0">catch </span><span class="s1">(Exception e) {</span>
+            <span class="s0">return null;</span>
+        <span class="s1">}</span>
+    <span class="s1">}</span>
+
+    <span class="s2">/**</span>
+     <span class="s2">* YAML конфиг для hev-socks5-tunnel.</span>
+     <span class="s2">* Формат как в v2rayNG TProxyService.buildConfig().</span>
+     <span class="s2">*/</span>
+    <span class="s0">private </span><span class="s1">String writeConfig() </span><span class="s0">throws </span><span class="s1">Exception {</span>
+        <span class="s1">StringBuilder sb = </span><span class="s0">new </span><span class="s1">StringBuilder()</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;tunnel:</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  mtu: 1500</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  ipv4: 10.1.10.1</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;      </span><span class="s5">// локальный IP туннеля (не tun0)</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;socks5:</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  port: &quot;</span><span class="s1">).append(SOCKS_PORT).append(</span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  address: 127.0.0.1</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  udp: 'udp'</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;misc:</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  task-stack-size: 81920</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  connect-timeout: 5000</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  read-write-timeout: 60000</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s1">sb.append(</span><span class="s3">&quot;  log-level: warn</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span><span class="s0">;</span>
+
+        <span class="s1">File configFile = </span><span class="s0">new </span><span class="s1">File(context.getFilesDir()</span><span class="s0">, </span><span class="s3">&quot;hev-socks5-tunnel.yaml&quot;</span><span class="s1">)</span><span class="s0">;</span>
+        <span class="s0">try </span><span class="s1">(FileWriter writer = </span><span class="s0">new </span><span class="s1">FileWriter(configFile)) {</span>
+            <span class="s1">writer.write(sb.toString())</span><span class="s0">;</span>
+        <span class="s1">}</span>
+
+        <span class="s1">FileLogger.d(TAG</span><span class="s0">, </span><span class="s3">&quot;hev config:</span><span class="s0">\n</span><span class="s3">&quot; </span><span class="s1">+ sb)</span><span class="s0">;</span>
+        <span class="s0">return </span><span class="s1">configFile.getAbsolutePath()</span><span class="s0">;</span>
+    <span class="s1">}</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Адаптивная иконка для Android 8.0+ (API 26+) -->
+<!-- Android сам обрежет по нужной форме: круг, скруглённый квадрат и т.д. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Фоновый слой — тёмно-синий цвет -->
+    <background android:drawable="@color/ic_launcher_background"/>
+    <!-- Передний слой — щит с замком -->
+    <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+</adaptive-icon>

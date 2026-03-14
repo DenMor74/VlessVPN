@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_dark">
+
+    <!-- ===== БЛОК СТАТУСА VPN ===== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/bg_card"
+        android:padding="20dp"
+        android:elevation="4dp">
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🔴 Отключено"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="@color/color_disconnected"
+            android:gravity="center"/>
+
+        <TextView
+            android:id="@+id/tv_connected_server"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textSize="13sp"
+            android:textColor="@color/text_secondary"
+            android:gravity="center"
+            android:layout_marginTop="2dp"/>
+
+        <Button
+            android:id="@+id/btn_disconnect"
+            android:layout_width="180dp"
+            android:layout_height="40dp"
+            android:layout_gravity="center"
+            android:layout_marginTop="12dp"
+            android:text="Отключить"
+            android:backgroundTint="@color/color_disconnected"
+            android:visibility="gone"/>
+
+        <!-- Трафик — показывается когда VPN подключён -->
+        <TextView
+            android:id="@+id/tv_traffic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="13sp"
+            android:textColor="#4CAF50"
+            android:gravity="center"
+            android:fontFamily="monospace"
+            android:layout_marginTop="4dp"
+            android:visibility="gone"/>
+
+    </LinearLayout>
+
+    <!-- ===== ПАНЕЛЬ ПРОГРЕССА ===== -->
+    <LinearLayout
+        android:id="@+id/panel_progress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#1A1F3A"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:visibility="gone">
+
+        <!-- Строка: иконка + текст + прогресс-бар -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Спиннер пока идёт процесс -->
+            <ProgressBar
+                android:id="@+id/progress_spinner"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginEnd="8dp"
+                style="?android:attr/progressBarStyleSmall"/>
+
+            <TextView
+                android:id="@+id/tv_progress_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Проверка серверов..."
+                android:textSize="13sp"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"/>
+
+        </LinearLayout>
+
+        <!-- Детальный статус — текущее действие -->
+        <TextView
+            android:id="@+id/tv_progress_detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#AABBDD"
+            android:fontFamily="monospace"/>
+
+        <!-- Счётчики -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp">
+
+            <TextView
+                android:id="@+id/tv_count_total"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="В листе: —"
+                android:textSize="11sp"
+                android:textColor="#7799BB"/>
+
+            <TextView
+                android:id="@+id/tv_count_ok"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="✓ Рабочих: —"
+                android:textSize="11sp"
+                android:textColor="#4CAF50"/>
+
+            <TextView
+                android:id="@+id/tv_count_fail"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="✗ Нет связи: —"
+                android:textSize="11sp"
+                android:textColor="#FF5555"/>
+
+        </LinearLayout>
+
+        <!-- Полоска прогресса -->
+        <ProgressBar
+            android:id="@+id/progress_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="8dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="#1A56DB"
+            android:indeterminate="false"/>
+
+    </LinearLayout>
+
+    <!-- ===== ПОСЛЕДНИЙ СТАТУС (всегда виден) ===== -->
+    <TextView
+        android:id="@+id/tv_last_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp"
+        android:text="Нет данных"
+        android:textSize="12sp"
+        android:textColor="#6688AA"
+        android:background="#111827"
+        android:visibility="gone"/>
+
+    <!-- ===== ВРЕМЯ ПОСЛЕДНЕГО ОБНОВЛЕНИЯ ===== -->
+    <TextView
+        android:id="@+id/tv_last_update"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="2dp"
+        android:text="Список не обновлялся"
+        android:textSize="11sp"
+        android:textColor="#556677"/>
+
+    <!-- ===== ЗАГОЛОВОК СПИСКА ===== -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Топ серверов по скорости"
+        android:textSize="12sp"
+        android:textColor="@color/text_secondary"
+        android:textAllCaps="true"
+        android:letterSpacing="0.08"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="6dp"/>
+
+    <!-- ===== СПИСОК СЕРВЕРОВ ===== -->
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipe_refresh"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recycler_servers"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingBottom="16dp"/>
+
+            <LinearLayout
+                android:id="@+id/tv_empty_state"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📡"
+                    android:textSize="48sp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Нет рабочих серверов"
+                    android:textSize="18sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="8dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Потяните вниз для обновления\nили проверьте настройки"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_hint"
+                    android:gravity="center"
+                    android:layout_marginTop="4dp"/>
+
+            </LinearLayout>
+
+        </FrameLayout>
+
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+</LinearLayout>

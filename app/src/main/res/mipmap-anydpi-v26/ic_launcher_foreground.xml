@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground слой адаптивной иконки (Android 8+) -->
+<!-- ВАЖНО: только теги <path> и <group> — <rect> не поддерживается в Android Vector -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Щит -->
+    <path
+        android:fillColor="#4B8BFF"
+        android:pathData="M54,18 L78,27 L78,54 L54,72 L30,54 L30,27 Z"/>
+
+    <!-- Дужка замка (полукруг) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M46,47 A8,9 0 0,1 62,47"/>
+
+    <!-- Корпус замка (прямоугольник через path) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,47 L64,47 L64,61 Q64,63 62,63 L46,63 Q44,63 44,61 Z"/>
+
+    <!-- Замочная скважина — круг -->
+    <path
+        android:fillColor="#4B8BFF"
+        android:pathData="M54,53 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"/>
+
+</vector>

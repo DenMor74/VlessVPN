@@ -2,13 +2,21 @@ package com.vlessvpn.app.storage;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.preference.PreferenceManager;
 
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Transformations;
 
 import com.vlessvpn.app.model.VlessServer;
+import com.vlessvpn.app.util.FileLogger;
 
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,6 +33,8 @@ public class ServerRepository {
     public static final String PREF_TOP_COUNT        = "top_server_count";
     public static final String PREF_SCAN_ON_START    = "scan_on_start";
     public static final int    DEFAULT_TOP_COUNT     = 10;
+
+    public static final String PREF_FORCE_MOBILE_TESTS = "force_mobile_for_tests";
 
     public static final String DEFAULT_CONFIG_URL =
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt";
@@ -149,5 +159,104 @@ public class ServerRepository {
 
     public void saveScanOnStart(boolean scan) {
         prefs.edit().putBoolean(PREF_SCAN_ON_START, scan).apply();
+    }
+
+    public List<VlessServer> getTopServersSync() {
+        int limit = prefs.getInt(PREF_TOP_COUNT, 15); // 10-30 по твоим настройкам
+
+        List<VlessServer> all = dao.getAllServersSync();
+
+        // Оставляем только протестированные и рабочие серверы
+        List<VlessServer> ready = new ArrayList<>();
+        for (VlessServer s : all) {
+            if (s.pingMs >= 0 && s.trafficOk) {   // pingMs >=0 + трафик прошёл
+                ready.add(s);
+            }
+        }
+
+        // Если ничего не протестировано — берём все (чтобы не остаться без списка)
+        if (ready.isEmpty()) {
+            ready = all;
+        }
+
+        // Сортируем по пингу ASC → самые быстрые первые
+        ready.sort((a, b) -> Long.compare(a.pingMs, b.pingMs));
+
+        // Возвращаем топ N
+        int size = Math.min(limit, ready.size());
+        return ready.subList(0, size);
+    }
+
+    public boolean isForceMobileTests() {
+        return prefs.getBoolean(PREF_FORCE_MOBILE_TESTS, true); // по умолчанию ВКЛ
+    }
+
+    public void saveForceMobileTests(boolean enabled) {
+        prefs.edit().putBoolean(PREF_FORCE_MOBILE_TESTS, enabled).apply();
+    }
+
+    /**
+     * Открывает соединение либо через мобильную сеть (если включено и WiFi подключён),
+     * либо обычным способом.
+     */
+    public static HttpURLConnection openConnectionForTest(Context context, URL url) throws IOException {
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        boolean forceMobile = context.getSharedPreferences("vless_prefs", Context.MODE_PRIVATE)
+                .getBoolean(PREF_FORCE_MOBILE_TESTS, true);
+
+        if (!forceMobile) {
+            return (HttpURLConnection) url.openConnection();
+        }
+
+        // WiFi подключён?
+        boolean wifiConnected = false;
+        for (Network net : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                wifiConnected = true;
+                break;
+            }
+        }
+
+        if (!wifiConnected) {
+            return (HttpURLConnection) url.openConnection();
+        }
+
+        // Ищем мобильную сеть
+        for (Network net : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+            if (caps != null &&
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                return (HttpURLConnection) net.openConnection(url);
+            }
+        }
+
+        // fallback
+        return (HttpURLConnection) url.openConnection();
+    }
+
+    /**
+     * Скачивание подписок: приоритет WiFi → fallback через VPN-туннель (LTE)
+     */
+    public static HttpURLConnection openConnectionForSubscription(Context context, URL url) throws IOException {
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        // 1. Ищем WiFi с реальным интернетом
+        for (Network net : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+            if (caps != null &&
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+
+                FileLogger.d("ServerRepository", "Скачиваем подписку через WiFi");
+                return (HttpURLConnection) net.openConnection(url);
+            }
+        }
+
+        // 2. Нет рабочего WiFi → обычное соединение (автоматически через туннель, если VPN подключён)
+        FileLogger.d("ServerRepository", "WiFi недоступен → скачиваем через туннель (LTE)");
+        return (HttpURLConnection) url.openConnection();
     }
 }

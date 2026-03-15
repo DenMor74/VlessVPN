@@ -18,5 +18,12 @@
         android:id="@+id/action_share_log"
         android:title="Поделиться логом"
         app:showAsAction="never"/>
+    <item android:id="@+id/menu_log"
+        android:title="Лог"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_clear_log"
+        android:title="Очистка лога"
+        app:showAsAction="never" />
 
 </menu>

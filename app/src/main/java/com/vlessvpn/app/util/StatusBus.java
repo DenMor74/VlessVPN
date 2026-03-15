@@ -47,7 +47,7 @@ public class StatusBus {
 
     public static void post(String message, boolean isRunning) {
         globalStatus.postValue(new StatusEvent(message, isRunning));
-        FileLogger.i("StatusBus", message);
+        //FileLogger.i("StatusBus", message);
     }
     public static void post(String message)  { post(message, true);  }
     public static void done(String message)  { post(message, false); }

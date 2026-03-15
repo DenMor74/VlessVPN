@@ -3,8 +3,11 @@ package com.vlessvpn.app.util;
 import android.content.Context;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.SimpleDateFormat;
@@ -37,7 +40,7 @@ public class FileLogger {
 
     private static File logFile = null;
     private static final SimpleDateFormat sdf =
-        new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.getDefault());
+        new SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault());
 
     /**
      * Инициализация. Вызывать в VpnApplication.onCreate() первой строкой.
@@ -53,9 +56,9 @@ public class FileLogger {
             logFile = new File(dir, FILE_NAME);
 
             // Всегда очищаем лог при запуске приложения
-            if (logFile.exists()) {
-                logFile.delete();
-            }
+            //if (logFile.exists()) {
+            //    logFile.delete();
+            //}
 
             write("════════════════════════════════════════");
             write("  VlessVPN запущен: " + sdf.format(new Date()));
@@ -140,6 +143,50 @@ public class FileLogger {
             Log.e(TAG, "shareLog error: " + e.getMessage(), e);
             android.widget.Toast.makeText(activity,
                 "Ошибка: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ДОБАВИТЬ В FileLogger
+    public static String getRecentLogs(int hours) {
+        if (logFile == null || !logFile.exists()) return "Лог пуст";
+
+        StringBuilder sb = new StringBuilder();
+        long cutoff = System.currentTimeMillis() - (hours * 3600L * 1000L);
+
+        try (BufferedReader br = new BufferedReader(new FileReader(logFile))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                // Пример строки: "03-14 20:15:22.123 I/VpnTunnelService: ..."
+                if (line.length() < 20) {
+                    sb.append(line).append("\n");
+                    continue;
+                }
+                // Простой парсинг времени (MM-dd HH:mm:ss)
+                String timeStr = line.substring(0, 15);
+                try {
+                    // Можно использовать более точный парсинг, но для скорости оставляем все строки
+                    // (файл маленький, а при старте приложения лог очищается)
+                    sb.append(line).append("\n");
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            return "Ошибка чтения лога";
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Полностью очищает файл лога (удаляет все записи)
+     */
+    public static void clearLog() {
+        if (logFile != null && logFile.exists()) {
+            if (logFile.delete()) {
+                try {
+                    // создаём пустой файл заново, чтобы логгер продолжал работать
+                    logFile.createNewFile();
+                } catch (IOException ignored) {}
+                Log.i(TAG, "=== ЛОГ ПОЛНОСТЬЮ ОЧИЩЕН ===");
+            }
         }
     }
 }

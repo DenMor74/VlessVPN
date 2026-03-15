@@ -23,6 +23,7 @@ public class SettingsActivity extends AppCompatActivity {
     private SeekBar   seekTopCount;
     private TextView  tvTopCountValue;
     private Switch    switchScanOnStart;
+    private Switch switchForceMobile;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +49,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchScanOnStart = findViewById(R.id.switch_scan_on_start);
         Button btnSave       = findViewById(R.id.btn_save);
         Button btnRefreshNow = findViewById(R.id.btn_refresh_now);
+        switchForceMobile = findViewById(R.id.switch_force_mobile);
 
         // SeekBar интервал: 1-24 часов
         seekInterval.setMax(23);
@@ -94,6 +96,8 @@ public class SettingsActivity extends AppCompatActivity {
 
         // Сканировать при запуске
         switchScanOnStart.setChecked(repository.isScanOnStart());
+
+        switchForceMobile.setChecked(repository.isForceMobileTests());
     }
 
     private void saveSettings() {
@@ -115,6 +119,8 @@ public class SettingsActivity extends AppCompatActivity {
 
         // Перепланируем WorkManager
         BackgroundMonitorService.schedule(this, newInterval);
+
+        repository.saveForceMobileTests(switchForceMobile.isChecked());
 
         Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
         finish();

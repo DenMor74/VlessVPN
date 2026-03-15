@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+*/build/
+
+# Android Studio
+.idea/
+*.iml
+local.properties
+
+# APK / AAB
+*.apk
+*.aab
+
+# Build outputs
+app/build/
+*/build/
+
+# Logs
+*.log
+
+# temp
+*.tmp
+*.temp
+
+# OS
+.DS_Store
+Thumbs.db
+/app/libs/libv2ray.aar

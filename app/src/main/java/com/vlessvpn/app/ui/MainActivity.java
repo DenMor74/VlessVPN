@@ -1,5 +1,6 @@
 package com.vlessvpn.app.ui;
 
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -14,6 +15,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,6 +33,15 @@ import com.vlessvpn.app.service.BackgroundMonitorService;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.google.gson.Gson;
 import com.vlessvpn.app.util.FileLogger;
+
+import android.app.Dialog;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.view.Window;
+import android.view.WindowManager;
+import android.content.ClipboardManager;
+import android.content.ClipData;
+
 
 public class MainActivity extends AppCompatActivity {
 
@@ -336,6 +347,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.menu_log) {
+            showLogDialog();
+            return true;
+        }
         int id = item.getItemId();
         if (id == R.id.action_settings) {
             startActivity(new Intent(this, SettingsActivity.class));
@@ -348,6 +363,64 @@ public class MainActivity extends AppCompatActivity {
             com.vlessvpn.app.util.FileLogger.shareLog(this);
             return true;
         }
+        if (id == R.id.menu_clear_log) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Очистка лога")
+                    .setMessage("Удалить ВСЕ записи лога?\n\nЭто действие необратимо.")
+                    .setPositiveButton("Да, очистить", (dialog, which) -> {
+                        FileLogger.clearLog();
+                        Toast.makeText(this, "Лог полностью очищен", Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton("Отмена", null)
+                    .show();
+            return true;
+        }
         return super.onOptionsItemSelected(item);
+    }
+
+    // Диалог с логом за последние 5 часов
+    private void showLogDialog() {
+        String logText = FileLogger.getRecentLogs(5);
+
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_DeviceDefault_Light_NoActionBar);
+        dialog.setContentView(R.layout.dialog_log);
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        ScrollView scrollLog = dialog.findViewById(R.id.scroll_log);
+        TextView tvLog = dialog.findViewById(R.id.tv_log);
+        tvLog.setText(logText);
+
+        // === АВТО-ПЕРЕХОД В КОНЕЦ (самое важное!) ===
+        scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
+
+        // Кнопка "Поделиться"
+        dialog.findViewById(R.id.btn_share).setOnClickListener(v -> {
+            FileLogger.shareLog(this);
+            dialog.dismiss();
+        });
+
+        // Кнопка "Копировать"
+        dialog.findViewById(R.id.btn_copy).setOnClickListener(v -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = ClipData.newPlainText("VlessVPN Log", logText);
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show();
+        });
+
+        // Кнопка "↓ В конец" (на случай если покрутил вверх)
+        dialog.findViewById(R.id.btn_to_end).setOnClickListener(v ->
+                scrollLog.fullScroll(View.FOCUS_DOWN)
+        );
+
+        // Закрыть
+        dialog.findViewById(R.id.btn_close).setOnClickListener(v -> dialog.dismiss());
+
+        dialog.show();
     }
 }

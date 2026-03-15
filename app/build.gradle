@@ -4,6 +4,18 @@ plugins {
     id 'com.android.application'
 }
 
+def getDate() {
+    return new Date().format("dd-MM-yyyy")
+}
+
+def getGitHash() {
+    try {
+        return 'git rev-parse --short HEAD'.execute().text.trim()
+    } catch(Exception e) {
+        return "nogit"
+    }
+}
+
 android {
     namespace 'com.vlessvpn.app'
     compileSdk 34
@@ -84,4 +96,20 @@ dependencies {
 
     // ========== PREFERENCES ==========
     implementation 'androidx.preference:preference:1.2.1'
+}
+
+android.applicationVariants.all { variant ->
+
+    variant.outputs.all { output ->
+
+        def appName = "vless_vpn"
+        def versionName = variant.versionName
+        def buildType = variant.buildType.name
+        def date = getDate()
+
+
+        outputFileName =
+                "${appName}_${versionName}_${buildType}_${date}.apk"
+    }
+
 }

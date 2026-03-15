@@ -88,7 +88,7 @@ public class BackgroundMonitorService extends Service {
                 for (String url : urls) {
                     if (url == null || url.trim().isEmpty()) continue;
                     try {
-                        List<VlessServer> fresh = dl.download(url.trim(), url.trim());
+                        List<VlessServer> fresh = dl.download(getApplicationContext(), url.trim(), url.trim());
                         if (!fresh.isEmpty()) {
                             repo.deleteBySourceUrl(url.trim());
                             repo.insertAll(fresh);

@@ -46,12 +46,15 @@ public class VpnTunnelService extends VpnService {
     public static final String ACTION_DISCONNECT = "com.vlessvpn.DISCONNECT";
     public static final String EXTRA_SERVER      = "server";
 
+    // ← НОВОЕ: флаг авто-подключения
+    public static final String EXTRA_AUTO_CONNECT = "auto_connect";
+
     private ExecutorService backgroundExecutor;
     private Handler mainHandler;
 
     private static volatile VpnTunnelService instance;
     public static volatile boolean isRunning = false;
-    public static volatile boolean isSwitchingServer = false; // Флаг безопасного переключения
+    public static volatile boolean isSwitchingServer = false;
     public static volatile VlessServer connectedServer = null;
 
     public static volatile long totalUp   = 0;
@@ -69,6 +72,13 @@ public class VpnTunnelService extends VpnService {
                 if (srv != null) {
                     updateNotification("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), srv.host);
                 }
+
+                // ════════════════════════════════════════════════════════════════════════
+                // ← ИСПРАВЛЕНО: Отправляем трафик ОТДЕЛЬНО (не через StatusBus.post)
+                // ════════════════════════════════════════════════════════════════════════
+                String trafficMsg = "↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown);
+                StatusBus.post(trafficMsg, true);  // Только трафик
+
                 StatusBus.post("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), true);
                 statsHandler.postDelayed(this, 3_000);
             }
@@ -124,8 +134,12 @@ public class VpnTunnelService extends VpnService {
         }
 
         VlessServer server = null;
+        boolean isAutoConnect = false;
+
         if (intent != null) {
             String json = intent.getStringExtra(EXTRA_SERVER);
+            isAutoConnect = intent.getBooleanExtra(EXTRA_AUTO_CONNECT, false);  // ← НОВОЕ
+
             if (json != null) {
                 try {
                     server = new Gson().fromJson(json, VlessServer.class);
@@ -174,12 +188,11 @@ public class VpnTunnelService extends VpnService {
         synchronized (connectLock) {
             if (connectId != activeConnectId) return;
             if (isRunning || v2RayManager != null || hevTunnel != null) {
-                fullStop(); // Безопасная остановка старого ядра
+                fullStop();
             }
             if (connectId != activeConnectId) return;
         }
 
-        // СБРАСЫВАЕМ ФЛАГ ПЕРЕКЛЮЧЕНИЯ (мы начинаем новое подключение)
         isSwitchingServer = false;
         currentServer = server;
 
@@ -189,14 +202,31 @@ public class VpnTunnelService extends VpnService {
             tunLatch.countDown();
         });
 
-        try { tunLatch.await(5, java.util.concurrent.TimeUnit.SECONDS); }
-        catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+        try {
+            tunLatch.await(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
 
         if (vpnInterface == null) {
             mainHandler.post(() -> StatusBus.done("Не удалось создать TUN"));
             stopSelf();
             return;
         }
+
+        // ════════════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Даём TUN интерфейсу время на инициализацию (500 мс)
+        // ════════════════════════════════════════════════════════════════════════
+        FileLogger.i(TAG, "TUN создан (fd=" + vpnInterface.getFd() + "), ожидаем 500 мс...");
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            FileLogger.w(TAG, "Задержка прервана");
+        }
+        FileLogger.i(TAG, "Запускаем V2Ray...");
+        // ════════════════════════════════════════════════════════════════════════
 
         registerNetworkCallback();
 
@@ -222,34 +252,80 @@ public class VpnTunnelService extends VpnService {
                     updateNotification("Подключено", s.host);
                     isRunning = true;
                     connectedServer = s;
+                    currentServer = s;
                     totalUp = 0; totalDown = 0;
                     StatusBus.post("Подключено: " + s.host, true);
                     statsHandler.postDelayed(statsPoller, 3_000);
 
-                    // Запуск проверки связи (каждые 5 минут)
+                    // Сохраняем как последний рабочий сервер
+                    ServerRepository repo = new ServerRepository(VpnTunnelService.this);
+                    repo.saveLastWorkingServer(s);
+                    FileLogger.i(TAG, "Сохранён последний рабочий сервер: " + s.host);
+
+                    // ════════════════════════════════════════════════════════════════════════
+                    // ОТПРАВЛЯЕМ BROADCAST ДЛЯ ОБНОВЛЕНИЯ UI (ДЛЯ АВТО-ПОДКЛЮЧЕНИЯ)
+                    // ════════════════════════════════════════════════════════════════════════
+                    FileLogger.i(TAG, "═══════════════════════════════════════");
+                    FileLogger.i(TAG, "ОТПРАВЛЯЕМ VPN_STATUS_CHANGED broadcast");
+                    try {
+                        Intent broadcast = new Intent("com.vlessvpn.VPN_STATUS_CHANGED");
+                        broadcast.putExtra("connected", true);
+                        broadcast.putExtra("server", new Gson().toJson(s));
+                        sendBroadcast(broadcast);
+                        FileLogger.i(TAG, "Broadcast отправлен успешно");
+                    } catch (Exception e) {
+                        FileLogger.e(TAG, "Ошибка отправки broadcast: " + e.getMessage());
+                    }
+                    FileLogger.i(TAG, "═══════════════════════════════════════");
+                    // ════════════════════════════════════════════════════════════════════════
+
+                    // Запуск проверки связи (каждую 1 минуту)
                     startPeriodicCheck();
                 });
             }
+
             @Override public void onStopped() {
-                mainHandler.post(() -> StatusBus.done("Отключено"));
+                mainHandler.post(() -> {
+                    StatusBus.done("Отключено");
+
+                    FileLogger.i(TAG, "ОТПРАВЛЯЕМ VPN_STATUS_CHANGED broadcast (отключено)");
+                    try {
+                        Intent broadcast = new Intent("com.vlessvpn.VPN_STATUS_CHANGED");
+                        broadcast.putExtra("connected", false);
+                        sendBroadcast(broadcast);
+                    } catch (Exception e) {
+                        FileLogger.e(TAG, "Ошибка отправки broadcast: " + e.getMessage());
+                    }
+                });
             }
+
             @Override public void onError(String error) {
                 mainHandler.post(() -> {
                     StatusBus.done(error);
-                    // Убиваем службу только если это не процесс переключения
+
+                    FileLogger.i(TAG, "ОТПРАВЛЯЕМ VPN_STATUS_CHANGED broadcast (ошибка)");
+                    try {
+                        Intent broadcast = new Intent("com.vlessvpn.VPN_STATUS_CHANGED");
+                        broadcast.putExtra("connected", false);
+                        broadcast.putExtra("error", error);
+                        sendBroadcast(broadcast);
+                    } catch (Exception e) {
+                        FileLogger.e(TAG, "Ошибка отправки broadcast: " + e.getMessage());
+                    }
+
                     if (!isSwitchingServer) {
                         stopSelf();
                     }
                 });
             }
+
             @Override public void onStatsUpdate(long up, long down) {
                 totalUp = up; totalDown = down;
             }
         });
 
-        v2RayManager.start(server); // Поток спит здесь, пока V2Ray работает
+        v2RayManager.start(server);
 
-        // Когда Xray остановлен, проверяем: если мы переключаемся, службу не убиваем!
         if (!isRunning && !isSwitchingServer) {
             stopHev();
             mainHandler.post(this::stopSelf);
@@ -261,7 +337,6 @@ public class VpnTunnelService extends VpnService {
     private final Runnable checkRunnable = new Runnable() {
         @Override
         public void run() {
-            // Если служба была пересоздана или остановлена, этот "старый" таймер должен тихо умереть
             if (!isRunning || backgroundExecutor == null || backgroundExecutor.isShutdown()) {
                 return;
             }
@@ -281,9 +356,21 @@ public class VpnTunnelService extends VpnService {
 
             if (!ok) {
                 FileLogger.w(TAG, "Сервер НЕ отвечает — инициируем переключение");
-                switchToNextServer(); // Безопасное переключение
+
+                // ← НОВОЕ: Очищаем последний рабочий сервер
+                ServerRepository repo = new ServerRepository(VpnTunnelService.this);
+                repo.clearLastWorkingServer();
+
+                switchToNextServer();
             } else {
                 FileLogger.d(TAG, "=== Сервер работает стабильно.");
+
+                // ← НОВОЕ: Обновляем последний рабочий сервер
+                if (currentServer != null) {
+                    ServerRepository repo = new ServerRepository(VpnTunnelService.this);
+                    repo.saveLastWorkingServer(currentServer);
+                }
+
                 if (currentServer != null) {
                     mainHandler.post(() -> StatusBus.post("Подключено: " + currentServer.host, true));
                 }
@@ -298,13 +385,12 @@ public class VpnTunnelService extends VpnService {
 
     private boolean performShortConnectivityCheck() {
         try {
-            // Заворачиваем запрос в SOCKS5 (10808) от Xray!
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
             URL url = new URL("http://cp.cloudflare.com/generate_204");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection(proxy);
 
             conn.setUseCaches(false);
-            conn.setConnectTimeout(6000); // 6 секунд на тест
+            conn.setConnectTimeout(6000);
             conn.setReadTimeout(6000);
 
             int code = conn.getResponseCode();
@@ -325,7 +411,6 @@ public class VpnTunnelService extends VpnService {
             return;
         }
 
-        // Ищем следующий сервер в списке
         VlessServer next = null;
         for (VlessServer s : readyList) {
             if (currentServer != null && !s.id.equals(currentServer.id)) {
@@ -340,13 +425,11 @@ public class VpnTunnelService extends VpnService {
 
         mainHandler.post(() -> StatusBus.post("Переключение на " + finalNext.remark));
 
-        // 1. ВКЛЮЧАЕМ ФЛАГ БЛОКИРОВКИ СМЕРТИ СЛУЖБЫ
         isSwitchingServer = true;
 
         long newConnectId = System.currentTimeMillis();
         activeConnectId = newConnectId;
 
-        // 2. ЗАПУСКАЕМ НОВЫЙ КОННЕКТ (он сам аккуратно вызовет fullStop для старого ядра)
         new Thread(() -> connect(finalNext, newConnectId), "reconnect-thread").start();
     }
 
@@ -375,7 +458,6 @@ public class VpnTunnelService extends VpnService {
         isRunning = false;
         connectedServer = null;
 
-        // Очищаем поллер статистики и 5-минутный чекер
         if (Looper.myLooper() == Looper.getMainLooper()) {
             statsHandler.removeCallbacks(statsPoller);
             if (checkHandler != null) checkHandler.removeCallbacks(checkRunnable);
@@ -410,7 +492,7 @@ public class VpnTunnelService extends VpnService {
 
     private void disconnect() {
         FileLogger.i(TAG, "disconnect()");
-        isSwitchingServer = false; // Сбрасываем флаг, так как это ручное отключение
+        isSwitchingServer = false;
         checkHandler.removeCallbacks(checkRunnable);
         fullStop();
         StatusBus.done("Отключено");

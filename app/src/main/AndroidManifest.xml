@@ -55,7 +55,6 @@
             android:parentActivityName=".ui.MainActivity"/>
 
         <!-- VPN Сервис — сердце приложения -->
-        <!-- android:permission гарантирует, что только система может его биндить -->
         <service
             android:name=".service.VpnTunnelService"
             android:exported="true"
@@ -74,6 +73,19 @@
             android:name=".service.BackgroundMonitorService"
             android:exported="false"/>
 
+        <!-- ════════════════════════════════════════════════════════════ -->
+        <!-- НОВЫЙ RECEIVER: Мониторинг WiFi для авто-подключения VPN    -->
+        <!-- ════════════════════════════════════════════════════════════ -->
+        <receiver
+            android:name=".network.WifiMonitor"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.net.conn.CONNECTIVITY_CHANGE"/>
+                <action android:name="android.net.wifi.NETWORK_STATE_CHANGED"/>
+            </intent-filter>
+        </receiver>
+
         <!-- Receiver для запуска при перезагрузке -->
         <receiver
             android:name=".service.BootReceiver"
@@ -84,7 +96,7 @@
             </intent-filter>
         </receiver>
 
-    
+
         <!-- Экран показа краша — открывается автоматически при падении -->
         <activity
             android:name=".util.CrashActivity"

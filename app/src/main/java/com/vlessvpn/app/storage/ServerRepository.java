@@ -10,6 +10,7 @@ import android.preference.PreferenceManager;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Transformations;
 
+import com.google.gson.Gson;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.util.FileLogger;
 
@@ -36,8 +37,12 @@ public class ServerRepository {
 
     public static final String PREF_FORCE_MOBILE_TESTS = "force_mobile_for_tests";
 
+    // ← НОВЫЕ КОНСТАНТЫ ДЛЯ АВТО-ПОДКЛЮЧЕНИЯ
+    public static final String PREF_AUTO_CONNECT_WIFI = "auto_connect_on_wifi_disconnect";
+    public static final String PREF_LAST_WORKING_SERVER = "last_working_server_json";
+
     public static final String DEFAULT_CONFIG_URL =
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt";
+            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt  ";
 
     public ServerRepository(Context context) {
         AppDatabase db = AppDatabase.getInstance(context);
@@ -56,7 +61,7 @@ public class ServerRepository {
     public LiveData<List<VlessServer>> getTopServersLiveData() {
         int limit = getTopCount();
         return Transformations.map(dao.getAllWorkingServers(),
-            list -> list != null && list.size() > limit ? list.subList(0, limit) : list);
+                list -> list != null && list.size() > limit ? list.subList(0, limit) : list);
     }
 
     /** Синхронный топ-10 — для Worker */
@@ -194,6 +199,75 @@ public class ServerRepository {
     public void saveForceMobileTests(boolean enabled) {
         prefs.edit().putBoolean(PREF_FORCE_MOBILE_TESTS, enabled).apply();
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // НОВЫЕ МЕТОДЫ ДЛЯ АВТО-ПОДКЛЮЧЕНИЯ ПРИ ПОТЕРЕ WiFi
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Проверить: включён ли авто-режим при потере WiFi
+     * @return true если авто-подключение включено
+     */
+    public boolean isAutoConnectOnWifiDisconnect() {
+        return prefs.getBoolean(PREF_AUTO_CONNECT_WIFI, false);
+    }
+
+    /**
+     * Сохранить настройку авто-подключения при потере WiFi
+     * @param enabled true = включить, false = выключить
+     */
+    public void saveAutoConnectOnWifiDisconnect(boolean enabled) {
+        prefs.edit().putBoolean(PREF_AUTO_CONNECT_WIFI, enabled).apply();
+        FileLogger.i("ServerRepository", "Авто-подключение сохранено: " + (enabled ? "ВКЛ" : "ВЫКЛ"));
+    }
+
+    /**
+     * Получить последний рабочий сервер (JSON)
+     * @return JSON строка сервера или null
+     */
+    public String getLastWorkingServerJson() {
+        return prefs.getString(PREF_LAST_WORKING_SERVER, null);
+    }
+
+    /**
+     * Сохранить сервер как последний рабочий
+     * @param server сервер для сохранения
+     */
+    public void saveLastWorkingServer(VlessServer server) {
+        if (server != null) {
+            String json = new Gson().toJson(server);
+            prefs.edit().putString(PREF_LAST_WORKING_SERVER, json).apply();
+            FileLogger.i("ServerRepository", "Сохранён последний рабочий сервер: " + server.host);
+        }
+    }
+
+    /**
+     * Очистить последний рабочий сервер
+     */
+    public void clearLastWorkingServer() {
+        prefs.edit().remove(PREF_LAST_WORKING_SERVER).apply();
+        FileLogger.d("ServerRepository", "Очищен последний рабочий сервер");
+    }
+
+    /**
+     * Получить последний рабочий сервер как объект
+     * @return VlessServer или null
+     */
+    public VlessServer getLastWorkingServer() {
+        String json = getLastWorkingServerJson();
+        if (json != null) {
+            try {
+                return new Gson().fromJson(json, VlessServer.class);
+            } catch (Exception e) {
+                FileLogger.e("ServerRepository", "Ошибка парсинга последнего сервера: " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // УТИЛИТЫ ДЛЯ СОЕДИНЕНИЙ
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * Открывает соединение либо через мобильную сеть (если включено и WiFi подключён),

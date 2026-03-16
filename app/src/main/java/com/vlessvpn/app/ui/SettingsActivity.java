@@ -23,7 +23,8 @@ public class SettingsActivity extends AppCompatActivity {
     private SeekBar   seekTopCount;
     private TextView  tvTopCountValue;
     private Switch    switchScanOnStart;
-    private Switch switchForceMobile;
+    private Switch    switchForceMobile;
+    private Switch    switchAutoConnectWifi;  // ← НОВОЕ ПОЛЕ
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,15 +42,17 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        etUrls           = findViewById(R.id.et_config_urls);
-        seekInterval     = findViewById(R.id.seek_interval);
-        tvIntervalValue  = findViewById(R.id.tv_interval_value);
-        seekTopCount     = findViewById(R.id.seek_top_count);
-        tvTopCountValue  = findViewById(R.id.tv_top_count_value);
-        switchScanOnStart = findViewById(R.id.switch_scan_on_start);
+        etUrls              = findViewById(R.id.et_config_urls);
+        seekInterval        = findViewById(R.id.seek_interval);
+        tvIntervalValue     = findViewById(R.id.tv_interval_value);
+        seekTopCount        = findViewById(R.id.seek_top_count);
+        tvTopCountValue     = findViewById(R.id.tv_top_count_value);
+        switchScanOnStart   = findViewById(R.id.switch_scan_on_start);
+        switchForceMobile   = findViewById(R.id.switch_force_mobile);
+        switchAutoConnectWifi = findViewById(R.id.switch_auto_connect_wifi);  // ← НОВОЕ
+
         Button btnSave       = findViewById(R.id.btn_save);
         Button btnRefreshNow = findViewById(R.id.btn_refresh_now);
-        switchForceMobile = findViewById(R.id.switch_force_mobile);
 
         // SeekBar интервал: 1-24 часов
         seekInterval.setMax(23);
@@ -97,7 +100,11 @@ public class SettingsActivity extends AppCompatActivity {
         // Сканировать при запуске
         switchScanOnStart.setChecked(repository.isScanOnStart());
 
+        // Тест через LTE
         switchForceMobile.setChecked(repository.isForceMobileTests());
+
+        // ← НОВОЕ: Авто-подключение при потере WiFi
+        switchAutoConnectWifi.setChecked(repository.isAutoConnectOnWifiDisconnect());
     }
 
     private void saveSettings() {
@@ -117,12 +124,22 @@ public class SettingsActivity extends AppCompatActivity {
         // Сканирование при запуске
         repository.saveScanOnStart(switchScanOnStart.isChecked());
 
+        // Тест через LTE
+        repository.saveForceMobileTests(switchForceMobile.isChecked());
+
+        // ← НОВОЕ: Авто-подключение при потере WiFi
+        repository.saveAutoConnectOnWifiDisconnect(switchAutoConnectWifi.isChecked());
+
         // Перепланируем WorkManager
         BackgroundMonitorService.schedule(this, newInterval);
 
-        repository.saveForceMobileTests(switchForceMobile.isChecked());
+        // Уведомление пользователя
+        if (switchAutoConnectWifi.isChecked()) {
+            Toast.makeText(this, "Настройки сохранены\n✅ Авто-подключение: ВКЛ", Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
+        }
 
-        Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
         finish();
     }
 

@@ -34,7 +34,7 @@ public class V2RayConfigBuilder {
 
             // ── LOG ──────────────────────────────────────────────────────────
             JSONObject log = new JSONObject();
-            log.put("loglevel", "debug");  // debug для диагностики
+            log.put("loglevel", "error");  // debug для диагностики
             config.put("log", log);
 
             // ── INBOUNDS ─────────────────────────────────────────────────────

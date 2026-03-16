@@ -188,60 +188,91 @@ public class VpnTunnelService extends VpnService {
         synchronized (connectLock) {
             if (connectId != activeConnectId) return;
             if (isRunning || v2RayManager != null || hevTunnel != null) {
-                fullStop();
+                fullStop(); // Безопасная остановка старого ядра
             }
             if (connectId != activeConnectId) return;
         }
 
+        // СБРАСЫВАЕМ ФЛАГ ПЕРЕКЛЮЧЕНИЯ
         isSwitchingServer = false;
         currentServer = server;
 
-        final java.util.concurrent.CountDownLatch tunLatch = new java.util.concurrent.CountDownLatch(1);
-        mainHandler.post(() -> {
-            vpnInterface = buildTun(server);
-            tunLatch.countDown();
-        });
-
-        try {
-            tunLatch.await(5, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return;
-        }
-
-        if (vpnInterface == null) {
-            mainHandler.post(() -> StatusBus.done("Не удалось создать TUN"));
-            stopSelf();
-            return;
-        }
-
-        // ════════════════════════════════════════════════════════════════════════
-        // ← НОВОЕ: Даём TUN интерфейсу время на инициализацию (500 мс)
-        // ════════════════════════════════════════════════════════════════════════
-        FileLogger.i(TAG, "TUN создан (fd=" + vpnInterface.getFd() + "), ожидаем 500 мс...");
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            FileLogger.w(TAG, "Задержка прервана");
-        }
-        FileLogger.i(TAG, "Запускаем V2Ray...");
-        // ════════════════════════════════════════════════════════════════════════
-
-        registerNetworkCallback();
-
+        // Полностью убираем Main Thread (CountDownLatch) и запускаем ВСЁ в фоне.
+        // Это спасет от NetworkOnMainThreadException и позволит нам безопасно "подождать" 4G сеть.
         v2rayThread = new Thread(() -> {
             try {
+                // 1. Создаем TUN с защитой от смены сети (умные ретраи)
+                vpnInterface = buildTunWithRetries(server);
+
+                if (vpnInterface == null) {
+                    FileLogger.e(TAG, "Не удалось создать TUN (background)");
+                    mainHandler.post(() -> StatusBus.done("Не удалось создать TUN"));
+                    stopSelf();
+                    return;
+                }
+
+                FileLogger.i(TAG, "TUN создан fd=" + vpnInterface.getFd());
+
+                // 2. Регистрируем коллбеки сети
+                registerNetworkCallback();
+
+                // 3. Запускаем Xray и HevTunnel
                 startV2RayAndHev(server);
+
             } catch (Exception e) {
+                FileLogger.e(TAG, "Ошибка в v2ray потоке", e);
                 mainHandler.post(() -> {
                     StatusBus.done(e.getMessage());
                     stopSelf();
                 });
             }
         }, "v2ray-thread");
+
         v2rayThread.setDaemon(true);
         v2rayThread.start();
+    }
+
+    // Новый метод, который ждет появления LTE/4G, если Wi-Fi только что отвалился
+    private ParcelFileDescriptor buildTunWithRetries(VlessServer server) {
+        // Делаем 4 попытки с интервалом в 1 секунду
+        for (int i = 1; i <= 4; i++) {
+            try {
+                // Страховка: проверяем, не отозвала ли система права на VPN
+                if (VpnService.prepare(this) != null) {
+                    FileLogger.e(TAG, "VPN не подготовлен (нет разрешения от системы)");
+                    return null;
+                }
+
+                Builder builder = new Builder();
+                builder.setSession("VlessVPN");
+                builder.setMtu(1500);
+                builder.addAddress("10.10.14.1", 24);
+                builder.addDnsServer("8.8.8.8");
+                builder.addDnsServer("8.8.4.4");
+
+                addRoutesExcluding(builder, server.host);
+
+                try { builder.addDisallowedApplication(getPackageName()); }
+                catch (Exception ignored) {}
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    builder.setMetered(false);
+                }
+
+                ParcelFileDescriptor pfd = builder.establish();
+                if (pfd != null) {
+                    return pfd; // Успех! Сеть поднялась, TUN создан.
+                }
+
+                FileLogger.w(TAG, "establish() вернул null. Сеть еще не готова. Попытка " + i + " из 4...");
+            } catch (Exception e) {
+                FileLogger.w(TAG, "Ошибка buildTun: " + e.getMessage() + ". Попытка " + i + " из 4...");
+            }
+
+            // Засыпаем на 1 секунду. Даем Android время переключить маршруты с мертвого Wi-Fi на 4G
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+        }
+        return null;
     }
 
     private void startV2RayAndHev(VlessServer server) throws Exception {

@@ -73,19 +73,6 @@
             android:name=".service.BackgroundMonitorService"
             android:exported="false"/>
 
-        <!-- ════════════════════════════════════════════════════════════ -->
-        <!-- НОВЫЙ RECEIVER: Мониторинг WiFi для авто-подключения VPN    -->
-        <!-- ════════════════════════════════════════════════════════════ -->
-
-        <receiver
-            android:name=".network.WifiMonitor"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="android.net.wifi.STATE_CHANGE"/>
-            </intent-filter>
-        </receiver>
-
         <!-- Receiver для запуска при перезагрузке -->
         <receiver
             android:name=".service.BootReceiver"

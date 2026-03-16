@@ -1,117 +1,80 @@
 package com.vlessvpn.app.network;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.wifi.WifiManager;
+import android.net.NetworkRequest;
+import androidx.annotation.NonNull;
 
-import androidx.core.content.ContextCompat;
-
-import com.google.gson.Gson;
-import com.vlessvpn.app.model.VlessServer;
+import com.vlessvpn.app.service.AutoConnectManager;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 /**
- * Надежный монитор Wi-Fi.
- * Будится системой через Manifest (android.net.wifi.STATE_CHANGE).
+ * WifiMonitor — мониторинг подключения/отключения Wi-Fi.
+ * Использует NetworkCallback (работает на Android 8–16).
+ * При отключении Wi-Fi вызывает AutoConnectManager.startAutoConnect().
  */
-public class WifiMonitor extends BroadcastReceiver {
+public class WifiMonitor {
 
     private static final String TAG = "WifiMonitor";
-    private static final String PREFS_NAME = "wifi_monitor_prefs";
-    private static final String KEY_WAS_WIFI = "was_wifi_connected";
+    private static ConnectivityManager.NetworkCallback callback;
+    private static Context appContext;
 
-    // Пул потоков для защиты от краша "Cannot access database on the main thread"
-    private static final ExecutorService executor = Executors.newSingleThreadExecutor();
+    public static void startMonitoring(Context context) {
+        if (callback != null) return;
 
-    @Override
-    public void onReceive(Context context, Intent intent) {
-        String action = intent != null ? intent.getAction() : null;
+        appContext = context.getApplicationContext();
+        ConnectivityManager cm = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        ServerRepository repo = new ServerRepository(appContext);
 
-        // Слушаем только официальный системный бродкаст Wi-Fi
-        if (!WifiManager.NETWORK_STATE_CHANGED_ACTION.equals(action)) return;
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .build();
 
-        // Используем ApplicationContext для безопасности фонового потока
-        final Context appContext = context.getApplicationContext();
+        callback = new ConnectivityManager.NetworkCallback() {
+            private boolean wasWifiConnected = true;
 
-        // Запускаем в фоне, чтобы не заблокировать Main Thread (иначе будет краш Room DB)
-        executor.execute(() -> {
-            ServerRepository repo = new ServerRepository(appContext);
-            boolean autoConnectEnabled = repo.isAutoConnectOnWifiDisconnect();
+            @Override
+            public void onAvailable(@NonNull Network network) {
+                wasWifiConnected = true;
+                FileLogger.i(TAG, "Wi-Fi подключён → отменяем авто-подключение");
+                AutoConnectManager.cancelAutoConnect();
+            }
 
-            if (!autoConnectEnabled) return; // Настройка выключена
+            @Override
+            public void onLost(@NonNull Network network) {
+                if (!wasWifiConnected) return;
+                wasWifiConnected = false;
 
-            boolean isWifiConnected = checkWifiConnected(appContext);
-            SharedPreferences prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            boolean wasWifiConnected = prefs.getBoolean(KEY_WAS_WIFI, false);
+                if (!repo.isAutoConnectOnWifiDisconnect()) {
+                    FileLogger.d(TAG, "Авто-подключение при отключении WiFi выключено в настройках");
+                    return;
+                }
 
-            if (isWifiConnected != wasWifiConnected) {
-                prefs.edit().putBoolean(KEY_WAS_WIFI, isWifiConnected).apply();
-
-                if (!isWifiConnected) {
-                    FileLogger.w(TAG, "🔴 Wi-Fi отключен! Запускаем VPN-защиту...");
-                    startVpn(appContext, repo);
-                } else {
-                    FileLogger.i(TAG, "🟢 Wi-Fi подключен! Отключаем VPN...");
-                    if (VpnTunnelService.isRunning) {
-                        stopVpn(appContext);
-                    }
+                if (!VpnTunnelService.isRunning && !AutoConnectManager.isFailoverInProgress()) {
+                    FileLogger.w(TAG, "Wi-Fi ОТКЛЮЧЁН! Запускаем AutoConnectManager");
+                    AutoConnectManager.startAutoConnect(appContext);
                 }
             }
-        });
+        };
+
+        cm.registerNetworkCallback(request, callback);
+        FileLogger.i(TAG, "WifiMonitor запущен (NetworkCallback)");
     }
 
-    private boolean checkWifiConnected(Context context) {
-        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return false;
-
-        Network activeNetwork = cm.getActiveNetwork();
-        if (activeNetwork != null) {
-            NetworkCapabilities caps = cm.getNetworkCapabilities(activeNetwork);
-            return caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
-        }
-        return false;
-    }
-
-    private void startVpn(Context context, ServerRepository repo) {
-        if (VpnTunnelService.isRunning) return;
-
-        List<VlessServer> topServers = repo.getTopServersSync();
-        if (topServers.isEmpty()) {
-            FileLogger.e(TAG, "Нет серверов для автоподключения!");
-            return;
-        }
-
-        VlessServer bestServer = topServers.get(0);
-        FileLogger.i(TAG, "Авто-запуск с сервером: " + bestServer.host);
-
-        Intent vpnIntent = new Intent(context, VpnTunnelService.class);
-        vpnIntent.setAction(VpnTunnelService.ACTION_CONNECT);
-        vpnIntent.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(bestServer));
-
-        ContextCompat.startForegroundService(context, vpnIntent);
-    }
-
-    private void stopVpn(Context context) {
-        Intent stopIntent = new Intent(context, VpnTunnelService.class);
-        stopIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
-        try {
-            // Используем безопасный startService, чтобы избежать краша ForegroundService
-            context.startService(stopIntent);
-        } catch (IllegalStateException e) {
-            FileLogger.w(TAG, "Используем stopService напрямую: " + e.getMessage());
-            context.stopService(new Intent(context, VpnTunnelService.class));
+    public static void stopMonitoring() {
+        if (callback != null) {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+                cm.unregisterNetworkCallback(callback);
+                callback = null;
+                FileLogger.i(TAG, "WifiMonitor остановлен");
+            } catch (Exception e) {
+                FileLogger.e(TAG, "Ошибка остановки мониторинга", e);
+            }
         }
     }
 }

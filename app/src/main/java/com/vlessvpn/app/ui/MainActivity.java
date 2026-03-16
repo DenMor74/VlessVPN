@@ -122,7 +122,8 @@ public class MainActivity extends AppCompatActivity {
         setupRecyclerView();
         observeData();
         updateAutoConnectStatus();  // ← НОВОЕ
-        WifiMonitor.registerNetworkCallback(this);  // ← НОВОЕ
+        //WifiMonitor.registerNetworkCallback(this);  // ← НОВОЕ
+
         // Запускаем фоновое сканирование при первом старте
         startService(new Intent(this, BackgroundMonitorService.class));
     }

@@ -74,10 +74,21 @@ public class BackgroundMonitorService extends Service {
         public Result doWork() {
             Context ctx  = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
+            // ════════════════════════════════════════════════════════════════
+            // ЖЕСТКАЯ ПРОВЕРКА НАСТРОЙКИ (Используем ваш ServerRepository)
+            // Если это одноразовый запуск (при старте), а настройка ВЫКЛЮЧЕНА:
+            if (!repo.isScanOnStart() && this.getTags().contains(WORK_TAG + "_once")) {
+                FileLogger.i(W, "Авто-сканирование при запуске ОТКЛЮЧЕНО. Отмена задачи.");
+                return Result.success(); // Тихо завершаем работу
+            }
+            // ════════════════════════════════════════════════════════════════
+
             ConfigDownloader dl   = new ConfigDownloader();
 
             StatusBus.post("🔄 Запуск проверки серверов...");
             FileLogger.i(W, "=== doWork START ===");
+            // -------------------------------------------
+
 
             // ── Шаг 1: Скачиваем если есть интернет ────────────────────────
             String[] urls = repo.getConfigUrls();

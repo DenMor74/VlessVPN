@@ -76,13 +76,13 @@
         <!-- ════════════════════════════════════════════════════════════ -->
         <!-- НОВЫЙ RECEIVER: Мониторинг WiFi для авто-подключения VPN    -->
         <!-- ════════════════════════════════════════════════════════════ -->
+
         <receiver
             android:name=".network.WifiMonitor"
-            android:exported="false"
+            android:exported="true"
             android:enabled="true">
             <intent-filter>
-                <action android:name="android.net.conn.CONNECTIVITY_CHANGE"/>
-                <action android:name="android.net.wifi.NETWORK_STATE_CHANGED"/>
+                <action android:name="android.net.wifi.STATE_CHANGE"/>
             </intent-filter>
         </receiver>
 

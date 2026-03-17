@@ -44,6 +44,35 @@ public class ServerRepository {
     public static final String DEFAULT_CONFIG_URL =
             "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt  ";
 
+    public static final String PREF_SCAN_INTERVAL = "scan_interval_minutes";  // ← НОВОЕ
+    public static final int DEFAULT_SCAN_INTERVAL = 30;  // 30 минут по умолчанию
+
+    /**
+     * Получить интервал сканирования текущего списка (минуты)
+     * @return интервал в минутах (10-1440)
+     */
+    public int getScanIntervalMinutes() {
+        return prefs.getInt(PREF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL);
+    }
+
+
+
+    /**
+     * Проверить: нужно ли сканировать текущий список
+     */
+    public boolean isScanNeeded() {
+        long lastScan = prefs.getLong("last_scan_timestamp", 0);
+        long intervalMs = getScanIntervalMinutes() * 60 * 1000L;
+        return (System.currentTimeMillis() - lastScan) > intervalMs;
+    }
+
+    /**
+     * Отметить время сканирования
+     */
+    public void markScanned() {
+        prefs.edit().putLong("last_scan_timestamp", System.currentTimeMillis()).apply();
+    }
+
     public ServerRepository(Context context) {
         AppDatabase db = AppDatabase.getInstance(context);
         this.dao  = db.serverDao();
@@ -333,4 +362,48 @@ public class ServerRepository {
         FileLogger.d("ServerRepository", "WiFi недоступен → скачиваем через туннель (LTE)");
         return (HttpURLConnection) url.openConnection();
     }
+
+    // ════════════════════════════════════════════════════════════════
+// НОВЫЕ МЕТОДЫ для раздельного сканирования (добавить в конец класса)
+// ════════════════════════════════════════════════════════════════
+
+    /**
+     * Получить интервал сканирования текущего списка (минуты)
+     * @return интервал в минутах (10-1440)
+     */
+
+    /**
+     * Сохранить интервал сканирования текущего списка
+     * @param minutes интервал в минутах (10-1440)
+     */
+    public void saveScanIntervalMinutes(int minutes) {
+        int clamped = Math.max(10, Math.min(1440, minutes));  // 10мин - 24ч
+        prefs.edit().putInt(PREF_SCAN_INTERVAL, clamped).apply();
+    }
+
+
+
+    /**
+     * Обновить сервер синхронно (для Worker)
+     */
+    public void updateServerSync(VlessServer server) {
+        dao.updateServer(server);
+    }
+
+
+    /**
+     * Удалить серверы по URL источника синхронно (для Worker)
+     */
+    public void deleteBySourceUrlSync(String url) {
+        dao.deleteBySourceUrl(url);
+    }
+
+
+    /**
+     * Получить время последней проверки списка
+     */
+    public long getLastScanTimestamp() {
+        return prefs.getLong("last_scan_timestamp", 0);
+    }
+
 }

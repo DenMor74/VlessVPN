@@ -1,94 +1,93 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Элемент списка серверов — показывает статус теста и пинг -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="@color/bg_card"
+    android:background="@drawable/bg_card_rounded"
     android:layout_marginHorizontal="12dp"
-    android:layout_marginTop="6dp"
-    android:padding="12dp"
-    android:elevation="2dp">
+    android:layout_marginTop="8dp"
+    android:padding="14dp"
+    android:elevation="3dp">
 
-    <!-- Строка 1: иконка статуса + host + пинг -->
+    <!-- Верхняя строка -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
-        <!-- Иконка статуса -->
+        <!-- ✅ Оставили TextView (как в коде), но сделали как иконку -->
         <TextView
             android:id="@+id/tv_server_icon"
-            android:layout_width="28dp"
-            android:layout_height="wrap_content"
-            android:text="⬜"
-            android:textSize="16sp"
-            android:gravity="center"/>
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:text="●"
+            android:textSize="18sp"
+            android:gravity="center"
+            android:textColor="#888888" />
 
-        <!-- Host:port -->
+        <!-- Host + описание -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:layout_marginStart="6dp">
+            android:layout_marginStart="10dp">
 
             <TextView
                 android:id="@+id/tv_server_host"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="server.example.com"
-                android:textSize="13sp"
+                android:textSize="14sp"
+                android:textStyle="bold"
                 android:textColor="#FFFFFF"
-                android:fontFamily="monospace"/>
+                android:maxLines="1"
+                android:ellipsize="end"/>
 
             <TextView
                 android:id="@+id/tv_server_remark"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Сервер"
-                android:textSize="11sp"
-                android:textColor="#7799BB"/>
-
+                android:textSize="12sp"
+                android:textColor="#8899AA"/>
         </LinearLayout>
 
         <!-- Пинг -->
         <TextView
             android:id="@+id/tv_server_ping"
-            android:layout_width="70dp"
+            android:layout_width="80dp"
             android:layout_height="wrap_content"
             android:text="—"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textColor="#4CAF50"
             android:gravity="end"
             android:fontFamily="monospace"/>
 
-        <!-- Кнопка подключить -->
+        <!-- ✅ Оставили Button (как в коде), но сделали красивым -->
         <Button
             android:id="@+id/btn_connect"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_marginStart="8dp"
             android:text="▶"
             android:textSize="14sp"
-            android:backgroundTint="#1A56DB"
             android:textColor="#FFFFFF"
-            android:paddingHorizontal="12dp"
+            android:background="@drawable/circle"
             android:visibility="gone"/>
-
     </LinearLayout>
 
-    <!-- Строка 2: статус теста -->
+    <!-- Статус -->
     <TextView
         android:id="@+id/tv_server_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="6dp"
         android:layout_marginStart="34dp"
         android:text=""
-        android:textSize="11sp"
-        android:textColor="#556677"
+        android:textSize="12sp"
+        android:textColor="#667788"
         android:visibility="gone"/>
 
 </LinearLayout>

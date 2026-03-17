@@ -54,9 +54,9 @@ public class V2RayManager {
                 libv2ray.Libv2ray.initCoreEnv(assetsPath, "");
 
                 coreEnvReady = true;
-                FileLogger.i(TAG, "initCoreEnv OK v=" + libv2ray.Libv2ray.checkVersionX());
+                FileLogger.i(TAG, "Инициализация ядра - OK v=" + libv2ray.Libv2ray.checkVersionX());
             } catch (Exception e) {
-                FileLogger.e(TAG, "initCoreEnv failed", e);
+                FileLogger.e(TAG, "Инициализация ядра - failed", e);
             }
         }
     }
@@ -96,7 +96,7 @@ public class V2RayManager {
             FileLogger.i(TAG, "v2ray start: " + server.host + ":" + server.port
                 + " flow=" + server.flow + " net=" + server.networkType
                 + " sec=" + server.security + " sni=" + server.sni);
-            FileLogger.i(TAG, "CONFIG: " + configJson);
+            // FileLogger.i(TAG, "CONFIG: " + configJson);
 
             coreController = libv2ray.Libv2ray.newCoreController(new VpnCallback(server));
 
@@ -386,10 +386,10 @@ public class V2RayManager {
 
             long delay = libv2ray.Libv2ray.measureOutboundDelay(configJson, testUrl);
 
-            FileLogger.d(TAG, "measureDelay=" + delay + "ms");
+           // FileLogger.d(TAG, "measureDelay=" + delay + "ms");
             return delay;
         } catch (Exception e) {
-            FileLogger.d(TAG, "measureDelay err: " + e.getMessage());
+           // FileLogger.d(TAG, "measureDelay err: " + e.getMessage());
             return -1;
         }
     }

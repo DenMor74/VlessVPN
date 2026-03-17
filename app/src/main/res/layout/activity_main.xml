@@ -179,18 +179,20 @@
 
     </LinearLayout>
 
-    <!-- ===== ПОСЛЕДНИЙ СТАТУС (всегда виден) ===== -->
+    <!-- ════════════════════════════════════════════════════════════════ -->
+    <!-- ПОСЛЕДНИЙ СТАТУС — всегда виден (не скрывается) -->
+    <!-- ════════════════════════════════════════════════════════════════ -->
     <TextView
         android:id="@+id/tv_last_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingHorizontal="16dp"
-        android:paddingVertical="6dp"
-        android:text="Нет данных"
+        android:paddingVertical="8dp"
+        android:text="📊 Всего: 0 | ✓ Рабочих: 0 | Последняя проверка: не проверялся"
         android:textSize="12sp"
         android:textColor="#6688AA"
         android:background="#111827"
-        android:visibility="gone"/>
+        android:visibility="visible"/>  <!-- ← Всегда visible! -->
 
     <!-- ===== ВРЕМЯ ПОСЛЕДНЕГО ОБНОВЛЕНИЯ ===== -->
     <TextView

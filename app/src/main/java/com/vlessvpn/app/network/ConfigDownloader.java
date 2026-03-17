@@ -4,6 +4,8 @@ import android.content.Context;
 import android.util.Log;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.storage.ServerRepository;
+import com.vlessvpn.app.util.FileLogger;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,7 +40,7 @@ public class ConfigDownloader {
         List<VlessServer> servers = new ArrayList<>();
         HttpURLConnection connection = null;
         try {
-            Log.i(TAG, "Загружаем список серверов: " + url);
+            FileLogger.i(TAG, "Загружаем список серверов: " + url);
 
             URL targetUrl = new URL(url);
             // ← ГЛАВНОЕ ИСПРАВЛЕНИЕ: умное подключение (WiFi или через туннель)
@@ -73,15 +75,15 @@ public class ConfigDownloader {
                         servers.add(server);
                         parsedCount++;
                     } else {
-                        Log.w(TAG, "Не удалось распарсить строку " + lineNum + ": " + line.substring(0, Math.min(50, line.length())));
+                        FileLogger.w(TAG, "Не удалось распарсить строку " + lineNum + ": " + line.substring(0, Math.min(50, line.length())));
                         errorCount++;
                     }
                 }
             }
             reader.close();
-            Log.i(TAG, "Загружено " + parsedCount + " серверов, ошибок парсинга: " + errorCount);
+            FileLogger.i(TAG, "Загружено " + parsedCount + " серверов, ошибок парсинга: " + errorCount);
         } catch (IOException e) {
-            Log.e(TAG, "Ошибка загрузки " + url + ": " + e.getMessage());
+            FileLogger.e(TAG, "Ошибка загрузки " + url + ": " + e.getMessage());
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -104,7 +106,7 @@ public class ConfigDownloader {
             allServers.addAll(servers);
             Log.i(TAG, "С " + url + " получено " + servers.size() + " серверов");
         }
-        Log.i(TAG, "Итого загружено серверов: " + allServers.size());
+        FileLogger.i(TAG, "Итого загружено серверов: " + allServers.size());
         return allServers;
     }
 }

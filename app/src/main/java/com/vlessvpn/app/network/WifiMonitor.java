@@ -1,6 +1,7 @@
 package com.vlessvpn.app.network;
 
 import android.content.Context;
+import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -41,7 +42,20 @@ public class WifiMonitor {
             public void onAvailable(@NonNull Network network) {
                 wasWifiConnected = true;
                 FileLogger.i(TAG, "Wi-Fi подключён → отменяем авто-подключение");
+
+                // 1. Отменяем.pending подключения
                 AutoConnectManager.cancelAutoConnect();
+
+                // 2. ← НОВОЕ: Если VPN запущен — отключаем его
+                if (VpnTunnelService.isRunning) {
+                    FileLogger.i(TAG, "VPN активен — отключаем (WiFi восстановлен)");
+
+                    Intent disconnectIntent = new Intent(appContext, VpnTunnelService.class);
+                    disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
+                    appContext.startService(disconnectIntent);
+
+                    FileLogger.i(TAG, "Отправлен ACTION_DISCONNECT");
+                }
             }
 
             @Override

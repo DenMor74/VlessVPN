@@ -59,10 +59,10 @@ public class ServerTester {
         if (best >= 0) {
             r.pingMs    = best;
             r.trafficOk = true;
-            FileLogger.d(TAG, "TCP OK " + server.host + ":" + server.port + " " + best + "ms");
+            // FileLogger.d(TAG, "TCP OK " + server.host + ":" + server.port + " " + best + "ms");
         } else {
             r.errorMessage = "недоступен";
-            FileLogger.d(TAG, "TCP FAIL " + server.host + ":" + server.port);
+           // FileLogger.d(TAG, "TCP FAIL " + server.host + ":" + server.port);
         }
         return r;
     }
@@ -99,11 +99,11 @@ public class ServerTester {
             // gstatic.com/generate_204 возвращает 204 если есть интернет
             // Любой ответ (200, 204, 301...) означает что трафик прошёл
             boolean ok = (code >= 200 && code < 400);
-            FileLogger.i(TAG, "trafficTest → HTTP " + code + " ok=" + ok);
+           // FileLogger.i(TAG, "trafficTest → HTTP " + code + " ok=" + ok);
             conn.disconnect();
             return ok;
         } catch (Exception e) {
-            FileLogger.d(TAG, "trafficTest FAIL: " + e.getMessage());
+           // FileLogger.d(TAG, "trafficTest FAIL: " + e.getMessage());
             return false;
         }
     }
@@ -133,10 +133,10 @@ public class ServerTester {
             return ms;
 
         } catch (android.system.ErrnoException e) {
-            FileLogger.d(TAG, "Os.ERR " + host + ":" + port + " errno=" + e.errno);
+           // FileLogger.d(TAG, "Os.ERR " + host + ":" + port + " errno=" + e.errno);
             return -1;
         } catch (Exception e) {
-            FileLogger.d(TAG, "ERR " + host + ":" + port + " — " + e.getMessage());
+           // FileLogger.d(TAG, "ERR " + host + ":" + port + " — " + e.getMessage());
             return -1;
         } finally {
             if (fd != null) try { Os.close(fd); } catch (Exception ignored) {}

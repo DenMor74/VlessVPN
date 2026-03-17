@@ -40,7 +40,7 @@ public class FileLogger {
 
     private static File logFile = null;
     private static final SimpleDateFormat sdf =
-        new SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault());
+        new SimpleDateFormat("HH:mm:ss", Locale.getDefault()); // "dd.MM HH:mm:ss"
 
     /**
      * Инициализация. Вызывать в VpnApplication.onCreate() первой строкой.

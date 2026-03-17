@@ -36,6 +36,41 @@
             android:layout_marginBottom="16dp"
             android:textSize="14sp" />
 
+        <!-- ← НОВОЕ: Интервал сканирования текущего списка -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔄 Как часто сканировать текущий лист"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_scan_interval_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Каждые 30 мин"
+                android:textSize="14sp"
+                android:textColor="#666666" />
+
+            <SeekBar
+                android:id="@+id/seek_scan_interval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="10 мин — 24 часа"
+                android:textSize="12sp"
+                android:textColor="#999999" />
+        </LinearLayout>
         <!-- Интервал обновления -->
         <TextView
             android:id="@+id/tv_interval_value"

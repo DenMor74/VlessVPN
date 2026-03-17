@@ -24,7 +24,13 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView  tvTopCountValue;
     private Switch    switchScanOnStart;
     private Switch    switchForceMobile;
-    private Switch    switchAutoConnectWifi;  // ← НОВОЕ ПОЛЕ
+    private Switch    switchAutoConnectWifi;
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВЫЕ: Для интервала сканирования
+    // ════════════════════════════════════════════════════════════════
+    private SeekBar   seekScanInterval;
+    private TextView  tvScanIntervalValue;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,10 +55,24 @@ public class SettingsActivity extends AppCompatActivity {
         tvTopCountValue     = findViewById(R.id.tv_top_count_value);
         switchScanOnStart   = findViewById(R.id.switch_scan_on_start);
         switchForceMobile   = findViewById(R.id.switch_force_mobile);
-        switchAutoConnectWifi = findViewById(R.id.switch_auto_connect_wifi);  // ← НОВОЕ
+        switchAutoConnectWifi = findViewById(R.id.switch_auto_connect_wifi);
 
-        Button btnSave       = findViewById(R.id.btn_save);
-        Button btnRefreshNow = findViewById(R.id.btn_refresh_now);
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: SeekBar для интервала сканирования (10мин - 24ч)
+        // ════════════════════════════════════════════════════════════════
+        seekScanInterval = findViewById(R.id.seek_scan_interval);
+        tvScanIntervalValue = findViewById(R.id.tv_scan_interval_value);
+
+        if (seekScanInterval != null && tvScanIntervalValue != null) {
+            seekScanInterval.setMax(143);  // 0..143 → 10..1440 минут (шаг 10 мин)
+            seekScanInterval.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
+                @Override
+                public void onProgressChanged(SeekBar s, int p, boolean u) {
+                    int minutes = (p + 1) * 10;  // 10, 20, 30... 1440
+                    tvScanIntervalValue.setText("Каждые " + formatInterval(minutes));
+                }
+            });
+        }
 
         // SeekBar интервал: 1-24 часов
         seekInterval.setMax(23);
@@ -64,7 +84,7 @@ public class SettingsActivity extends AppCompatActivity {
         });
 
         // SeekBar количество серверов: 1-30
-        seekTopCount.setMax(29); // 0..29 → 1..30
+        seekTopCount.setMax(29);
         seekTopCount.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
                 int cnt = p + 1;
@@ -72,12 +92,15 @@ public class SettingsActivity extends AppCompatActivity {
             }
         });
 
+        Button btnSave = findViewById(R.id.btn_save);
+        Button btnRefreshNow = findViewById(R.id.btn_refresh_now);
+
         btnSave.setOnClickListener(v -> saveSettings());
 
         btnRefreshNow.setOnClickListener(v -> {
             repository.resetUpdateTime();
             repository.resetAllTestTimes();
-            BackgroundMonitorService.runImmediately(this);
+            BackgroundMonitorService.runDownloadNow(this);
             Toast.makeText(this, "Обновление запущено...", Toast.LENGTH_SHORT).show();
         });
     }
@@ -103,8 +126,17 @@ public class SettingsActivity extends AppCompatActivity {
         // Тест через LTE
         switchForceMobile.setChecked(repository.isForceMobileTests());
 
-        // ← НОВОЕ: Авто-подключение при потере WiFi
+        // Авто-подключение при потере WiFi
         switchAutoConnectWifi.setChecked(repository.isAutoConnectOnWifiDisconnect());
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Интервал сканирования
+        // ════════════════════════════════════════════════════════════════
+        if (seekScanInterval != null && tvScanIntervalValue != null) {
+            int scanMinutes = repository.getScanIntervalMinutes();
+            seekScanInterval.setProgress((scanMinutes / 10) - 1);
+            tvScanIntervalValue.setText("Каждые " + formatInterval(scanMinutes));
+        }
     }
 
     private void saveSettings() {
@@ -113,7 +145,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (urlsText.isEmpty()) urlsText = ServerRepository.DEFAULT_CONFIG_URL;
         repository.saveConfigUrls(urlsText);
 
-        // Интервал
+        // Интервал обновления
         int newInterval = seekInterval.getProgress() + 1;
         repository.saveUpdateInterval(newInterval);
 
@@ -127,11 +159,23 @@ public class SettingsActivity extends AppCompatActivity {
         // Тест через LTE
         repository.saveForceMobileTests(switchForceMobile.isChecked());
 
-        // ← НОВОЕ: Авто-подключение при потере WiFi
+        // Авто-подключение при потере WiFi
         repository.saveAutoConnectOnWifiDisconnect(switchAutoConnectWifi.isChecked());
 
-        // Перепланируем WorkManager
-        BackgroundMonitorService.schedule(this, newInterval);
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Сохранить интервал сканирования
+        // ════════════════════════════════════════════════════════════════
+        int newScanInterval = 30;  // по умолчанию
+        if (seekScanInterval != null) {
+            newScanInterval = (seekScanInterval.getProgress() + 1) * 10;
+            repository.saveScanIntervalMinutes(newScanInterval);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← ИСПРАВЛЕНО: Перепланируем ОБА задания (раздельно)
+        // ════════════════════════════════════════════════════════════════
+        BackgroundMonitorService.scheduleDownload(this, newInterval);
+        BackgroundMonitorService.scheduleScan(this, newScanInterval);
 
         // Уведомление пользователя
         if (switchAutoConnectWifi.isChecked()) {
@@ -141,6 +185,12 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         finish();
+    }
+
+    private String formatInterval(int minutes) {
+        if (minutes < 60) return minutes + " мин";
+        else if (minutes < 1440) return (minutes / 60) + " ч";
+        else return (minutes / 1440) + " дн";
     }
 
     private String hoursLabel(int hours) {

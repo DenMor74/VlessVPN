@@ -26,6 +26,13 @@ public interface ServerDao {
     @Query("DELETE FROM servers WHERE id = :id")
     void deleteById(String id);
 
+    @Update
+    void updateServer(VlessServer server);
+
+
+    @Query("SELECT * FROM servers")
+    List<VlessServer> getAllServers();
+
     /**
      * Топ-10 рабочих серверов для отображения в UI (LiveData → автообновление)
      */

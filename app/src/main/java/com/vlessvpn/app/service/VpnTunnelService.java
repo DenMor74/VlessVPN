@@ -33,8 +33,10 @@ import java.net.Proxy;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 public class VpnTunnelService extends VpnService {
 
@@ -45,9 +47,13 @@ public class VpnTunnelService extends VpnService {
     public static final String ACTION_CONNECT    = "com.vlessvpn.CONNECT";
     public static final String ACTION_DISCONNECT = "com.vlessvpn.DISCONNECT";
     public static final String EXTRA_SERVER      = "server";
-
-    // ← НОВОЕ: флаг авто-подключения
     public static final String EXTRA_AUTO_CONNECT = "auto_connect";
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВОЕ: Список слушателей подключения (для MainViewModel)
+    // ════════════════════════════════════════════════════════════════
+
+    private static final CopyOnWriteArrayList<Consumer<Boolean>> connectionListeners = new CopyOnWriteArrayList<>();
 
     private ExecutorService backgroundExecutor;
     private Handler mainHandler;
@@ -73,13 +79,8 @@ public class VpnTunnelService extends VpnService {
                     updateNotification("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), srv.host);
                 }
 
-                // ════════════════════════════════════════════════════════════════════════
-                // ← ИСПРАВЛЕНО: Отправляем трафик ОТДЕЛЬНО (не через StatusBus.post)
-                // ════════════════════════════════════════════════════════════════════════
                 String trafficMsg = "↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown);
-                StatusBus.post(trafficMsg, true);  // Только трафик
-
-                StatusBus.post("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), true);
+                StatusBus.post(trafficMsg, true);
                 statsHandler.postDelayed(this, 3_000);
             }
         }
@@ -98,6 +99,44 @@ public class VpnTunnelService extends VpnService {
     private volatile long activeConnectId = 0;
 
     private Handler checkHandler;
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВЫЕ МЕТОДЫ для MainViewModel
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Зарегистрировать слушателя изменения статуса подключения
+     * @param ctx контекст
+     * @param listener回调函数
+     */
+    public static void registerConnectionListener(android.content.Context ctx, Consumer<Boolean> listener) {
+        connectionListeners.add(listener);
+        // Сразу отправить текущий статус
+        listener.accept(isRunning);
+    }
+
+    /**
+     * Получить текущий подключенный сервер
+     * @return сервер или null
+     */
+    public static VlessServer getCurrentServer() {
+        return connectedServer;
+    }
+
+    /**
+     * Уведомить всех слушателей об изменении статуса
+     */
+    private static void notifyConnectionChanged(boolean connected) {
+        for (Consumer<Boolean> listener : connectionListeners) {
+            try {
+                listener.accept(connected);
+            } catch (Exception e) {
+                FileLogger.e(TAG, "Ошибка уведомления слушателя: " + e.getMessage());
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
 
     public static int getTunFd() {
         return 0;
@@ -138,7 +177,7 @@ public class VpnTunnelService extends VpnService {
 
         if (intent != null) {
             String json = intent.getStringExtra(EXTRA_SERVER);
-            isAutoConnect = intent.getBooleanExtra(EXTRA_AUTO_CONNECT, false);  // ← НОВОЕ
+            isAutoConnect = intent.getBooleanExtra(EXTRA_AUTO_CONNECT, false);
 
             if (json != null) {
                 try {
@@ -188,20 +227,16 @@ public class VpnTunnelService extends VpnService {
         synchronized (connectLock) {
             if (connectId != activeConnectId) return;
             if (isRunning || v2RayManager != null || hevTunnel != null) {
-                fullStop(); // Безопасная остановка старого ядра
+                fullStop();
             }
             if (connectId != activeConnectId) return;
         }
 
-        // СБРАСЫВАЕМ ФЛАГ ПЕРЕКЛЮЧЕНИЯ
         isSwitchingServer = false;
         currentServer = server;
 
-        // Полностью убираем Main Thread (CountDownLatch) и запускаем ВСЁ в фоне.
-        // Это спасет от NetworkOnMainThreadException и позволит нам безопасно "подождать" 4G сеть.
         v2rayThread = new Thread(() -> {
             try {
-                // 1. Создаем TUN с защитой от смены сети (умные ретраи)
                 vpnInterface = buildTunWithRetries(server);
 
                 if (vpnInterface == null) {
@@ -212,11 +247,7 @@ public class VpnTunnelService extends VpnService {
                 }
 
                 FileLogger.i(TAG, "TUN создан fd=" + vpnInterface.getFd());
-
-                // 2. Регистрируем коллбеки сети
                 registerNetworkCallback();
-
-                // 3. Запускаем Xray и HevTunnel
                 startV2RayAndHev(server);
 
             } catch (Exception e) {
@@ -232,12 +263,9 @@ public class VpnTunnelService extends VpnService {
         v2rayThread.start();
     }
 
-    // Новый метод, который ждет появления LTE/4G, если Wi-Fi только что отвалился
     private ParcelFileDescriptor buildTunWithRetries(VlessServer server) {
-        // Делаем 4 попытки с интервалом в 1 секунду
         for (int i = 1; i <= 4; i++) {
             try {
-                // Страховка: проверяем, не отозвала ли система права на VPN
                 if (VpnService.prepare(this) != null) {
                     FileLogger.e(TAG, "VPN не подготовлен (нет разрешения от системы)");
                     return null;
@@ -261,15 +289,14 @@ public class VpnTunnelService extends VpnService {
 
                 ParcelFileDescriptor pfd = builder.establish();
                 if (pfd != null) {
-                    return pfd; // Успех! Сеть поднялась, TUN создан.
+                    return pfd;
                 }
 
-                FileLogger.w(TAG, "establish() вернул null. Сеть еще не готова. Попытка " + i + " из 4...");
+                FileLogger.w(TAG, "establish() вернул null. Попытка " + i + " из 4...");
             } catch (Exception e) {
                 FileLogger.w(TAG, "Ошибка buildTun: " + e.getMessage() + ". Попытка " + i + " из 4...");
             }
 
-            // Засыпаем на 1 секунду. Даем Android время переключить маршруты с мертвого Wi-Fi на 4G
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
         }
         return null;
@@ -288,14 +315,10 @@ public class VpnTunnelService extends VpnService {
                     StatusBus.post("Подключено: " + s.host, true);
                     statsHandler.postDelayed(statsPoller, 3_000);
 
-                    // Сохраняем как последний рабочий сервер
                     ServerRepository repo = new ServerRepository(VpnTunnelService.this);
                     repo.saveLastWorkingServer(s);
                     FileLogger.i(TAG, "Сохранён последний рабочий сервер: " + s.host);
 
-                    // ════════════════════════════════════════════════════════════════════════
-                    // ОТПРАВЛЯЕМ BROADCAST ДЛЯ ОБНОВЛЕНИЯ UI (ДЛЯ АВТО-ПОДКЛЮЧЕНИЯ)
-                    // ════════════════════════════════════════════════════════════════════════
                     FileLogger.i(TAG, "═══════════════════════════════════════");
                     FileLogger.i(TAG, "ОТПРАВЛЯЕМ VPN_STATUS_CHANGED broadcast");
                     try {
@@ -308,9 +331,13 @@ public class VpnTunnelService extends VpnService {
                         FileLogger.e(TAG, "Ошибка отправки broadcast: " + e.getMessage());
                     }
                     FileLogger.i(TAG, "═══════════════════════════════════════");
-                    // ════════════════════════════════════════════════════════════════════════
 
-                    // Запуск проверки связи (каждую 1 минуту)
+                    // ════════════════════════════════════════════════════════════════
+                    // ← НОВОЕ: Уведомляем слушателей MainViewModel
+                    // ════════════════════════════════════════════════════════════════
+                    notifyConnectionChanged(true);
+                    // ════════════════════════════════════════════════════════════════
+
                     startPeriodicCheck();
                 });
             }
@@ -327,6 +354,12 @@ public class VpnTunnelService extends VpnService {
                     } catch (Exception e) {
                         FileLogger.e(TAG, "Ошибка отправки broadcast: " + e.getMessage());
                     }
+
+                    // ════════════════════════════════════════════════════════════════
+                    // ← НОВОЕ: Уведомляем слушателей MainViewModel
+                    // ════════════════════════════════════════════════════════════════
+                    notifyConnectionChanged(false);
+                    // ════════════════════════════════════════════════════════════════
                 });
             }
 
@@ -343,6 +376,12 @@ public class VpnTunnelService extends VpnService {
                     } catch (Exception e) {
                         FileLogger.e(TAG, "Ошибка отправки broadcast: " + e.getMessage());
                     }
+
+                    // ════════════════════════════════════════════════════════════════
+                    // ← НОВОЕ: Уведомляем слушателей MainViewModel
+                    // ════════════════════════════════════════════════════════════════
+                    notifyConnectionChanged(false);
+                    // ════════════════════════════════════════════════════════════════
 
                     if (!isSwitchingServer) {
                         stopSelf();
@@ -365,6 +404,10 @@ public class VpnTunnelService extends VpnService {
 
     // ── PERIODIC CHECK & AUTO-SWITCH ─────────────────────────────────────────
 
+    // ════════════════════════════════════════════════════════════════
+// БЫЛО (ошибка — doConnectivityCheck внутри Runnable):
+// ════════════════════════════════════════════════════════════════
+
     private final Runnable checkRunnable = new Runnable() {
         @Override
         public void run() {
@@ -372,42 +415,45 @@ public class VpnTunnelService extends VpnService {
                 return;
             }
 
-            backgroundExecutor.execute(this::doConnectivityCheck);
+            backgroundExecutor.execute(VpnTunnelService.this::doConnectivityCheck);  // ← ОШИБКА!
 
             if (checkHandler != null) {
                 checkHandler.postDelayed(this, 1 * 60 * 1000L);
             }
         }
 
-        private void doConnectivityCheck() {
-            FileLogger.i(TAG, "=== 1-min check: проверяем текущий сервер");
-            mainHandler.post(() -> StatusBus.post("Проверка соединения..."));
-
-            boolean ok = performShortConnectivityCheck();
-
-            if (!ok) {
-                FileLogger.w(TAG, "Сервер НЕ отвечает — инициируем переключение");
-
-                // ← НОВОЕ: Очищаем последний рабочий сервер
-                ServerRepository repo = new ServerRepository(VpnTunnelService.this);
-                repo.clearLastWorkingServer();
-
-                switchToNextServer();
-            } else {
-                FileLogger.d(TAG, "=== Сервер работает стабильно.");
-
-                // ← НОВОЕ: Обновляем последний рабочий сервер
-                if (currentServer != null) {
-                    ServerRepository repo = new ServerRepository(VpnTunnelService.this);
-                    repo.saveLastWorkingServer(currentServer);
-                }
-
-                if (currentServer != null) {
-                    mainHandler.post(() -> StatusBus.post("Подключено: " + currentServer.host, true));
-                }
-            }
+        private void doConnectivityCheck() {  // ← Метод внутри Runnable — НЕ виден снаружи!
+            // ...
         }
     };
+
+
+    private void doConnectivityCheck() {
+        FileLogger.i(TAG, "=== 1-min check: проверяем текущий сервер");
+        mainHandler.post(() -> StatusBus.post("Проверка соединения..."));
+
+        boolean ok = performShortConnectivityCheck();
+
+        if (!ok) {
+            FileLogger.w(TAG, "Сервер НЕ отвечает — инициируем переключение");
+
+            ServerRepository repo = new ServerRepository(VpnTunnelService.this);
+            repo.clearLastWorkingServer();
+
+            switchToNextServer();
+        } else {
+            FileLogger.d(TAG, "=== Сервер работает стабильно.");
+
+            if (currentServer != null) {
+                ServerRepository repo = new ServerRepository(VpnTunnelService.this);
+                repo.saveLastWorkingServer(currentServer);
+            }
+
+            if (currentServer != null) {
+                mainHandler.post(() -> StatusBus.post("Подключено: " + currentServer.host, true));
+            }
+        }
+    }
 
     private void startPeriodicCheck() {
         checkHandler.removeCallbacks(checkRunnable);

@@ -1,0 +1,5 @@
+<!-- res/drawable/bg_card_rounded.xml -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/bg_card"/>
+    <corners android:radius="12dp"/>
+</shape>

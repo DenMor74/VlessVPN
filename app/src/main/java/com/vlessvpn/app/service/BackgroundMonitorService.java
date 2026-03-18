@@ -131,6 +131,15 @@ public class BackgroundMonitorService extends Service {
         public Result doWork() {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
+            // ════════════════════════════════════════════════════════════════
+            // ← НОВОЕ: Проверка ночного времени
+            // ════════════════════════════════════════════════════════════════
+            if (repo.isNightTime()) {
+                FileLogger.i(W, "Ночное время — пропускаем скачивание");
+                StatusBus.post(ctx, "🌙 Ночной режим — скачивание отложено", false);
+                return Result.success();  // Не retry, просто пропускаем
+            }
+            // ════════════════════════════════════════════════════════════════
 
             StatusBus.post(ctx, "📥 Скачиваем новые списки...", true);
             FileLogger.i(W, "=== Скачиваем новые списки");
@@ -229,6 +238,15 @@ public class BackgroundMonitorService extends Service {
         public Result doWork() {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
+            // ════════════════════════════════════════════════════════════════
+            // ← НОВОЕ: Проверка ночного времени
+            // ════════════════════════════════════════════════════════════════
+            if (repo.isNightTime()) {
+                FileLogger.i(W, "Ночное время — пропускаем сканирование");
+                StatusBus.post(ctx, "🌙 Ночной режим — сканирование отложено", false);
+                return Result.success();  // Не retry, просто пропускаем
+            }
+            // ════════════════════════════════════════════════════════════════
 
             // ════════════════════════════════════════════════════════════════
             // WakeLock чтобы CPU не спал во время сканирования
@@ -282,7 +300,15 @@ public class BackgroundMonitorService extends Service {
                                 server.lastTestedAt = System.currentTimeMillis();
                                 repo.updateServerSync(server);
                                 StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
+                                StatusBus.postServer(
+                                        ctx, server.id, server.host, "fail", tcp.pingMs, false,
+                                        "✗ TCP " + tcp.pingMs + "ms"  // ← TCP пинг в detail
+                                );
                             } else {
+                                StatusBus.postServer(
+                                        ctx, server.id, server.host, "testing", tcp.pingMs, false,
+                                        "TCP " + tcp.pingMs + "ms → VLESS..."  // ← TCP пинг в detail
+                                );
                                 StatusBus.postServer(ctx, server.id, server.host, "testing", tcp.pingMs, false, "TCP " + tcp.pingMs + "ms → VLESS...");
 
                                 int testPort = (portCounter.getAndIncrement() % 100) + 10900;
@@ -290,6 +316,10 @@ public class BackgroundMonitorService extends Service {
                                 long vlessDelay = V2RayManager.measureDelay(ctx, testCfg);
 
                                 if (vlessDelay > 0) {
+                                    StatusBus.postServer(
+                                            ctx, server.id, server.host, "ok", vlessDelay, true,
+                                            "✓ VLESS " + vlessDelay + "ms"
+                                    );
                                     server.pingMs = vlessDelay;
                                     server.trafficOk = true;
                                     server.lastTestedAt = System.currentTimeMillis();
@@ -297,6 +327,10 @@ public class BackgroundMonitorService extends Service {
                                     ok.incrementAndGet();
                                     StatusBus.postServer(ctx, server.id, server.host, "ok", vlessDelay, true, "✓ VLESS " + vlessDelay + "ms");
                                 } else {
+                                    StatusBus.postServer(
+                                            ctx, server.id, server.host, "fail", tcp.pingMs, false,
+                                            "✗ VLESS (TCP " + tcp.pingMs + "ms)"  // ← TCP пинг в detail
+                                    );
                                     server.trafficOk = false;
                                     server.pingMs = tcp.pingMs;
                                     server.lastTestedAt = System.currentTimeMillis();

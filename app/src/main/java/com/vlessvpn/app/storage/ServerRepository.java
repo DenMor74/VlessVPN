@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,6 +47,10 @@ public class ServerRepository {
 
     public static final String PREF_SCAN_INTERVAL = "scan_interval_minutes";  // ← НОВОЕ
     public static final int DEFAULT_SCAN_INTERVAL = 30;  // 30 минут по умолчанию
+
+    public static final String PREF_DISABLE_NIGHT_CHECK = "disable_night_check";
+    public static final String PREF_NIGHT_START_HOUR = "night_start_hour";
+    public static final String PREF_NIGHT_END_HOUR = "night_end_hour";
 
     /**
      * Получить интервал сканирования текущего списка (минуты)
@@ -266,7 +271,7 @@ public class ServerRepository {
         if (server != null) {
             String json = new Gson().toJson(server);
             prefs.edit().putString(PREF_LAST_WORKING_SERVER, json).apply();
-            FileLogger.i("ServerRepository", "Сохранён последний рабочий сервер: " + server.host);
+            //FileLogger.i("ServerRepository", "Сохранён последний рабочий сервер: " + server.host);
         }
     }
 
@@ -275,7 +280,7 @@ public class ServerRepository {
      */
     public void clearLastWorkingServer() {
         prefs.edit().remove(PREF_LAST_WORKING_SERVER).apply();
-        FileLogger.d("ServerRepository", "Очищен последний рабочий сервер");
+        //FileLogger.d("ServerRepository", "Очищен последний рабочий сервер");
     }
 
     /**
@@ -430,4 +435,55 @@ public class ServerRepository {
         return prefs.getLong("last_scan_timestamp", 0);
     }
 
+    /**
+     * Проверить: отключены ли проверки ночью
+     */
+    public boolean isDisableNightCheck() {
+        return prefs.getBoolean(PREF_DISABLE_NIGHT_CHECK, false);
+    }
+
+    /**
+     * Сохранить настройку отключения ночных проверок
+     */
+    public void saveDisableNightCheck(boolean disabled) {
+        prefs.edit().putBoolean(PREF_DISABLE_NIGHT_CHECK, disabled).apply();
+        FileLogger.i("ServerRepository", "Ночные проверки: " + (disabled ? "ОТКЛ" : "ВКЛ"));
+    }
+
+    /**
+     * Получить час начала ночного режима (по умолчанию 24)
+     */
+    public int getNightStartHour() {
+        return prefs.getInt(PREF_NIGHT_START_HOUR, 24);
+    }
+
+    /**
+     * Получить час окончания ночного режима (по умолчанию 6)
+     */
+    public int getNightEndHour() {
+        return prefs.getInt(PREF_NIGHT_END_HOUR, 6);
+    }
+
+    /**
+     * Проверить: сейчас ночное время?
+     * @return true если сейчас ночь (24:00-6:00)
+     */
+    public boolean isNightTime() {
+        if (!isDisableNightCheck()) {
+            return false;  // Ночной режим отключен
+        }
+
+        int startHour = getNightStartHour();  // 24
+        int endHour = getNightEndHour();      // 6
+
+        Calendar cal = Calendar.getInstance();
+        int currentHour = cal.get(Calendar.HOUR_OF_DAY);
+
+        // Ночь с 24:00 до 6:00
+        if (startHour == 24 && endHour == 6) {
+            return currentHour >= 0 && currentHour < endHour;
+        }
+
+        return false;
+    }
 }

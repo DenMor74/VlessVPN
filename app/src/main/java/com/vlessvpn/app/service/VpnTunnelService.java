@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -24,6 +25,7 @@ import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.network.ServerTester;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.ui.MainActivity;
+import com.vlessvpn.app.util.AppBlacklistManager;
 import com.vlessvpn.app.util.FileLogger;
 import com.vlessvpn.app.util.StatusBus;
 
@@ -34,6 +36,7 @@ import java.net.Proxy;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -143,7 +146,7 @@ public class VpnTunnelService extends VpnService {
         super.onCreate();
         instance = this;
         connectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-        FileLogger.i(TAG, "=== onCreate ===");
+        //FileLogger.i(TAG, "=== onCreate ===");
         createNotificationChannel();
         V2RayManager.initEnvOnce(this);
 
@@ -155,7 +158,7 @@ public class VpnTunnelService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
-        FileLogger.i(TAG, "onStartCommand: " + action);
+        //FileLogger.i(TAG, "onStartCommand: " + action);
 
         if (ACTION_DISCONNECT.equals(action)) {
             disconnect();
@@ -212,7 +215,7 @@ public class VpnTunnelService extends VpnService {
     // ── CONNECT / DISCONNECT ─────────────────────────────────────────────────
 
     private void connect(VlessServer server, long connectId) {
-        FileLogger.i(TAG, "connect() id=" + connectId + " server=" + server.host);
+        //FileLogger.i(TAG, "connect() id=" + connectId + " server=" + server.host);
 
         synchronized (connectLock) {
             if (connectId != activeConnectId) return;
@@ -273,6 +276,8 @@ public class VpnTunnelService extends VpnService {
                 try { builder.addDisallowedApplication(getPackageName()); }
                 catch (Exception ignored) {}
 
+                applyAppBlacklist(builder); // ← НОВОЕ: Применить чёрный список приложений
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     builder.setMetered(false);
                 }
@@ -290,6 +295,35 @@ public class VpnTunnelService extends VpnService {
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
         }
         return null;
+    }
+
+    private void applyAppBlacklist(Builder builder) {
+        AppBlacklistManager blm = new AppBlacklistManager(this);
+        Set<String> blacklist = blm.getBlacklist();
+
+        if (blacklist.isEmpty()) {
+            FileLogger.d(TAG, "Чёрный список пуст — все приложения через VPN");
+            return;
+        }
+
+        int added = 0;
+        int failed = 0;
+
+        for (String packageName : blacklist) {
+            try {
+                builder.addDisallowedApplication(packageName);
+                added++;
+                //FileLogger.d(TAG, "Добавлено в исключения: " + packageName);
+            } catch (PackageManager.NameNotFoundException e) {
+                failed++;
+                FileLogger.w(TAG, "Приложение не найдено: " + packageName);
+            } catch (Exception e) {
+                failed++;
+                FileLogger.w(TAG, "Ошибка добавления: " + packageName + " — " + e.getMessage());
+            }
+        }
+
+        //FileLogger.i(TAG, "Чёрный список применён: " + added + " приложений (ошибок: " + failed + ")");
     }
 
     private void startV2RayAndHev(VlessServer server) throws Exception {
@@ -366,7 +400,7 @@ public class VpnTunnelService extends VpnService {
 
                     StatusBus.done(error);
 
-                    FileLogger.i(TAG, "ОТПРАВЛЯЕМ VPN_STATUS_CHANGED broadcast (ошибка)");
+                    //FileLogger.i(TAG, "ОТПРАВЛЯЕМ VPN_STATUS_CHANGED broadcast (ошибка)");
                     try {
                         Intent broadcast = new Intent("com.vlessvpn.VPN_STATUS_CHANGED");
                         broadcast.putExtra("connected", false);

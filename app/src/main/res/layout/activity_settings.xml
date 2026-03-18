@@ -194,7 +194,91 @@
             android:textSize="10sp"
             android:textColor="#888888"
             android:paddingHorizontal="12dp"
-            android:layout_marginBottom="24dp"/>
+            android:layout_marginBottom="8dp"/>
+
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <!-- Ночной режим (добавить перед кнопкой "Сохранить") -->
+        <!-- ════════════════════════════════════════════════════════════════ -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:background="@color/bg_card"
+            android:layout_marginTop="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🌙 Ночной режим"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <Switch
+                android:id="@+id/switch_disable_night_check"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Не проверять ночью (24:00-6:00)"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp"/>
+
+            <TextView
+                android:id="@+id/tv_night_check_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="⚠️ Скачивание и сканирование будет отложено до 6:00 утра"
+                android:textSize="12sp"
+                android:textColor="#FF9800"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"/>
+
+        </LinearLayout>
+
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <!-- Чёрный список приложений -->
+        <!-- ════════════════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="12dp"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🚫 Приложения в обход VPN"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/tv_blacklist_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Выбрано приложений: 0"
+                android:textSize="14sp"
+                android:textColor="#666666"
+                android:layout_marginTop="4dp"/>
+
+            <Button
+                android:id="@+id/btn_app_blacklist"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="Выбрать приложения"
+                android:background="@drawable/bg_circle_button"
+                android:layout_marginTop="4dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Трафик этих приложений будет идти напрямую, минуя VPN"
+                android:textSize="10sp"
+                android:textColor="#999999"
+                android:layout_marginBottom="18dp"/>
+
+        </LinearLayout>
 
         <!-- ===== Кнопки ===== -->
 
@@ -205,6 +289,7 @@
             android:text="Сохранить"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
+            android:layout_marginHorizontal="10dp"
             android:background="@drawable/bg_circle_button"/>
     </LinearLayout>
 </ScrollView>

@@ -93,11 +93,11 @@ public class AutoConnectManager {
 
         if (serverList == null || currentServerIndex >= serverList.size()) {
             FileLogger.w(TAG, "═══════════════════════════════════════");
-            FileLogger.w(TAG, "Список серверов исчерпан. Повтор через 5 минут...");
+            FileLogger.w(TAG, "Список серверов исчерпан. Повтор через 1 минут...");
             FileLogger.w(TAG, "═══════════════════════════════════════");
 
             mainHandler.post(() ->
-                    com.vlessvpn.app.util.StatusBus.post("⚠️ Нет рабочих серверов. Повтор через 5 мин..."));
+                    com.vlessvpn.app.util.StatusBus.post("⚠️ Нет рабочих серверов. Повтор через 1 мин..."));
 
             mainHandler.postDelayed(() -> {
                 if (!shouldCancelConnection) {
@@ -105,7 +105,7 @@ public class AutoConnectManager {
                     isFailoverInProgress = false;
                     startAutoConnect(context);
                 }
-            }, 5 * 60 * 1000L);
+            }, 1 * 60 * 1000L);
             return;
         }
 

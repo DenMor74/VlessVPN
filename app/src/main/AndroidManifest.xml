@@ -32,6 +32,19 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <queries>
+        <!-- Все приложения -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+
+        <!-- Приложения с лаунчером -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".VpnApplication"
         android:allowBackup="true"
@@ -58,6 +71,12 @@
             android:name=".ui.SettingsActivity"
             android:exported="false"
             android:parentActivityName=".ui.MainActivity"/>
+
+        <activity
+            android:name=".ui.AppBlacklistActivity"
+            android:label="Приложения вне VPN"
+            android:parentActivityName=".ui.SettingsActivity"
+            android:exported="false"/>
 
         <!-- VPN Сервис — сердце приложения -->
         <service

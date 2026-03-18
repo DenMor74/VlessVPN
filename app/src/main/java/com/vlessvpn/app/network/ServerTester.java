@@ -153,11 +153,11 @@ public class ServerTester {
 
             int code = conn.getResponseCode();
             boolean ok = (code >= 200 && code < 400);
-            FileLogger.i(TAG, "trafficTest → HTTP " + code + " ok=" + ok);
+           // FileLogger.i(TAG, "trafficTest → HTTP " + code + " ok=" + ok);
             conn.disconnect();
             return ok;
         } catch (Exception e) {
-            FileLogger.d(TAG, "trafficTest FAIL: " + e.getMessage());
+           // FileLogger.d(TAG, "trafficTest FAIL: " + e.getMessage());
             return false;
         }
     }

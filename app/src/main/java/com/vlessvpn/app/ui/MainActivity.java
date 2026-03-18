@@ -344,6 +344,10 @@ public class MainActivity extends AppCompatActivity {
                 mainHandler.postDelayed(() -> swipeRefresh.setRefreshing(false), 3000);
             }
         });
+        // ════════════════════════════════════════════════════════════════
+        // ← ОТКЛЮЧИТЬ свайп вниз:
+        // ════════════════════════════════════════════════════════════════
+        swipeRefresh.setEnabled(false);
     }
 
     private void setupRecyclerView() {
@@ -523,7 +527,7 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
             BackgroundMonitorService.runScanNow(this);
-            Toast.makeText(this, "🔍 Сканирование текущего списка...", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "🔍 Проверка текущего списка...", Toast.LENGTH_SHORT).show();
             return true;
         }
 
@@ -532,7 +536,7 @@ public class MainActivity extends AppCompatActivity {
             return true;
         } else if (id == R.id.action_refresh) {
             viewModel.forceRefreshServers();
-            Toast.makeText(this, "Обновление серверов...", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Скачивание и проверка серверов...", Toast.LENGTH_SHORT).show();
             return true;
         } else if (id == R.id.action_share_log) {
             FileLogger.shareLog(this);

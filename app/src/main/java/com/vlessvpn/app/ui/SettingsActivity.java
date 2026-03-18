@@ -1,6 +1,8 @@
 package com.vlessvpn.app.ui;
 
+import android.content.Intent;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.SeekBar;
@@ -13,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.vlessvpn.app.R;
 import com.vlessvpn.app.service.BackgroundMonitorService;
 import com.vlessvpn.app.storage.ServerRepository;
+import com.vlessvpn.app.util.AppBlacklistManager;
 
 public class SettingsActivity extends AppCompatActivity {
 
@@ -25,6 +28,9 @@ public class SettingsActivity extends AppCompatActivity {
     private Switch    switchScanOnStart;
     private Switch    switchForceMobile;
     private Switch    switchAutoConnectWifi;
+
+    private Switch switchDisableNightCheck;
+    private TextView tvNightCheckInfo;
 
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ: Для интервала сканирования
@@ -45,6 +51,22 @@ public class SettingsActivity extends AppCompatActivity {
         repository = new ServerRepository(this);
         initViews();
         loadCurrentSettings();
+    }
+
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        // ... остальной код ...
+
+        // ← НОВОЕ: Обновить счётчик чёрного списка
+        TextView tvBlacklistCount = findViewById(R.id.tv_blacklist_count);
+        if (tvBlacklistCount != null) {
+            AppBlacklistManager blm = new AppBlacklistManager(this);
+            int count = blm.getBlacklistCount();
+            tvBlacklistCount.setText("Выбрано приложений: " + count);
+        }
     }
 
     private void initViews() {
@@ -95,6 +117,27 @@ public class SettingsActivity extends AppCompatActivity {
         Button btnSave = findViewById(R.id.btn_save);
         btnSave.setOnClickListener(v -> saveSettings());
 
+        Button btnAppBlacklist = findViewById(R.id.btn_app_blacklist);
+        TextView tvBlacklistCount = findViewById(R.id.tv_blacklist_count);
+
+        // Показать количество приложений в чёрном списке
+        AppBlacklistManager blm = new AppBlacklistManager(this);
+        int count = blm.getBlacklistCount();
+        tvBlacklistCount.setText("Выбрано приложений: " + count);
+
+        btnAppBlacklist.setOnClickListener(v -> {
+            Intent intent = new Intent(SettingsActivity.this, AppBlacklistActivity.class);
+            startActivity(intent);
+        });
+
+        // ← НОВОЕ: Переключатель ночного режима
+        switchDisableNightCheck = findViewById(R.id.switch_disable_night_check);
+        tvNightCheckInfo = findViewById(R.id.tv_night_check_info);
+
+        switchDisableNightCheck.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            tvNightCheckInfo.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+        });
+
     }
 
     private void loadCurrentSettings() {
@@ -129,6 +172,9 @@ public class SettingsActivity extends AppCompatActivity {
             seekScanInterval.setProgress((scanMinutes / 10) - 1);
             tvScanIntervalValue.setText("Проверять лист: каждые " + formatInterval(scanMinutes));
         }
+        // ← НОВОЕ: Ночной режим
+        switchDisableNightCheck.setChecked(repository.isDisableNightCheck());
+        tvNightCheckInfo.setVisibility(repository.isDisableNightCheck() ? View.VISIBLE : View.GONE);
     }
 
     private void saveSettings() {
@@ -162,6 +208,8 @@ public class SettingsActivity extends AppCompatActivity {
             newScanInterval = (seekScanInterval.getProgress() + 1) * 10;
             repository.saveScanIntervalMinutes(newScanInterval);
         }
+        // ← НОВОЕ: Сохранить ночной режим
+        repository.saveDisableNightCheck(switchDisableNightCheck.isChecked());
 
         // ════════════════════════════════════════════════════════════════
         // ← ИСПРАВЛЕНО: Перепланируем ОБА задания (раздельно)

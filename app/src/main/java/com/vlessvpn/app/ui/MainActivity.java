@@ -25,6 +25,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.view.menu.MenuBuilder;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -138,13 +139,21 @@ public class MainActivity extends AppCompatActivity {
 
                 if (message != null && !message.isEmpty()) {
                     mainHandler.post(() -> {
-                        tvProgressTitle.setText(message);
-                        tvLastStatus.setText(message);  // ← Прогресс/итог здесь
+                        // ════════════════════════════════════════════════════════════════
+                        // ← НОВОЕ: Разделяем трафик и прогресс
+                        // ════════════════════════════════════════════════════════════════
+                        if (message.contains("↑") || message.contains("↓")) {
+                            // Это трафик → tvTraffic
+                            tvTraffic.setText(message);
+                            tvTraffic.setVisibility(View.VISIBLE);
+                        } else {
+                            // Это прогресс/итог → tvLastStatus и tvProgressTitle
+                            tvProgressTitle.setText(message);
+                            tvLastStatus.setText(message);
+                        }
                     });
                 }
                 mainHandler.post(() -> {
-                    // ← ВАЖНО: НЕ скрываем панель после завершения!
-                    // Только останавливаем спиннер
                     progressSpinner.setVisibility(isRunning ? View.VISIBLE : View.GONE);
                     progressBar.setProgress(progress);
 
@@ -227,7 +236,7 @@ public class MainActivity extends AppCompatActivity {
         statusFilter.addAction(StatusBus.ACTION_SERVER_EVENT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statusReceiver, statusFilter, Context.RECEIVER_EXPORTED);
-            FileLogger.i(TAG, "StatusBus Receiver: EXPORTED");
+           // FileLogger.i(TAG, "StatusBus Receiver: EXPORTED");
         } else {
             registerReceiver(statusReceiver, statusFilter);
             //FileLogger.i(TAG, "StatusBus Receiver: зарегистрирован");
@@ -294,7 +303,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-            FileLogger.i(TAG, "Sheet info: " + sheetInfo);
+            //FileLogger.i(TAG, "Sheet info: " + sheetInfo);
         }).start();
     }
 
@@ -406,15 +415,17 @@ public class MainActivity extends AppCompatActivity {
 
         ServerRepository repo = new ServerRepository(this);
         boolean autoConnectEnabled = repo.isAutoConnectOnWifiDisconnect();
-
+        //SwitchCompat autoSwitch = findViewById(R.id.tv_auto_connect_status);
         if (autoConnectEnabled) {
+            //autoSwitch.setChecked(true); // или false
             tvAutoConnectStatus.setText("🟢 Авто-режим: ВКЛ");
-            tvAutoConnectStatus.setBackgroundColor(Color.parseColor("#E8F5E9"));
-            tvAutoConnectStatus.setTextColor(Color.parseColor("#2E7D32"));
+            //tvAutoConnectStatus.setBackgroundColor(Color.parseColor("#E8F5E9"));
+            //tvAutoConnectStatus.setTextColor(Color.parseColor("#2E7D32"));
             tvAutoConnectStatus.setVisibility(View.VISIBLE);
         } else {
-            tvAutoConnectStatus.setText("🔴 Авто-режим: ВЫКЛ");
-            tvAutoConnectStatus.setBackgroundColor(Color.parseColor("#FFF3E0"));
+            //autoSwitch.setChecked(false); // или false
+            //tvAutoConnectStatus.setText("🔴 Авто-режим: ВЫКЛ");
+            //tvAutoConnectStatus.setBackgroundColor(Color.parseColor("#FFF3E0"));
             tvAutoConnectStatus.setTextColor(Color.parseColor("#E65100"));
             tvAutoConnectStatus.setVisibility(View.VISIBLE);
         }
@@ -498,13 +509,13 @@ public class MainActivity extends AppCompatActivity {
         }
         int id = item.getItemId();
 
-        if (id == R.id.action_download) {
+/*        if (id == R.id.action_download) {
             ServerRepository repo = new ServerRepository(this);
             repo.resetUpdateTime();
             BackgroundMonitorService.runDownloadNow(this);
             Toast.makeText(this, "📥 Скачивание новых списков...", Toast.LENGTH_SHORT).show();
             return true;
-        }
+        }*/
 
         if (id == R.id.action_scan) {
             if (VpnTunnelService.isRunning) {

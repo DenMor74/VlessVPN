@@ -2,25 +2,18 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- Скачать -->
-    <item
-        android:id="@+id/action_download"
-        android:title="Скачать"
-        android:icon="@drawable/download"
-        app:showAsAction="always" />
-
-    <!-- Проверка -->
+    <!-- Проверка текущего листа -->
     <item
         android:id="@+id/action_scan"
         android:title="Проверить"
-        android:icon="@drawable/check"
+        android:icon="@drawable/refresh"
         app:showAsAction="always" />
 
-    <!-- Обновить -->
+    <!-- Скачать и проверить -->
     <item
         android:id="@+id/action_refresh"
         android:title="Обновить"
-        android:icon="@drawable/refresh"
+        android:icon="@drawable/download"
         app:showAsAction="always" />
 
     <!-- ✅ Настройки теперь на панели -->

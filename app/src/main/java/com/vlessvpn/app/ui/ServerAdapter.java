@@ -132,7 +132,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
             h.tvPing.setTextColor(0xFF556677);
         }
 
-        if (detail != null && !detail.isEmpty()) {
+/*        if (detail != null && !detail.isEmpty()) {
             h.tvStatus.setText(detail);
             h.tvStatus.setVisibility(View.VISIBLE);
         } else if (status == TestStatus.TESTING) {
@@ -149,7 +149,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
             h.tvStatus.setVisibility(View.VISIBLE);
         } else {
             h.tvStatus.setVisibility(View.GONE);
-        }
+        }*/
 
         if (s.trafficOk || status == TestStatus.OK) {
             h.btnConnect.setVisibility(View.VISIBLE);

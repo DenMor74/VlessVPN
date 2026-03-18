@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
+import com.vlessvpn.app.service.VpnTunnelService;
 public class ServerRepository {
 
     private final ServerDao dao;
@@ -339,11 +339,35 @@ public class ServerRepository {
         return (HttpURLConnection) url.openConnection();
     }
 
+// ════════════════════════════════════════════════════════════════
+// В ServerRepository.java → openConnectionForSubscription()
+// ════════════════════════════════════════════════════════════════
+
     /**
-     * Скачивание подписок: приоритет WiFi → fallback через VPN-туннель (LTE)
+     * Скачивание подписок: приоритет WiFi → VPN-туннель (SOCKS5) → LTE
      */
     public static HttpURLConnection openConnectionForSubscription(Context context, URL url) throws IOException {
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Если VPN активен → используем SOCKS5 прокси
+        // ════════════════════════════════════════════════════════════════
+        if (VpnTunnelService.isRunning) {
+            FileLogger.d("ServerRepository", "VPN активен → скачиваем через SOCKS5 прокси");
+
+            // Создаём прокси для подключения через v2ray (порт 10808)
+            java.net.Proxy proxy = new java.net.Proxy(
+                    java.net.Proxy.Type.SOCKS,
+                    new java.net.InetSocketAddress("127.0.0.1", 10808)
+            );
+
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection(proxy);
+            conn.setConnectTimeout(15000);  // ← Увеличенный таймаут для VPN
+            conn.setReadTimeout(30000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 VlessVPN/1.0");
+
+            return conn;
+        }
 
         // 1. Ищем WiFi с реальным интернетом
         for (Network net : cm.getAllNetworks()) {
@@ -358,8 +382,8 @@ public class ServerRepository {
             }
         }
 
-        // 2. Нет рабочего WiFi → обычное соединение (автоматически через туннель, если VPN подключён)
-        FileLogger.d("ServerRepository", "WiFi недоступен → скачиваем через туннель (LTE)");
+        // 2. Нет рабочего WiFi → обычное соединение (через LTE)
+        FileLogger.d("ServerRepository", "WiFi недоступен → скачиваем через LTE");
         return (HttpURLConnection) url.openConnection();
     }
 

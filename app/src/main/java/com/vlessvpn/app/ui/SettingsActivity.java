@@ -69,7 +69,7 @@ public class SettingsActivity extends AppCompatActivity {
                 @Override
                 public void onProgressChanged(SeekBar s, int p, boolean u) {
                     int minutes = (p + 1) * 10;  // 10, 20, 30... 1440
-                    tvScanIntervalValue.setText("Каждые " + formatInterval(minutes));
+                    tvScanIntervalValue.setText("Проверять лист: каждые " + formatInterval(minutes));
                 }
             });
         }
@@ -79,7 +79,7 @@ public class SettingsActivity extends AppCompatActivity {
         seekInterval.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
                 int h = p + 1;
-                tvIntervalValue.setText("Каждые " + h + " " + hoursLabel(h));
+                tvIntervalValue.setText("Скачивать листы: каждые " + h + " " + hoursLabel(h));
             }
         });
 
@@ -93,16 +93,8 @@ public class SettingsActivity extends AppCompatActivity {
         });
 
         Button btnSave = findViewById(R.id.btn_save);
-        Button btnRefreshNow = findViewById(R.id.btn_refresh_now);
-
         btnSave.setOnClickListener(v -> saveSettings());
 
-        btnRefreshNow.setOnClickListener(v -> {
-            repository.resetUpdateTime();
-            repository.resetAllTestTimes();
-            BackgroundMonitorService.runDownloadNow(this);
-            Toast.makeText(this, "Обновление запущено...", Toast.LENGTH_SHORT).show();
-        });
     }
 
     private void loadCurrentSettings() {
@@ -113,12 +105,12 @@ public class SettingsActivity extends AppCompatActivity {
         // Интервал обновления
         int hours = repository.getUpdateIntervalHours();
         seekInterval.setProgress(hours - 1);
-        tvIntervalValue.setText("Каждые " + hours + " " + hoursLabel(hours));
+        tvIntervalValue.setText("Скачивать листы: каждые " + hours + " " + hoursLabel(hours));
 
         // Количество серверов в топе
         int topCount = repository.getTopCount();
         seekTopCount.setProgress(topCount - 1);
-        tvTopCountValue.setText("Топ серверов: " + topCount);
+        tvTopCountValue.setText("Выводить на экран серверов: " + topCount);
 
         // Сканировать при запуске
         switchScanOnStart.setChecked(repository.isScanOnStart());
@@ -135,7 +127,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (seekScanInterval != null && tvScanIntervalValue != null) {
             int scanMinutes = repository.getScanIntervalMinutes();
             seekScanInterval.setProgress((scanMinutes / 10) - 1);
-            tvScanIntervalValue.setText("Каждые " + formatInterval(scanMinutes));
+            tvScanIntervalValue.setText("Проверять лист: каждые " + formatInterval(scanMinutes));
         }
     }
 
@@ -207,4 +199,6 @@ public class SettingsActivity extends AppCompatActivity {
         @Override public void onStartTrackingTouch(SeekBar s) {}
         @Override public void onStopTrackingTouch(SeekBar s) {}
     }
+
+
 }

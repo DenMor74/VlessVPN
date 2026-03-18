@@ -42,7 +42,7 @@ public class HevTunnel {
         try {
             String configPath = writeConfig();
             int fd = vpnInterface.getFd();
-            FileLogger.i(TAG, "TProxyStartService configPath=" + configPath + " fd=" + fd);
+            //FileLogger.i(TAG, "TProxyStartService configPath=" + configPath + " fd=" + fd);
             // Вызываем через stub — JNI ищет методы в com.v2ray.ang.service.TProxyService
             com.v2ray.ang.service.TProxyService.TProxyStartService(configPath, fd);
             running = true;
@@ -98,7 +98,7 @@ public class HevTunnel {
             writer.write(sb.toString());
         }
 
-        FileLogger.d(TAG, "hev config:\n" + sb);
+        //FileLogger.d(TAG, "hev config:\n" + sb);
         return configFile.getAbsolutePath();
     }
 }

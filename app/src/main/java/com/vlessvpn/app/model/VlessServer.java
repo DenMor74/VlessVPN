@@ -9,14 +9,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.vlessvpn.app.util.FileLogger;
+
 /**
- * VlessServer — модель одного VLESS сервера.
+ * VlessServer — модель одного сервера (VLESS/VMess/Trojan).
  *
  * @Entity — говорит Room, что это таблица в базе данных.
- * Каждое поле класса = колонка в таблице.
- *
- * Пример VLESS URI который мы парсим:
- * vless://UUID@host:port?security=reality&sni=example.com&pbk=KEY#Название
  */
 @Entity(tableName = "servers")
 public class VlessServer {
@@ -25,78 +23,106 @@ public class VlessServer {
 
     @PrimaryKey
     @NonNull
-    public String id = "";          // UUID сервера — уникальный ключ
+    public String id = "";
 
-    public String host = "";        // IP-адрес или домен сервера
-    public int port = 443;          // Порт (обычно 443)
-    public String uuid = "";        // UUID для аутентификации
+    public String host = "";
+    public int port = 443;
+    public String uuid = "";
 
     // Параметры соединения
-    public String security = "none";   // "reality", "tls", "none"
-    public String networkType = "tcp"; // "tcp", "xhttp", "ws", "grpc"
-    public String sni = "";            // Server Name Indication (для TLS/Reality)
-    public String pbk = "";            // Public Key (только для Reality)
-    public String fp = "chrome";       // Fingerprint браузера (маскировка)
-    public String flow = "";           // Дополнительный поток: "xtls-rprx-vision"
-    public String path = "/";          // HTTP path (для xhttp/ws)
-    public String sid = "";            // Short ID (для Reality)
-    public String host2 = "";          // HTTP host header
-    public String remark = "";         // Отображаемое название сервера
+    public String security = "none";
+    public String networkType = "tcp";
+    public String sni = "";
+    public String pbk = "";
+    public String fp = "chrome";
+    public String flow = "";
+    public String path = "/";
+    public String sid = "";
+    public String host2 = "";
+    public String remark = "";
 
-    public String rawUri = "";         // Оригинальная строка vless://...
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВЫЕ ПОЛЯ для поддержки xhttp и других транспортов
+    // ════════════════════════════════════════════════════════════════
+    public String mode = "";           // xhttp mode: stream-one, packet-up, auto
+    public String extra = "";          // xhttp extra config
+    public String spx = "";            // Reality spacer
+    public String alpn = "";           // ALPN protocol
+    public String protocol = "vless";  // "vless", "vmess", "trojan"
+    // ════════════════════════════════════════════════════════════════
+
+    public String rawUri = "";
 
     // ========== РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ==========
 
-    public long pingMs = -1;           // Пинг в миллисекундах (-1 = не тестирован)
-    public boolean trafficOk = false;  // Прошёл ли тест трафика
-    public long lastTestedAt = 0;      // Когда последний раз тестировали (Unix timestamp)
-    public String sourceUrl = "";      // С какого URL был скачан этот сервер
+    public long pingMs = -1;
+    public boolean trafficOk = false;
+    public long lastTestedAt = 0;
+    public String sourceUrl = "";
 
     // ========== СТАТИЧЕСКИЙ ПАРСЕР ==========
 
     /**
-     * Парсит строку VLESS URI в объект VlessServer.
-     *
-     * @param uri Строка вида vless://UUID@host:port?params#remark
-     * @return Объект VlessServer или null если строка невалидна
+     * Парсит строку VLESS/VMess/Trojan URI в объект VlessServer.
      */
     public static VlessServer parse(String uri) {
-        // Проверяем что строка начинается с vless://
-        if (uri == null || !uri.startsWith("vless://")) {
+        if (uri == null || uri.trim().isEmpty()) {
+            return null;
+        }
+
+        uri = uri.trim();
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Поддержка VMess
+        // ════════════════════════════════════════════════════════════════
+        if (uri.startsWith("vmess://")) {
+            return parseVmess(uri);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Поддержка Trojan
+        // ════════════════════════════════════════════════════════════════
+        if (uri.startsWith("trojan://")) {
+            return parseTrojan(uri);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← Hysteria2 — НЕ поддерживается Xray
+        // ════════════════════════════════════════════════════════════════
+        if (uri.startsWith("hysteria2://") || uri.startsWith("hysteria://")) {
+            FileLogger.w("VlessServer", "Hysteria2 не поддерживается: " + uri.substring(0, Math.min(50, uri.length())));
+            return null;
+        }
+
+        // VLESS
+        if (!uri.startsWith("vless://")) {
             return null;
         }
 
         VlessServer s = new VlessServer();
-        s.rawUri = uri.trim();
+        s.protocol = "vless";
+        s.rawUri = uri;
 
         try {
-            // Убираем схему "vless://"
             String body = uri.substring("vless://".length());
 
-            // ---- Шаг 1: Извлекаем REMARK (текст после символа #) ----
+            // REMARK
             int hashIdx = body.lastIndexOf('#');
             if (hashIdx > 0) {
-                // Декодируем URL-encoded текст: %F0%9F%87%AB → 🇫🇮
-                s.remark = URLDecoder.decode(
-                    body.substring(hashIdx + 1),
-                    StandardCharsets.UTF_8.name()
-                );
+                s.remark = URLDecoder.decode(body.substring(hashIdx + 1), StandardCharsets.UTF_8.name());
                 body = body.substring(0, hashIdx);
             }
 
-            // ---- Шаг 2: Извлекаем UUID (текст до символа @) ----
+            // UUID
             int atIdx = body.indexOf('@');
-            if (atIdx < 0) return null; // невалидный URI
+            if (atIdx < 0) return null;
             s.uuid = body.substring(0, atIdx);
-            // id = uuid+host+port — уникален даже если у серверов одинаковый UUID
-            // (UUID одного провайдера на разных серверах)
             body = body.substring(atIdx + 1);
 
-            // ---- Шаг 3: Извлекаем HOST и PORT (до символа ?) ----
+            // HOST:PORT
             int qIdx = body.indexOf('?');
             String hostPort = (qIdx > 0) ? body.substring(0, qIdx) : body;
 
-            // Обрабатываем IPv6 адреса вида [::1]:443
             if (hostPort.startsWith("[")) {
                 int bracketEnd = hostPort.indexOf(']');
                 s.host = hostPort.substring(1, bracketEnd);
@@ -107,7 +133,7 @@ public class VlessServer {
                 s.port = Integer.parseInt(hostPort.substring(colonIdx + 1));
             }
 
-            // ---- Шаг 4: Парсим QUERY PARAMS ----
+            // QUERY PARAMS
             if (qIdx > 0) {
                 Map<String, String> params = parseQueryParams(body.substring(qIdx + 1));
 
@@ -120,34 +146,145 @@ public class VlessServer {
                 s.path         = params.getOrDefault("path", "/");
                 s.sid          = params.getOrDefault("sid", "");
                 s.host2        = params.getOrDefault("host", "");
+
+                // ════════════════════════════════════════════════════════════════
+                // ← НОВОЕ: Поддержка xhttp параметров
+                // ════════════════════════════════════════════════════════════════
+                s.mode         = params.getOrDefault("mode", "");
+                s.extra        = params.getOrDefault("extra", "");
+                s.spx          = params.getOrDefault("spx", "");
+                s.alpn         = params.getOrDefault("alpn", "");
             }
 
-            // Уникальный ключ = uuid + host + port
             s.id = s.uuid + "@" + s.host + ":" + s.port;
 
-            // Фильтруем неподдерживаемые транспорты
-            // xhttp — новый протокол, отсутствует в libv2ray v5.45.x
+            // ════════════════════════════════════════════════════════════════
+            // ← ИСПРАВЛЕНО: НЕ фильтруем xhttp! Xray v26 поддерживает
+            // ════════════════════════════════════════════════════════════════
+            // xhttp теперь поддерживается в Xray-core 1.8.0+ (v26.x)
+            // Оставляем сервера, но логируем для отладки
             if ("xhttp".equals(s.networkType)) {
-                return null; // пропускаем
+                //FileLogger.d("VlessServer", "xhttp сервер добавлен: " + s.host + ":" + s.port);
             }
 
-            // Если remark пустой — используем host:port
             if (s.remark.isEmpty()) {
                 s.remark = s.host + ":" + s.port;
             }
 
         } catch (Exception e) {
-            // Если что-то пошло не так при парсинге — возвращаем null
+            FileLogger.e("VlessServer", "Ошибка парсинга VLESS: " + e.getMessage());
             return null;
         }
 
         return s;
     }
 
-    /**
-     * Разбирает строку query params в Map.
-     * Пример: "security=reality&sni=example.com" → {"security":"reality", "sni":"example.com"}
-     */
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВОЕ: Парсер VMess
+    // ════════════════════════════════════════════════════════════════
+
+    private static VlessServer parseVmess(String uri) {
+        try {
+            String base64 = uri.substring("vmess://".length());
+            String json = new String(java.util.Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
+
+            org.json.JSONObject obj = new org.json.JSONObject(json);
+
+            VlessServer s = new VlessServer();
+            s.protocol = "vmess";
+            s.uuid = obj.getString("id");
+            s.host = obj.getString("add");
+            s.port = obj.getInt("port");
+            s.remark = obj.optString("ps", s.host + ":" + s.port);
+            s.networkType = obj.optString("net", "tcp");
+            s.security = obj.optString("tls", "none");
+            s.sni = obj.optString("sni", s.host);
+            s.host2 = obj.optString("host", "");
+            s.path = obj.optString("path", "/");
+            s.fp = obj.optString("fp", "chrome");
+            s.alpn = obj.optString("alpn", "");
+
+            s.id = s.uuid + "@" + s.host + ":" + s.port;
+            s.rawUri = uri;
+
+            //FileLogger.d("VlessServer", "VMess распарсен: " + s.remark);
+            return s;
+
+        } catch (Exception e) {
+            FileLogger.e("VlessServer", "Ошибка парсинга VMess: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВОЕ: Парсер Trojan
+    // ════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════
+// ← НОВОЕ: Парсер Trojan
+// ════════════════════════════════════════════════════════════════
+
+    private static VlessServer parseTrojan(String uri) {
+        try {
+            String body = uri.substring("trojan://".length());
+
+            VlessServer s = new VlessServer();
+            s.protocol = "trojan";
+
+            // REMARK
+            int hashIdx = body.lastIndexOf('#');
+            if (hashIdx > 0) {
+                s.remark = URLDecoder.decode(body.substring(hashIdx + 1), StandardCharsets.UTF_8.name());
+                body = body.substring(0, hashIdx);
+            }
+
+            // PASSWORD@HOST:PORT
+            int atIdx = body.indexOf('@');
+            if (atIdx < 0) return null;
+            s.uuid = body.substring(0, atIdx);  // В Trojan это password
+            body = body.substring(atIdx + 1);
+
+            // HOST:PORT
+            int qIdx = body.indexOf('?');
+            String hostPort = (qIdx > 0) ? body.substring(0, qIdx) : body;
+
+            int colonIdx = hostPort.lastIndexOf(':');
+            s.host = hostPort.substring(0, colonIdx);
+            s.port = Integer.parseInt(hostPort.substring(colonIdx + 1));
+
+            // ════════════════════════════════════════════════════════════════
+            // ← ИСПРАВЛЕНО: Объявляем params перед if
+            // ════════════════════════════════════════════════════════════════
+            Map<String, String> params = new HashMap<>();
+
+            if (qIdx > 0) {
+                params = parseQueryParams(body.substring(qIdx + 1));
+                s.sni = params.getOrDefault("sni", s.host);
+                s.alpn = params.getOrDefault("alpn", "");
+                s.fp = params.getOrDefault("fp", "chrome");
+            }
+
+            s.security = "tls";  // Trojan всегда использует TLS
+            s.networkType = params.getOrDefault("type", "tcp");  // ← Теперь работает!
+
+            s.id = s.uuid + "@" + s.host + ":" + s.port;
+            s.rawUri = uri;
+
+            if (s.remark.isEmpty()) {
+                s.remark = s.host + ":" + s.port;
+            }
+
+            //FileLogger.d("VlessServer", "Trojan распарсен: " + s.remark);
+            return s;
+
+        } catch (Exception e) {
+            FileLogger.e("VlessServer", "Ошибка парсинга Trojan: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+
     private static Map<String, String> parseQueryParams(String query) {
         Map<String, String> map = new HashMap<>();
         if (query == null || query.isEmpty()) return map;
@@ -166,18 +303,11 @@ public class VlessServer {
         return map;
     }
 
-    /**
-     * Проверяет, нужно ли тестировать этот сервер.
-     * Тестируем если: никогда не тестировали ИЛИ прошло больше 1 часа.
-     */
     public boolean needsTesting() {
-        long oneHour = 60 * 60 * 1000L; // 1 час в миллисекундах
+        long oneHour = 60 * 60 * 1000L;
         return lastTestedAt == 0 || (System.currentTimeMillis() - lastTestedAt) > oneHour;
     }
 
-    /**
-     * Текстовое представление пинга для UI.
-     */
     public String getPingText() {
         if (pingMs < 0) return "—";
         if (pingMs < 100) return pingMs + "ms ⚡";
@@ -187,6 +317,6 @@ public class VlessServer {
 
     @Override
     public String toString() {
-        return "VlessServer{host=" + host + ", port=" + port + ", ping=" + pingMs + "ms}";
+        return "VlessServer{protocol=" + protocol + ", host=" + host + ", port=" + port + ", ping=" + pingMs + "ms}";
     }
 }

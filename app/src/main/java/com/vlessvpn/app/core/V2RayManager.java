@@ -54,9 +54,9 @@ public class V2RayManager {
                 libv2ray.Libv2ray.initCoreEnv(assetsPath, "");
 
                 coreEnvReady = true;
-                FileLogger.i(TAG, "Инициализация ядра - OK v=" + libv2ray.Libv2ray.checkVersionX());
+                FileLogger.i(TAG, "Ядро - OK v=" + libv2ray.Libv2ray.checkVersionX());
             } catch (Exception e) {
-                FileLogger.e(TAG, "Инициализация ядра - failed", e);
+                FileLogger.e(TAG, "Ядро - failed", e);
             }
         }
     }
@@ -93,9 +93,11 @@ public class V2RayManager {
             initEnvOnce(context);
 
             String configJson = V2RayConfigBuilder.build(server, 10808);
-            FileLogger.i(TAG, "v2ray start: " + server.host + ":" + server.port
-                + " flow=" + server.flow + " net=" + server.networkType
-                + " sec=" + server.security + " sni=" + server.sni);
+            //FileLogger.i(TAG, "v2ray start: " + server.host + ":" + server.port
+             //   + " flow=" + server.flow + " net=" + server.networkType
+            //    + " sec=" + server.security + " sni=" + server.sni);
+            FileLogger.i(TAG, "v2ray start: " + server.host);
+
             // FileLogger.i(TAG, "CONFIG: " + configJson);
 
             coreController = libv2ray.Libv2ray.newCoreController(new VpnCallback(server));
@@ -112,7 +114,7 @@ public class V2RayManager {
             }
 
             // Успешный запуск — уведомляем
-            FileLogger.i(TAG, "v2ray isRunning=true → onStarted");
+            FileLogger.i(TAG, "v2ray запущен!");
             if (callback != null) callback.onStarted(server);
 
             // Поллинг пока работает
@@ -178,8 +180,8 @@ public class V2RayManager {
         @Override
         public long startup() {
             int fd = com.vlessvpn.app.service.VpnTunnelService.getTunFd();
-            FileLogger.i(TAG, "startup() → fd=" + fd);
-            if (fd <= 0) FileLogger.e(TAG, "startup(): TUN fd не готов!");
+            //FileLogger.i(TAG, "startup() → fd=" + fd);
+            //if (fd <= 0) FileLogger.e(TAG, "startup(): TUN fd не готов!");
             return (long) fd;
         }
 
@@ -209,7 +211,7 @@ public class V2RayManager {
         @Override
         public long onEmitStatus(long level, String message) {
             if (message == null || message.isEmpty()) return 0;
-            FileLogger.i(TAG, "[go L" + level + "] " + message);
+            //FileLogger.i(TAG, "[go L" + level + "] " + message);
 
             // Fallback protect — на случай если Go шлёт через onEmitStatus
             if (message.startsWith("protect:") || message.startsWith("Protect:")) {
@@ -347,7 +349,7 @@ public class V2RayManager {
             String testUrl = "https://connectivitycheck.gstatic.com/generate_204";  // стабильный, быстрый
             // Альтернативы: "https://www.google.com/generate_204", "https://1.1.1.1"
             long delay = libv2ray.Libv2ray.measureOutboundDelay(configJson, testUrl);
-            FileLogger.d(TAG, "measure standard = " + delay + "ms");
+           // FileLogger.d(TAG, "measure standard = " + delay + "ms");
             return delay >= 0 ? delay : -1;
         } catch (Exception e) {
             FileLogger.d(TAG, "measure err: " + e.getMessage());
@@ -391,6 +393,11 @@ public class V2RayManager {
         } catch (Exception e) {
            // FileLogger.d(TAG, "measureDelay err: " + e.getMessage());
             return -1;
+        } finally {
+            // ════════════════════════════════════════════════════════════════
+            // ← НОВОЕ: Принудительная очистка памяти после теста
+            // ════════════════════════════════════════════════════════════════
+            System.gc();  // ← Вызов сборщика мусора
         }
     }
 

@@ -2,7 +2,8 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:fillViewport="true"
+    android:background="@color/bg_dark">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -10,108 +11,132 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- URL конфигов -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="URL с конфигами (с новой строки):"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp"/>
-
-        <EditText
-            android:id="@+id/et_config_urls"
-            android:layout_width="match_parent"
-            android:layout_height="190dp"
-            android:background="#454545"
-            android:gravity="top|start"
-            android:hint="Ссылки на листы подписки (по одной на строку)"
-            android:inputType="textMultiLine|textNoSuggestions"
-            android:lines="10"
-            android:maxLines="16"
-            android:minLines="6"
-            android:scrollbars="vertical"
-            android:textColor="#FBF6F6"
-            android:textColorHint="#757575"
-            android:layout_marginBottom="16dp"
-            android:textSize="14sp" />
-
-        <!-- ← НОВОЕ: Интервал сканирования текущего списка -->
+        <!-- ===== URL конфигов ===== -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:background="@drawable/bg_card_rounded"
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="5dp"
+            android:elevation="2dp">
 
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🔄 Как часто сканировать текущий лист"
-                android:textSize="16sp"
-                android:textStyle="bold" />
+                android:text="URL с конфигами (с новой строки):"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="4dp"/>
+
+            <EditText
+                android:id="@+id/et_config_urls"
+                android:layout_width="match_parent"
+                android:layout_height="190dp"
+                android:background="#2C2F3A"
+                android:gravity="top|start"
+                android:hint="Ссылки на листы подписки (по одной на строку)"
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:lines="10"
+                android:maxLines="16"
+                android:minLines="6"
+                android:scrollbars="vertical"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#888888"
+                android:textSize="14sp"/>
+        </LinearLayout>
+
+        <!-- ===== Интервал сканирования ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card_rounded"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:elevation="2dp">
 
             <TextView
                 android:id="@+id/tv_scan_interval_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Каждые 30 мин"
+                android:text="Сканировать текущий лист"
                 android:textSize="14sp"
-                android:textColor="#666666" />
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"/>
+
 
             <SeekBar
                 android:id="@+id/seek_scan_interval"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" />
+                android:layout_marginTop="8dp"/>
+
+        </LinearLayout>
+
+        <!-- ===== Интервал обновления ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card_rounded"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:elevation="2dp">
 
             <TextView
-                android:layout_width="wrap_content"
+                android:id="@+id/tv_interval_value"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="10 мин — 24 часа"
-                android:textSize="12sp"
-                android:textColor="#999999" />
+                android:text="Скачивать листы: каждые 5 часов"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="4dp"/>
+
+            <SeekBar
+                android:id="@+id/seek_interval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="23"/>
         </LinearLayout>
-        <!-- Интервал обновления -->
-        <TextView
-            android:id="@+id/tv_interval_value"
+
+        <!-- ===== Количество серверов ===== -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Проверка: каждые 5 часов"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp"/>
+            android:orientation="vertical"
+            android:background="@drawable/bg_card_rounded"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:elevation="2dp">
 
-        <SeekBar
-            android:id="@+id/seek_interval"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="23"
-            android:layout_marginBottom="16dp"/>
+            <TextView
+                android:id="@+id/tv_top_count_value"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Выводить на экран серверов: 10"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="4dp"/>
 
-        <!-- Количество серверов в топе -->
-        <TextView
-            android:id="@+id/tv_top_count_value"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Топ серверов: 10"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp"/>
+            <SeekBar
+                android:id="@+id/seek_top_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="29"/>
+        </LinearLayout>
 
-        <SeekBar
-            android:id="@+id/seek_top_count"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="29"
-            android:layout_marginBottom="16dp"/>
-
-        <!-- Сканировать при запуске -->
+        <!-- ===== Сканирование при запуске ===== -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="0dp">
 
             <TextView
                 android:layout_width="0dp"
@@ -119,7 +144,8 @@
                 android:layout_weight="1"
                 android:text="Сканировать серверы при запуске"
                 android:textSize="14sp"
-                android:textStyle="bold"/>
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"/>
 
             <Switch
                 android:id="@+id/switch_scan_on_start"
@@ -134,28 +160,32 @@
             android:text="Если выключено — при запуске показываются последние результаты из базы"
             android:textSize="10sp"
             android:textColor="#888888"
-            android:layout_marginBottom="24dp"/>
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="10dp"/>
 
-        <!-- Тест через LTE -->
+        <!-- ===== Тест через LTE ===== -->
         <Switch
             android:id="@+id/switch_force_mobile"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Тест через LTE (даже при WiFi)"
             android:textSize="14sp"
-            android:layout_marginBottom="24dp" />
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="24dp"/>
 
-        <!-- ════════════════════════════════════════════════════════════ -->
-        <!-- НОВЫЙ БЛОК: Авто-подключение при потере WiFi                -->
-        <!-- ════════════════════════════════════════════════════════════ -->
-
+        <!-- ===== Авто-подключение ===== -->
         <Switch
             android:id="@+id/switch_auto_connect_wifi"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Авто-подключение при потере WiFi"
             android:textSize="14sp"
-            android:layout_marginBottom="4dp" />
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:paddingHorizontal="12dp"
+            android:layout_marginBottom="4dp"/>
 
         <TextView
             android:layout_width="match_parent"
@@ -163,21 +193,18 @@
             android:text="При включении: VPN подключится автоматически когда телефон выйдет из зоны WiFi. При возврате в зону WiFi — VPN отключится."
             android:textSize="10sp"
             android:textColor="#888888"
+            android:paddingHorizontal="12dp"
             android:layout_marginBottom="24dp"/>
 
-        <!-- Кнопки -->
-        <Button
-            android:id="@+id/btn_refresh_now"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Обновить серверы сейчас"
-            android:layout_marginBottom="8dp"/>
+        <!-- ===== Кнопки ===== -->
 
         <Button
             android:id="@+id/btn_save"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Сохранить"/>
-
+            android:layout_height="48dp"
+            android:text="Сохранить"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:background="@drawable/bg_circle_button"/>
     </LinearLayout>
 </ScrollView>

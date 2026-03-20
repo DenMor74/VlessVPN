@@ -123,27 +123,6 @@ public class MainActivity extends AppCompatActivity {
                         }
                     });
 
-    private final BroadcastReceiver trafficReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context ctx, Intent intent) {
-            if (intent == null) return;
-
-            String action = intent.getAction();
-
-            if ("com.vlessvpn.TRAFFIC_UPDATE".equals(action)) {
-                long totalUp = intent.getLongExtra("totalUp", 0);
-                long totalDown = intent.getLongExtra("totalDown", 0);
-
-                String traffic = "↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown);
-
-                mainHandler.post(() -> {
-                    if (tvTraffic != null) {
-                        tvTraffic.setText(traffic);
-                    }
-                });
-            }
-        }
-    };
 
     private final BroadcastReceiver vpnReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context ctx, Intent intent) {
@@ -168,23 +147,7 @@ public class MainActivity extends AppCompatActivity {
                 int fail = intent.getIntExtra(StatusBus.EXTRA_FAIL, 0);
 
                // FileLogger.d(TAG, "Progress: " + message + " run=" + isRunning);
-                // ════════════════════════════════════════════════════════════════
-                // ← Обработка трафика (сообщение начинается с "TRAFFIC:")
-                // ════════════════════════════════════════════════════════════════
-                if (message != null && message.startsWith("TRAFFIC:")) {
-                    String[] parts = message.substring(8).split("\\|");
-                    if (parts.length == 2) {
-                        String traffic = "↑ " + parts[0] + "  ↓ " + parts[1];
 
-                        mainHandler.post(() -> {
-                            if (tvTraffic != null) {
-                                tvTraffic.setText(traffic);
-                                //FileLogger.d(TAG, "tvTraffic updated: " + traffic);
-                            }
-                        });
-                    }
-                    return; // ← Выходим, не обрабатываем как обычный статус
-                }
 
                 if (message != null && !message.isEmpty()) {
                     mainHandler.post(() -> {
@@ -264,13 +227,6 @@ public class MainActivity extends AppCompatActivity {
         updateAutoConnectStatus();
         updateInfoPanel();  // ← Обновить всю панель
 
-        // ← Зарегистрировать traffic receiver
-        IntentFilter trafficFilter = new IntentFilter("com.vlessvpn.TRAFFIC_UPDATE");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(trafficReceiver, trafficFilter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(trafficReceiver, trafficFilter);
-        }
 
         // Регистрируем VPN receiver
         IntentFilter vpnFilter = new IntentFilter("com.vlessvpn.VPN_STATUS_CHANGED");
@@ -302,7 +258,6 @@ public class MainActivity extends AppCompatActivity {
             try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
             receiverRegistered = false;
         }
-        try { unregisterReceiver(trafficReceiver); } catch (Exception ignored) {}
     }
 
     @Override
@@ -506,11 +461,17 @@ public class MainActivity extends AppCompatActivity {
         // Трафик и статус сканирования через LiveData (надёжнее broadcast в том же процессе)
         viewModel.getLastStatusMessage().observe(this, msg -> {
             if (msg == null || msg.isEmpty()) return;
-            if (msg.contains("↑") && VpnTunnelService.isRunning) {
-                // Сообщение трафика — показываем в tvTraffic
-                if (tvTraffic != null) tvTraffic.setText(msg);
-            } else if (!msg.startsWith("TRAFFIC:")) {
-                // Прогресс сканирования — показываем в tvStatusMode
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Если сообщение содержит трафик (↑ и ↓)
+            // ════════════════════════════════════════════════════════════════
+            if (msg.contains("↑") && msg.contains("↓") && VpnTunnelService.isRunning) {
+                if (tvTraffic != null) {
+                    tvTraffic.setText(msg);
+                    //FileLogger.d(TAG, "tvTraffic updated from LiveData: " + msg);
+                }
+            } else if (!msg.contains("↑")) {
+                // Прогресс сканирования
                 if (tvStatusMode != null) {
                     tvStatusMode.setText(VpnTunnelService.isRunning ? msg : "🔍 " + msg);
                 }
@@ -770,8 +731,7 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText("🟢 Подключено");
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
-            
-            startTrafficMonitor();
+
             // ════════════════════════════════════════════════════════════════
             // ← Обновить строку режима
             // ════════════════════════════════════════════════════════════════
@@ -786,7 +746,6 @@ public class MainActivity extends AppCompatActivity {
             tvConnectedServer.setText("—");
             
             tvTraffic.setText(" ");
-            stopTrafficMonitor();
             // ════════════════════════════════════════════════════════════════
             // ← Обновить строку режима
             // ════════════════════════════════════════════════════════════════
@@ -799,28 +758,6 @@ public class MainActivity extends AppCompatActivity {
     private Handler trafficHandler = new Handler(Looper.getMainLooper());
     private Runnable trafficRunnable;
 
-    private void startTrafficMonitor() {
-        trafficRunnable = new Runnable() {
-            @Override
-            public void run() {
-                // Получить статистику трафика из VpnTunnelService
-                String traffic = "↑ " + fmtBytes(VpnTunnelService.totalUp) + "  ↓ " + fmtBytes(VpnTunnelService.totalDown);
-                if (traffic != null && !traffic.isEmpty()) {
-                    tvTraffic.setText(traffic);
-                }
-                trafficHandler.postDelayed(this, 1000);
-            }
-        };
-        trafficHandler.post(trafficRunnable);
-    }
-
-    private void stopTrafficMonitor() {
-        if (trafficHandler != null && trafficRunnable != null) {
-            trafficHandler.removeCallbacks(trafficRunnable);
-            trafficRunnable = null;
-        }
-        if (tvTraffic != null) tvTraffic.setText(" ");
-    }
 
     // ── Меню ─────────────────────────────────────────────────────────────────
 

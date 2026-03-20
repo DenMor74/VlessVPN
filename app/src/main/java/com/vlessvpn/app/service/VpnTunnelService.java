@@ -49,6 +49,8 @@ public class VpnTunnelService extends VpnService {
     public static final String EXTRA_SERVER      = "server";
     public static final String EXTRA_AUTO_CONNECT = "auto_connect";
 
+    private volatile boolean isStopping = false;
+
     // ── Слушатели подключения (MainViewModel) ────────────────────────────────
     private static final CopyOnWriteArrayList<Consumer<Boolean>> connectionListeners =
             new CopyOnWriteArrayList<>();
@@ -79,32 +81,41 @@ public class VpnTunnelService extends VpnService {
 
     private final Runnable statsPoller = new Runnable() {
         @Override public void run() {
-            if (!isRunning) return;
-            // Читаем трафик из /proc/net/dev (tun0) — надёжнее чем xray queryStats
-            long[] s = readTunStats();
-            totalUp   = s[0];
-            totalDown = s[1];
-            // Также обновляем через xray stats если вдруг они работают
+            // ════════════════════════════════════════════════════════════════
+            // ← Добавить логирование для отладки
+            // ════════════════════════════════════════════════════════════════
+            if (!isRunning) {
+                FileLogger.d(TAG, "statsPoller: isRunning=false — останавливаем");
+                return;
+            }
+
             V2RayManager mgr = v2RayManager;
-            if (mgr != null && totalUp == 0 && totalDown == 0) {
-                s = mgr.getStats();
-                totalUp   = s[0];
+            if (mgr == null) {
+                FileLogger.d(TAG, "statsPoller: v2RayManager=null — останавливаем");
+                return;
+            }
+
+            try {
+                long[] s = mgr.getStats();
+                totalUp = s[0];
                 totalDown = s[1];
-            }
-            VlessServer srv = connectedServer;
-            if (srv != null) {
-                updateNotification("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown),
-                        srv.host);
-            }
-            // Отправляем трафик через LiveData (работает в том же процессе надёжнее broadcast)
-            StatusBus.post("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), true);
 
-            // Дополнительно broadcast для trafficReceiver в MainActivity
-            Intent broadcast = new Intent("com.vlessvpn.TRAFFIC_UPDATE");
-            broadcast.putExtra("totalUp",   totalUp);
-            broadcast.putExtra("totalDown", totalDown);
-            sendBroadcast(broadcast);
+                //FileLogger.d(TAG, "statsPoller: up=" + totalUp + " down=" + totalDown);
 
+                VlessServer srv = connectedServer;
+                if (srv != null) {
+                    updateNotification("↑ " + fmtBytes(totalUp) + "/s ↓ " + fmtBytes(totalDown) + "/s", srv.host);
+                }
+
+                StatusBus.post("↑ " + fmtBytes(totalUp) + "/s ↓ " + fmtBytes(totalDown) + "/s", true);
+
+            } catch (Exception e) {
+                FileLogger.e(TAG, "statsPoller error: " + e.getMessage());
+            }
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Продолжить опрос через 1 секунду
+            // ════════════════════════════════════════════════════════════════
             statsHandler.postDelayed(this, 1_000);
         }
     };
@@ -113,13 +124,58 @@ public class VpnTunnelService extends VpnService {
     private final Handler  checkHandler  = new Handler(Looper.getMainLooper());
     private ExecutorService bgExecutor;
 
+// ════════════════════════════════════════════════════════════════
+// В VpnTunnelService.java — исправить checkRunnable
+// ════════════════════════════════════════════════════════════════
+
     private final Runnable checkRunnable = new Runnable() {
-        @Override public void run() {
-            if (!isRunning || bgExecutor == null || bgExecutor.isShutdown()) return;
+        @Override
+        public void run() {
+            // ════════════════════════════════════════════════════════════════
+            // ← СРАЗУ запланировать следующую проверку (до выполнения!)
+            // ════════════════════════════════════════════════════════════════
+            if (checkHandler != null) {
+                checkHandler.postDelayed(this, 60 * 1000L);
+                FileLogger.d(TAG, "✓ Следующая проверка запланирована через 60 сек");
+            }
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Проверка что VPN ещё активен
+            // ════════════════════════════════════════════════════════════════
+            if (!isRunning) {
+                FileLogger.d(TAG, "checkRunnable: isRunning=false — пропускаем");
+                return;
+            }
+
+            if (bgExecutor == null || bgExecutor.isShutdown()) {
+                FileLogger.w(TAG, "checkRunnable: backgroundExecutor недоступен — пропускаем");
+                return;
+            }
+
+            FileLogger.i(TAG, "=== 1-min проверка соединения ===");
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Проверка соединения...", true));
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Запустить проверку в фоне
+            // ════════════════════════════════════════════════════════════════
             bgExecutor.execute(VpnTunnelService.this::doConnectivityCheck);
-            checkHandler.postDelayed(this, 60_000L);
         }
     };
+
+    private void startPeriodicCheck() {
+        // ════════════════════════════════════════════════════════════════
+        // ← НЕ удалять старые callback (они уже запланированы в checkRunnable)
+        // ════════════════════════════════════════════════════════════════
+        // ❌ Удалить: checkHandler.removeCallbacks(checkRunnable);
+
+        if (checkHandler != null) {
+            // ← Запустить первую проверку через 60 секунд
+            checkHandler.postDelayed(checkRunnable, 60 * 1000L);
+            FileLogger.i(TAG, "Periodic check ЗАПУЩЕН (первый через 60 сек)");
+        } else {
+            FileLogger.e(TAG, "checkHandler = null!");
+        }
+    }
 
     private ParcelFileDescriptor vpnInterface;
     private V2RayManager         v2RayManager;
@@ -204,7 +260,7 @@ public class VpnTunnelService extends VpnService {
             if (isRunning || v2RayManager != null || hevTunnel != null) fullStop();
             if (connectId != activeConnectId) return;
         }
-
+        isStopping = false;
         currentServer = server;
 
         v2rayThread = new Thread(() -> {
@@ -275,6 +331,7 @@ public class VpnTunnelService extends VpnService {
                     totalUp = 0; totalDown = 0;
                     StatusBus.post(VpnTunnelService.this, "Подключено: " + s.host, true);
                     statsHandler.postDelayed(statsPoller, 500);
+                    startPeriodicCheck();
                     ServerTester.setVpnActive(true);
                     new ServerRepository(VpnTunnelService.this).saveLastWorkingServer(s);
                     sendVpnBroadcast(true, s, null);
@@ -334,11 +391,12 @@ public class VpnTunnelService extends VpnService {
     private void doConnectivityCheck() {
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Проверка соединения...", true));
         if (!ServerTester.trafficTest()) {
-            FileLogger.w(TAG, "Нет трафика — переключаем сервер");
+            FileLogger.w(TAG, "=== Нет трафика!");
             new ServerRepository(this).clearLastWorkingServer();
             switchToNextServer();
         } else {
             if (currentServer != null) {
+                FileLogger.w(TAG, "=== Трафик OK!");
                 new ServerRepository(this).saveLastWorkingServer(currentServer);
                 mainHandler.post(() -> StatusBus.post(VpnTunnelService.this,
                         "Подключено: " + currentServer.host, true));
@@ -396,25 +454,32 @@ public class VpnTunnelService extends VpnService {
     }
 
     private void fullStop() {
-        FileLogger.i(TAG, "fullStop()");
-        isRunning       = false;
-        connectedServer = null;
-        totalUp         = 0;
-        totalDown       = 0;
+        // ════════════════════════════════════════════════════════════════
+        // ← Защита от повторного вызова
+        // ════════════════════════════════════════════════════════════════
+        if (isStopping) {
+            FileLogger.d(TAG, "fullStop() already in progress — skipping");
+            return;
+        }
+        isStopping = true;
 
-        // removeCallbacks только из main thread
+        FileLogger.i(TAG, "fullStop()");
+        isRunning = false;
+        connectedServer = null;
+
         if (Looper.myLooper() == Looper.getMainLooper()) {
             statsHandler.removeCallbacks(statsPoller);
-            checkHandler.removeCallbacks(checkRunnable);
+            if (checkHandler != null) checkHandler.removeCallbacks(checkRunnable);
         } else {
             mainHandler.post(() -> {
                 statsHandler.removeCallbacks(statsPoller);
-                checkHandler.removeCallbacks(checkRunnable);
+                if (checkHandler != null) checkHandler.removeCallbacks(checkRunnable);
             });
         }
 
         unregisterNetworkCallback();
         stopHev();
+
         try { Thread.sleep(150); } catch (InterruptedException ignored) {}
 
         V2RayManager mgr = v2RayManager;
@@ -432,6 +497,11 @@ public class VpnTunnelService extends VpnService {
             try { vpnInterface.close(); } catch (Exception ignored) {}
             vpnInterface = null;
         }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← Сбросить флаг
+        // ════════════════════════════════════════════════════════════════
+        isStopping = false;
     }
 
     private void disconnect() {
@@ -506,46 +576,23 @@ public class VpnTunnelService extends VpnService {
 
     private void unregisterNetworkCallback() {
         if (connectivityManager != null && networkCallback != null) {
-            try { connectivityManager.unregisterNetworkCallback(networkCallback); }
-            catch (Exception ignored) {}
-            networkCallback = null;
+            try {
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+                //FileLogger.d(TAG, "NetworkCallback unregistered");
+            } catch (IllegalArgumentException e) {
+                // ════════════════════════════════════════════════════════════════
+                // ← Это нормально — callback уже был отREGISTERED
+                // ════════════════════════════════════════════════════════════════
+                FileLogger.d(TAG, "NetworkCallback already unregistered (ignored)");
+            } catch (Exception e) {
+                FileLogger.w(TAG, "unregisterNetworkCallback error: " + e.getMessage());
+            } finally {
+                networkCallback = null;  // ← Всегда сбрасываем
+            }
         }
     }
 
     // ── Notification ──────────────────────────────────────────────────────────
-
-    /**
-     * Читает статистику трафика из /proc/net/dev для интерфейса tun0.
-     * Не зависит от xray stats API.
-     * @return [upload_bytes, download_bytes] или [0,0] если не удалось прочитать
-     */
-    private static long[] readTunStats() {
-        try {
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/net/dev"));
-            String line;
-            while ((line = br.readLine()) != null) {
-                // Ищем любой tun интерфейс (tun0, tun1 и т.д.)
-                String trimLine = line.trim();
-                if (trimLine.startsWith("tun")) {
-                    String data = line.substring(line.indexOf(':') + 1).trim();
-                    // Убираем множественные пробелы
-                    String[] parts = data.trim().replaceAll("\\s+", " ").split(" ");
-                    if (parts.length >= 9) {
-                        long rx = Long.parseLong(parts[0]);  // bytes received (download)
-                        long tx = Long.parseLong(parts[8]);  // bytes transmitted (upload)
-                        FileLogger.d(TAG, "tun stats: up=" + tx + " down=" + rx);
-                        br.close();
-                        return new long[]{tx, rx}; // [upload, download]
-                    }
-                }
-            }
-            br.close();
-        } catch (Exception e) {
-            FileLogger.d(TAG, "readTunStats error: " + e.getMessage());
-        }
-        return new long[]{0, 0};
-    }
 
     private static String fmtBytes(long bytes) {
         if (bytes < 1024)              return bytes + " B";

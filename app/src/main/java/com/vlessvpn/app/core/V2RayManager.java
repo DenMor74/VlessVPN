@@ -4,13 +4,20 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.TrafficStats;
 import android.os.Handler;
 import android.os.Looper;
 
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.util.FileLogger;
 
+
+
 public class V2RayManager {
+
+    private long lastTotalTx = 0;
+    private long lastTotalRx = 0;
+    private long lastQueryTime = 0;
 
     private static final String TAG = "V2RayManager";
 
@@ -29,6 +36,48 @@ public class V2RayManager {
             } catch (Exception e) {
                 FileLogger.e(TAG, "initCoreEnv failed", e);
             }
+        }
+    }
+
+    public long[] getStats() {
+        try {
+            // ════════════════════════════════════════════════════════════════
+            // ← Получаем ОБЩИЙ трафик устройства
+            // ════════════════════════════════════════════════════════════════
+            long currentTotalTx = TrafficStats.getTotalTxBytes();
+            long currentTotalRx = TrafficStats.getTotalRxBytes();
+            long currentTime = System.currentTimeMillis();
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Вычисляем разницу с последнего замера (байты за секунду)
+            // ════════════════════════════════════════════════════════════════
+            long timeDelta = currentTime - lastQueryTime;
+
+            if (timeDelta < 500) {
+                // Слишком быстро — возвращаем последние значения
+                return new long[]{currentTotalTx - lastTotalTx, currentTotalRx - lastTotalRx};
+            }
+
+            long up = currentTotalTx - lastTotalTx;
+            long down = currentTotalRx - lastTotalRx;
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Сохраняем для следующего замера
+            // ════════════════════════════════════════════════════════════════
+            lastTotalTx = currentTotalTx;
+            lastTotalRx = currentTotalRx;
+            lastQueryTime = currentTime;
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Логирование (для отладки)
+            // ════════════════════════════════════════════════════════════════
+            //FileLogger.d(TAG, "queryStats: up=" + up + " down=" + down + " (timeDelta=" + timeDelta + "ms)");
+
+            return new long[]{up, down};
+
+        } catch (Exception e) {
+            FileLogger.e(TAG, "getStats error: " + e.getMessage());
+            return new long[]{0, 0};
         }
     }
 
@@ -53,6 +102,12 @@ public class V2RayManager {
     public boolean start(VlessServer server) {
         stop();
         currentServer = server;
+        // ════════════════════════════════════════════════════════════════
+        // ← Сбросить счётчики при старте VPN
+        // ════════════════════════════════════════════════════════════════
+        lastTotalTx = TrafficStats.getTotalTxBytes();
+        lastTotalRx = TrafficStats.getTotalRxBytes();
+        lastQueryTime = System.currentTimeMillis();
         try {
             initEnvOnce(context);
             String cfg = V2RayConfigBuilder.build(server, 10808, -1);
@@ -98,22 +153,6 @@ public class V2RayManager {
 
     public boolean isRunning() {
         return coreController != null && coreController.getIsRunning();
-    }
-
-    public long[] getStats() {
-        libv2ray.CoreController ctrl = coreController;
-        if (ctrl == null) return new long[]{0, 0};
-        try {
-            // Xray-core использует полный путь счётчика: "outbound>>>tag>>>traffic>>>direction"
-            long up   = ctrl.queryStats("outbound>>>proxy>>>traffic>>>uplink",   "");
-            long down = ctrl.queryStats("outbound>>>proxy>>>traffic>>>downlink", "");
-            FileLogger.d(TAG, "queryStats up=" + up + " down=" + down);
-            if (callback != null) callback.onStatsUpdate(up, down);
-            return new long[]{up, down};
-        } catch (Exception e) {
-            FileLogger.w(TAG, "queryStats error: " + e.getMessage());
-            return new long[]{0, 0};
-        }
     }
 
     // ── Измерение задержки (для ScanWorker) ────────────────────────────────

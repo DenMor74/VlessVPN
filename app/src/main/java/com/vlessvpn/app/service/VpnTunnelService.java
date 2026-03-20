@@ -79,19 +79,27 @@ public class VpnTunnelService extends VpnService {
 
     private final Runnable statsPoller = new Runnable() {
         @Override public void run() {
-            V2RayManager mgr = v2RayManager;
-            if (mgr == null || !isRunning) return;
-            long[] s = mgr.getStats();
+            if (!isRunning) return;
+            // Читаем трафик из /proc/net/dev (tun0) — надёжнее чем xray queryStats
+            long[] s = readTunStats();
             totalUp   = s[0];
             totalDown = s[1];
+            // Также обновляем через xray stats если вдруг они работают
+            V2RayManager mgr = v2RayManager;
+            if (mgr != null && totalUp == 0 && totalDown == 0) {
+                s = mgr.getStats();
+                totalUp   = s[0];
+                totalDown = s[1];
+            }
             VlessServer srv = connectedServer;
             if (srv != null) {
                 updateNotification("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown),
                         srv.host);
             }
-            String trafficMsg = "TRAFFIC:" + fmtBytes(totalUp) + "|" + fmtBytes(totalDown);
-            StatusBus.post(VpnTunnelService.this, trafficMsg, true);
+            // Отправляем трафик через LiveData (работает в том же процессе надёжнее broadcast)
+            StatusBus.post("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), true);
 
+            // Дополнительно broadcast для trafficReceiver в MainActivity
             Intent broadcast = new Intent("com.vlessvpn.TRAFFIC_UPDATE");
             broadcast.putExtra("totalUp",   totalUp);
             broadcast.putExtra("totalDown", totalDown);
@@ -391,6 +399,8 @@ public class VpnTunnelService extends VpnService {
         FileLogger.i(TAG, "fullStop()");
         isRunning       = false;
         connectedServer = null;
+        totalUp         = 0;
+        totalDown       = 0;
 
         // removeCallbacks только из main thread
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -503,6 +513,39 @@ public class VpnTunnelService extends VpnService {
     }
 
     // ── Notification ──────────────────────────────────────────────────────────
+
+    /**
+     * Читает статистику трафика из /proc/net/dev для интерфейса tun0.
+     * Не зависит от xray stats API.
+     * @return [upload_bytes, download_bytes] или [0,0] если не удалось прочитать
+     */
+    private static long[] readTunStats() {
+        try {
+            java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.FileReader("/proc/net/dev"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                // Ищем любой tun интерфейс (tun0, tun1 и т.д.)
+                String trimLine = line.trim();
+                if (trimLine.startsWith("tun")) {
+                    String data = line.substring(line.indexOf(':') + 1).trim();
+                    // Убираем множественные пробелы
+                    String[] parts = data.trim().replaceAll("\\s+", " ").split(" ");
+                    if (parts.length >= 9) {
+                        long rx = Long.parseLong(parts[0]);  // bytes received (download)
+                        long tx = Long.parseLong(parts[8]);  // bytes transmitted (upload)
+                        FileLogger.d(TAG, "tun stats: up=" + tx + " down=" + rx);
+                        br.close();
+                        return new long[]{tx, rx}; // [upload, download]
+                    }
+                }
+            }
+            br.close();
+        } catch (Exception e) {
+            FileLogger.d(TAG, "readTunStats error: " + e.getMessage());
+        }
+        return new long[]{0, 0};
+    }
 
     private static String fmtBytes(long bytes) {
         if (bytes < 1024)              return bytes + " B";

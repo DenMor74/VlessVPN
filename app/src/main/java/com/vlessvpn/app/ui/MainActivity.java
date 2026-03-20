@@ -503,9 +503,19 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // ════════════════════════════════════════════════════════════════
-        // ← УДАЛИТЬ observe за isWorking (больше не нужно)
-        // ════════════════════════════════════════════════════════════════
+        // Трафик и статус сканирования через LiveData (надёжнее broadcast в том же процессе)
+        viewModel.getLastStatusMessage().observe(this, msg -> {
+            if (msg == null || msg.isEmpty()) return;
+            if (msg.contains("↑") && VpnTunnelService.isRunning) {
+                // Сообщение трафика — показываем в tvTraffic
+                if (tvTraffic != null) tvTraffic.setText(msg);
+            } else if (!msg.startsWith("TRAFFIC:")) {
+                // Прогресс сканирования — показываем в tvStatusMode
+                if (tvStatusMode != null) {
+                    tvStatusMode.setText(VpnTunnelService.isRunning ? msg : "🔍 " + msg);
+                }
+            }
+        });
     }
 
 // ════════════════════════════════════════════════════════════════
@@ -807,8 +817,9 @@ public class MainActivity extends AppCompatActivity {
     private void stopTrafficMonitor() {
         if (trafficHandler != null && trafficRunnable != null) {
             trafficHandler.removeCallbacks(trafficRunnable);
+            trafficRunnable = null;
         }
-        tvTraffic.setText(" ");
+        if (tvTraffic != null) tvTraffic.setText(" ");
     }
 
     // ── Меню ─────────────────────────────────────────────────────────────────

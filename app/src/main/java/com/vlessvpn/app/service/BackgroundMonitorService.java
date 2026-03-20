@@ -22,6 +22,7 @@ import androidx.work.WorkManager;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
+import com.google.gson.Gson;
 import com.vlessvpn.app.core.V2RayConfigBuilder;
 import com.vlessvpn.app.core.V2RayManager;
 import com.vlessvpn.app.model.VlessServer;
@@ -31,14 +32,9 @@ import com.vlessvpn.app.network.WifiMonitor;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 import com.vlessvpn.app.util.StatusBus;
-import com.google.gson.Gson;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
+
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.URL;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -48,81 +44,58 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class BackgroundMonitorService extends Service {
 
-    private static final String TAG = "BackgroundMonitor";
-    private static final String WORK_TAG_DOWNLOAD = "server_download";
-    private static final String WORK_TAG_SCAN = "server_scan";
+    private static final String TAG            = "BackgroundMonitor";
+    private static final String WORK_DOWNLOAD  = "server_download";
+    private static final String WORK_SCAN      = "server_scan";
 
-    // ════════════════════════════════════════════════════════════════
-    // ПЛАНИРОВЩИК: Скачивание новых списков
-    // ════════════════════════════════════════════════════════════════
+    // ── Планировщики ────────────────────────────────────────────────────────
 
     public static void scheduleDownload(Context ctx, int intervalHours) {
-        PeriodicWorkRequest req = new PeriodicWorkRequest.Builder(
-                DownloadWorker.class, intervalHours, TimeUnit.HOURS)
-                .addTag(WORK_TAG_DOWNLOAD).build();
-        WorkManager.getInstance(ctx)
-                .enqueueUniquePeriodicWork(WORK_TAG_DOWNLOAD,
-                        ExistingPeriodicWorkPolicy.UPDATE, req);
+        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
+                WORK_DOWNLOAD,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                new PeriodicWorkRequest.Builder(DownloadWorker.class, intervalHours, TimeUnit.HOURS)
+                        .addTag(WORK_DOWNLOAD).build());
     }
-
-    public static void runDownloadNow(Context ctx) {
-        OneTimeWorkRequest req = new OneTimeWorkRequest.Builder(DownloadWorker.class)
-                .addTag(WORK_TAG_DOWNLOAD + "_manual").build();
-        WorkManager.getInstance(ctx)
-                .enqueueUniqueWork(WORK_TAG_DOWNLOAD + "_manual",
-                        ExistingWorkPolicy.REPLACE, req);
-    }
-
-    // ════════════════════════════════════════════════════════════════
-    // ПЛАНИРОВЩИК: Сканирование текущего списка (без скачивания)
-    // ════════════════════════════════════════════════════════════════
 
     public static void scheduleScan(Context ctx, int intervalMinutes) {
-        Constraints constraints = new Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .setRequiresBatteryNotLow(false)
-                .setRequiresStorageNotLow(false)
-                .build();
-
-        PeriodicWorkRequest req = new PeriodicWorkRequest.Builder(
-                ScanWorker.class, intervalMinutes, TimeUnit.MINUTES)
-                .setConstraints(constraints)
-                .addTag(WORK_TAG_SCAN)
-                .build();
-
-        WorkManager.getInstance(ctx)
-                .enqueueUniquePeriodicWork(WORK_TAG_SCAN,
-                        ExistingPeriodicWorkPolicy.UPDATE, req);
+        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
+                WORK_SCAN,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                new PeriodicWorkRequest.Builder(ScanWorker.class, intervalMinutes, TimeUnit.MINUTES)
+                        .setConstraints(new Constraints.Builder()
+                                .setRequiredNetworkType(NetworkType.CONNECTED).build())
+                        .addTag(WORK_SCAN).build());
     }
 
+    /** Запустить скачивание немедленно (кнопка "Скачать") */
+    public static void runDownloadNow(Context ctx) {
+        WorkManager.getInstance(ctx).enqueueUniqueWork(
+                WORK_DOWNLOAD + "_manual", ExistingWorkPolicy.REPLACE,
+                new OneTimeWorkRequest.Builder(DownloadWorker.class).build());
+    }
+
+    /** Запустить сканирование немедленно (кнопка "Проверить текущий лист") */
     public static void runScanNow(Context ctx) {
-        OneTimeWorkRequest req = new OneTimeWorkRequest.Builder(ScanWorker.class)
-                .addTag(WORK_TAG_SCAN + "_manual").build();
-        WorkManager.getInstance(ctx)
-                .enqueueUniqueWork(WORK_TAG_SCAN + "_manual",
-                        ExistingWorkPolicy.REPLACE, req);
+        WorkManager.getInstance(ctx).enqueueUniqueWork(
+                WORK_SCAN + "_manual", ExistingWorkPolicy.REPLACE,
+                new OneTimeWorkRequest.Builder(ScanWorker.class).build());
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         ServerRepository repo = new ServerRepository(this);
-
         scheduleDownload(this, repo.getUpdateIntervalHours());
         scheduleScan(this, repo.getScanIntervalMinutes());
-
         stopSelf();
         return START_NOT_STICKY;
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
-    // ════════════════════════════════════════════════════════════════
-    // DownloadWorker: ТОЛЬКО скачивание списков
-    // ════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════
-// В BackgroundMonitorService.java → DownloadWorker.doWork()
-// ════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+    // DownloadWorker — скачивает списки, затем ВСЕГДА запускает сканирование
+    // ════════════════════════════════════════════════════════════════════════
 
     public static class DownloadWorker extends Worker {
         private static final String W = "DownloadWorker";
@@ -133,84 +106,72 @@ public class BackgroundMonitorService extends Service {
         public Result doWork() {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
-            // ════════════════════════════════════════════════════════════════
-            // ← НОВОЕ: Проверка ночного времени
-            // ════════════════════════════════════════════════════════════════
+
+            // Ночной режим
             if (repo.isNightTime()) {
-                FileLogger.i(W, "Ночное время — пропускаем скачивание");
+                FileLogger.i(W, "Ночное время — пропуск скачивания");
                 StatusBus.post(ctx, "🌙 Ночной режим — скачивание отложено", false);
-                return Result.success();  // Не retry, просто пропускаем
+                return Result.success();
             }
-            // ════════════════════════════════════════════════════════════════
 
-            StatusBus.post(ctx, "📥 Скачиваем новые списки...", true);
-            FileLogger.i(W, "=== Скачиваем новые списки");
-
-            String[] urls = repo.getConfigUrls();
-            int totalDownloaded = 0;
-            boolean hasNewServers = false;  // ← НОВОЕ: Флаг новых серверов
-
-            if (hasRealInternet()) {
-                int urlIndex = 0;
-                for (String url : urls) {
-                    if (url == null || url.trim().isEmpty()) continue;
-
-                    urlIndex++;
-                    StatusBus.post(ctx, "📥 Загрузка " + urlIndex + "/" + urls.length, true);
-
-                    try {
-                        // ← Сохраняем количество серверов до загрузки
-                        int beforeCount = repo.getAllServersSync().size();
-
-                        ConfigDownloader dl = new ConfigDownloader();
-                        List<VlessServer> fresh = dl.download(ctx, url.trim(), url.trim());
-
-                        if (!fresh.isEmpty()) {
-                            repo.deleteBySourceUrlSync(url.trim());
-                            repo.insertAll(fresh);
-                            totalDownloaded += fresh.size();
-
-                            // ← Проверяем появились ли новые серверы
-                            int afterCount = repo.getAllServersSync().size();
-                            if (afterCount > beforeCount) {
-                                hasNewServers = true;
-                            }
-
-                            FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
-                        }
-                    } catch (Exception e) {
-                        FileLogger.w(W, "Ошибка загрузки " + url + ": " + e.getMessage());
-                    }
-                }
-                repo.markUpdated();
-                StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
-
-                // ════════════════════════════════════════════════════════════════
-                // ← НОВОЕ: Если есть новые серверы — запускаем сканирование
-                // ════════════════════════════════════════════════════════════════
-                if (hasNewServers && totalDownloaded > 0) {
-                    FileLogger.i(W, "Новые серверы загружены — запускаем сканирование");
-                    StatusBus.post(ctx, "🔍 Запускаем проверку новых серверов...", true);
-
-                    // Сбрасываем флаги тестов для новых серверов
-                    repo.resetAllTestTimesSync();
-
-                    // Запускаем сканирование
+            // ИСПРАВЛЕНО: Проверяем не рано ли обновляться (для периодического запуска)
+            // Для ручного запуска (через runDownloadNow) время сброшено заранее в forceRefreshServers
+            if (!repo.isUpdateNeeded()) {
+                FileLogger.i(W, "Обновление ещё не нужно — пропускаем скачивание");
+                // Но если в базе нет ни одного протестированного сервера — сканируем
+                if (repo.getWorkingCount() == 0) {
+                    FileLogger.i(W, "Нет рабочих серверов — запускаем сканирование");
                     runScanNow(ctx);
                 }
+                return Result.success();
+            }
 
-            } else {
-                FileLogger.i(W, "Нет интернета — пропускаем скачивание");
-                StatusBus.post(ctx, "⚠️ Нет интернета — скачивание пропущено", true);
+            if (!hasRealInternet()) {
+                StatusBus.post(ctx, "⚠️ Нет интернета — скачивание пропущено", false);
                 return Result.retry();
             }
+
+            StatusBus.post(ctx, "📥 Скачиваем новые списки...", true);
+            String[] urls = repo.getConfigUrls();
+            int totalDownloaded = 0;
+
+            for (int i = 0; i < urls.length; i++) {
+                String url = urls[i];
+                if (url == null || url.trim().isEmpty()) continue;
+                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + urls.length, true);
+                try {
+                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
+                    if (!fresh.isEmpty()) {
+                        repo.deleteBySourceUrlSync(url.trim());
+                        repo.insertAll(fresh);
+                        totalDownloaded += fresh.size();
+                        FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
+                    }
+                } catch (Exception e) {
+                    FileLogger.w(W, "Ошибка загрузки " + url + ": " + e.getMessage());
+                }
+            }
+
             repo.markUpdated();
+            StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
+
+            // ИСПРАВЛЕНО: Всегда запускаем сканирование после скачивания
+            if (totalDownloaded > 0) {
+                FileLogger.i(W, "Скачано " + totalDownloaded + " серверов → запускаем сканирование");
+                StatusBus.post(ctx, "🔍 Запускаем проверку серверов...", true);
+                repo.resetAllTestTimesSync();
+                runScanNow(ctx);
+            } else {
+                FileLogger.w(W, "Ничего не скачано — сканирование пропущено");
+                StatusBus.done(ctx, "⚠️ Нет новых серверов");
+            }
+
             return Result.success();
         }
 
         private boolean hasRealInternet() {
-            Context ctx = getApplicationContext();
-            ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            ConnectivityManager cm = (ConnectivityManager)
+                    getApplicationContext().getSystemService(Context.CONNECTIVITY_SERVICE);
             if (cm == null) return false;
             for (Network net : cm.getAllNetworks()) {
                 NetworkCapabilities caps = cm.getNetworkCapabilities(net);
@@ -227,9 +188,9 @@ public class BackgroundMonitorService extends Service {
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // ScanWorker: Сканирование с WakeLock
-    // ════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+    // ScanWorker — TCP пинг + VLESS measureDelay для всех серверов
+    // ════════════════════════════════════════════════════════════════════════
 
     public static class ScanWorker extends Worker {
         private static final String W = "ScanWorker";
@@ -240,214 +201,160 @@ public class BackgroundMonitorService extends Service {
         public Result doWork() {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
-            // ════════════════════════════════════════════════════════════════
-            // ← НОВОЕ: Проверка ночного времени
-            // ════════════════════════════════════════════════════════════════
-            if (repo.isNightTime()) {
-                FileLogger.i(W, "Ночное время — пропускаем сканирование");
-                StatusBus.post(ctx, "🌙 Ночной режим — сканирование отложено", false);
-                return Result.success();  // Не retry, просто пропускаем
-            }
-            // ════════════════════════════════════════════════════════════════
 
-            // ════════════════════════════════════════════════════════════════
-            // WakeLock чтобы CPU не спал во время сканирования
-            // ════════════════════════════════════════════════════════════════
+            if (repo.isNightTime()) {
+                FileLogger.i(W, "Ночное время — пропуск сканирования");
+                StatusBus.post(ctx, "🌙 Ночной режим — сканирование отложено", false);
+                return Result.success();
+            }
+
+            if (VpnTunnelService.isRunning) {
+                FileLogger.i(W, "VPN подключён — пропускаем фоновое сканирование");
+                return Result.success();
+            }
+
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
-            WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VlessVPN::ScanWorker");
-            wakeLock.acquire(10 * 60 * 1000L); // 10 минут максимум
+            WakeLock wakeLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK, "VlessVPN::ScanWorker");
+            wakeLock.acquire(10 * 60 * 1000L);
 
             try {
-                if (VpnTunnelService.isRunning) {
-                    FileLogger.i(W, "VPN подключён — пропускаем фоновое сканирование");
-                    return Result.success();
-                }
-
-                StatusBus.post(ctx, "🔍 Сканируем текущий список...", true);
-                FileLogger.i(W, "=== Проверка серверов...");
-
-                List<VlessServer> toTest = repo.getAllServersSync();
-                if (toTest.isEmpty()) {
-                    StatusBus.done(ctx, "⚠️ Нет серверов в базе");
-                    return Result.retry();
-                }
-
-                int total = toTest.size();
-                StatusBus.post(ctx, "🔍 Тестируем " + total + " серверов...", true);
-                StatusBus.setWorking(ctx, true);
-
-                final int THREADS = 10;
-                ExecutorService pool = Executors.newFixedThreadPool(THREADS);
-                final AtomicInteger portCounter = new AtomicInteger(10900);
-                CountDownLatch latch = new CountDownLatch(total);
-                AtomicInteger done = new AtomicInteger(0);
-                AtomicInteger ok = new AtomicInteger(0);
-
-                for (VlessServer server : toTest) {
-                    if (isStopped()) { latch.countDown(); continue; }
-                    pool.submit(() -> {
-                        try {
-                            int current = done.incrementAndGet();
-                            int percent = (current * 100) / total;
-
-                            StatusBus.postServer(ctx, server.id, server.host, "pinging", -1, false, current + "/" + total);
-
-                            // ════════════════════════════════════════════════════════════════
-                            // TCP тест через LTE (даже при WiFi)
-                            // ════════════════════════════════════════════════════════════════
-                            ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server);
-
-                            if (!tcp.trafficOk) {
-                                server.trafficOk = false;
-                                server.lastTestedAt = System.currentTimeMillis();
-                                server.tcpPingMs = (int) tcp.pingMs;
-                                repo.updateServerSync(server);
-                                StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
-                                StatusBus.postServer(
-                                        ctx, server.id, server.host, "fail", tcp.pingMs, false,
-                                        "✗ TCP " + tcp.pingMs + "ms"  // ← TCP пинг в detail
-                                );
-                            } else {
-                                StatusBus.postServer(
-                                        ctx, server.id, server.host, "testing", tcp.pingMs, false,
-                                        "TCP " + tcp.pingMs + "ms → VLESS..."  // ← TCP пинг в detail
-                                );
-                                StatusBus.postServer(ctx, server.id, server.host, "testing", tcp.pingMs, false, "TCP " + tcp.pingMs + "ms → VLESS...");
-
-                                int testPort = (portCounter.getAndIncrement() % 100) + 10900;
-                                String testCfg = V2RayConfigBuilder.buildForTest(server, testPort);
-                                long vlessDelay = V2RayManager.measureDelay(ctx, testCfg);
-
-                                if (vlessDelay > 0) {
-                                    StatusBus.postServer(
-                                            ctx, server.id, server.host, "ok", vlessDelay, true,
-                                            "✓ VLESS " + vlessDelay + "ms"
-                                    );
-                                    server.pingMs = vlessDelay;      // ← VLESS задержка
-                                    server.tcpPingMs = (int) tcp.pingMs;  // ← TCP ping
-                                    server.trafficOk = true;
-                                    server.lastTestedAt = System.currentTimeMillis();
-                                    repo.updateServerSync(server);
-                                    ok.incrementAndGet();
-                                    StatusBus.postServer(ctx, server.id, server.host, "ok", vlessDelay, true, "✓ VLESS " + vlessDelay + "ms");
-                                } else {
-                                    StatusBus.postServer(
-                                            ctx, server.id, server.host, "fail", tcp.pingMs, false,
-                                            "✗ VLESS (TCP " + tcp.pingMs + "ms)"  // ← TCP пинг в detail
-                                    );
-                                    server.trafficOk = false;
-                                    server.pingMs = -1;              // ← VLESS не прошёл
-                                    server.tcpPingMs = (int) tcp.pingMs;  // ← Но TCP ping сохраняем
-                                    server.lastTestedAt = System.currentTimeMillis();
-                                    repo.updateServerSync(server);
-                                    StatusBus.postServer(ctx, server.id, server.host, "fail", tcp.pingMs, false, "✗ VLESS");
-                                }
-                            }
-
-                            StatusBus.updateCounts(ctx, total, ok.get(), current - ok.get());
-                            StatusBus.setProgress(ctx, percent);
-                            StatusBus.post(ctx, "🔍 " + current + "/" + total + " (✓ " + ok.get() + " рабочих)", true);
-
-                        } catch (Exception e) {
-                            FileLogger.e(W, "Ошибка теста " + server.host, e);
-                        } finally {
-                            latch.countDown();
-                        }
-                    });
-                }
-
-                try { latch.await(10, TimeUnit.MINUTES); } catch (InterruptedException ignored) {}
-                pool.shutdownNow();
-
-                repo.markScanned();
-
-                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-                int finalOk = ok.get();
-                int finalFail = total - finalOk;
-                StatusBus.setWorking(ctx, false);
-                StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total + " (✗ " + finalFail + ")");
-
-                checkWifiAndManageVpn(ctx, repo);  // ← НОВОЕ: Проверка WiFi и авто-подключение/отключение VPN
-
-                FileLogger.i(W, "=== Завершено: " + finalOk + "/" + total + " ===");
-                return Result.success();
-
+                return doScan(ctx, repo);
             } finally {
-                if (wakeLock.isHeld()) {
-                    wakeLock.release();
-                }
+                if (wakeLock.isHeld()) wakeLock.release();
             }
         }
 
-        private static void checkWifiAndManageVpn(Context ctx, ServerRepository repo) {
-            // Проверяем только после сканирования (не монитор)
-            if (!repo.isAutoConnectAfterScan()) {
-                FileLogger.d(W, "Авто-подключение после сканирования отключено");
-                return;
+        private Result doScan(Context ctx, ServerRepository repo) {
+            List<VlessServer> toTest = repo.getAllServersSync();
+            if (toTest.isEmpty()) {
+                StatusBus.done(ctx, "⚠️ Нет серверов в базе");
+                return Result.retry();
             }
 
-            boolean wifiConnected = WifiMonitor.isWifiConnected(ctx);
-            boolean vpnRunning = VpnTunnelService.isRunning;
+            int total = toTest.size();
+            StatusBus.post(ctx, "🔍 Тестируем " + total + " серверов...", true);
+            StatusBus.setWorking(ctx, true);
 
-            FileLogger.i(W, "После сканирования — WiFi: " + (wifiConnected ? "ПОДКЛЮЧЕН" : "ОТКЛЮЧЕН") +
-                    ", VPN: " + (vpnRunning ? "ПОДКЛЮЧЕН" : "ОТКЛЮЧЕН"));
+            ExecutorService pool = Executors.newFixedThreadPool(10);
+            AtomicInteger portCounter = new AtomicInteger(10900);
+            CountDownLatch latch = new CountDownLatch(total);
+            AtomicInteger done  = new AtomicInteger(0);
+            AtomicInteger ok    = new AtomicInteger(0);
+
+            for (VlessServer server : toTest) {
+                if (isStopped()) { latch.countDown(); continue; }
+                pool.submit(() -> {
+                    try {
+                        int curr    = done.incrementAndGet();
+                        int percent = (curr * 100) / total;
+
+                        StatusBus.postServer(ctx, server.id, server.host,
+                                "pinging", -1, false, curr + "/" + total);
+
+                        // Шаг 1: TCP пинг (быстрая фильтрация недоступных)
+                        ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server);
+
+                        if (!tcp.trafficOk) {
+                            server.trafficOk    = false;
+                            server.pingMs       = -1;
+                            server.tcpPingMs    = (int) tcp.pingMs;
+                            server.lastTestedAt = System.currentTimeMillis();
+                            repo.updateServerSync(server);
+                            StatusBus.postServer(ctx, server.id, server.host,
+                                    "fail", -1, false, "✗ TCP");
+                        } else {
+                            // Шаг 2: VLESS measureDelay (реальная проверка протокола)
+                            StatusBus.postServer(ctx, server.id, server.host,
+                                    "testing", tcp.pingMs, false,
+                                    "TCP " + tcp.pingMs + "ms → VLESS...");
+
+                            int testPort = (portCounter.getAndIncrement() % 100) + 10900;
+                            String testCfg = V2RayConfigBuilder.buildForTest(server, testPort);
+                            long vlessDelay = V2RayManager.measureDelay(ctx, testCfg);
+
+                            if (vlessDelay > 0) {
+                                server.pingMs       = vlessDelay;
+                                server.tcpPingMs    = (int) tcp.pingMs;
+                                server.trafficOk    = true;
+                                server.lastTestedAt = System.currentTimeMillis();
+                                repo.updateServerSync(server);
+                                ok.incrementAndGet();
+                                StatusBus.postServer(ctx, server.id, server.host,
+                                        "ok", vlessDelay, true,
+                                        "✓ VLESS " + vlessDelay + "ms");
+                            } else {
+                                server.trafficOk    = false;
+                                server.pingMs       = -1;
+                                server.tcpPingMs    = (int) tcp.pingMs;
+                                server.lastTestedAt = System.currentTimeMillis();
+                                repo.updateServerSync(server);
+                                StatusBus.postServer(ctx, server.id, server.host,
+                                        "fail", tcp.pingMs, false,
+                                        "✗ VLESS (TCP " + tcp.pingMs + "ms)");
+                            }
+                        }
+
+                        StatusBus.updateCounts(ctx, total, ok.get(), curr - ok.get());
+                        StatusBus.setProgress(ctx, percent);
+                        StatusBus.post(ctx,
+                                "🔍 " + curr + "/" + total + " (✓ " + ok.get() + " рабочих)", true);
+
+                    } catch (Exception e) {
+                        FileLogger.e(W, "Ошибка теста " + server.host, e);
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+
+            try { latch.await(10, TimeUnit.MINUTES); } catch (InterruptedException ignored) {}
+            pool.shutdownNow();
+
+            repo.markScanned();
+
+            int finalOk   = ok.get();
+            int finalFail = total - finalOk;
+            StatusBus.setWorking(ctx, false);
+            StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total
+                    + " (✗ " + finalFail + ")");
+
+            // Авто-подключение после сканирования (если включено)
+            checkAutoConnect(ctx, repo);
+
+            FileLogger.i(W, "=== Завершено: " + finalOk + "/" + total + " ===");
+            return Result.success();
+        }
+
+        private static void checkAutoConnect(Context ctx, ServerRepository repo) {
+            if (!repo.isAutoConnectAfterScan()) return;
+
+            boolean wifiConnected = WifiMonitor.isWifiConnected(ctx);
+            boolean vpnRunning    = VpnTunnelService.isRunning;
 
             if (!wifiConnected && !vpnRunning) {
-                FileLogger.i(W, "WiFi отсутствует → подключаем VPN");
-                autoConnectVpn(ctx, repo);
+                VlessServer server = repo.getLastWorkingServer();
+                if (server == null) {
+                    List<VlessServer> working = repo.getTopServersSync();
+                    if (working.isEmpty()) return;
+                    server = working.get(0);
+                }
+                FileLogger.i(W, "Авто-подключение после сканирования: " + server.host);
+                Intent i = new Intent(ctx, VpnTunnelService.class);
+                i.setAction(VpnTunnelService.ACTION_CONNECT);
+                i.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(server));
+                i.putExtra(VpnTunnelService.EXTRA_AUTO_CONNECT, true);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    ctx.startForegroundService(i);
+                else
+                    ctx.startService(i);
             }
 
             if (wifiConnected && vpnRunning) {
-                FileLogger.i(W, "WiFi появился → отключаем VPN");
-                autoDisconnectVpn(ctx);
+                Intent i = new Intent(ctx, VpnTunnelService.class);
+                i.setAction(VpnTunnelService.ACTION_DISCONNECT);
+                ctx.startService(i);
             }
-        }
-
-        // ════════════════════════════════════════════════════════════════
-        // ← НОВЫЙ МЕТОД: Авто-подключение к последнему рабочему серверу
-        // ════════════════════════════════════════════════════════════════
-
-        private static void autoConnectVpn(Context ctx, ServerRepository repo) {
-            // Получаем последний рабочий сервер
-            VlessServer server = repo.getLastWorkingServer();
-
-            if (server == null) {
-                // Если нет сохранённого — берём первый из рабочих
-                List<VlessServer> working = repo.getTopServersSync();
-                if (working.isEmpty()) {
-                    FileLogger.w(W, "Нет рабочих серверов для авто-подключения");
-                    return;
-                }
-                server = working.get(0);
-            }
-
-            FileLogger.i(W, "Авто-подключение к: " + server.host + ":" + server.port);
-
-            // Запускаем VPN сервис
-            Intent intent = new Intent(ctx, VpnTunnelService.class);
-            intent.setAction(VpnTunnelService.ACTION_CONNECT);
-            intent.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(server));
-            intent.putExtra(VpnTunnelService.EXTRA_AUTO_CONNECT, true);  // ← Флаг авто-подключения
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ctx.startForegroundService(intent);
-            } else {
-                ctx.startService(intent);
-            }
-
-            FileLogger.i(W, "VPN запущен (авто-подключение)");
-        }
-
-        // ════════════════════════════════════════════════════════════════
-        // ← НОВЫЙ МЕТОД: Авто-отключение VPN
-        // ════════════════════════════════════════════════════════════════
-
-        private static void autoDisconnectVpn(Context ctx) {
-            Intent intent = new Intent(ctx, VpnTunnelService.class);
-            intent.setAction(VpnTunnelService.ACTION_DISCONNECT);
-            ctx.startService(intent);
-
-            FileLogger.i(W, "VPN остановлен (авто-отключение)");
         }
     }
 }

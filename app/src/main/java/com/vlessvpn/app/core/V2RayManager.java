@@ -104,11 +104,14 @@ public class V2RayManager {
         libv2ray.CoreController ctrl = coreController;
         if (ctrl == null) return new long[]{0, 0};
         try {
-            long up   = ctrl.queryStats("proxy", "uplink");
-            long down = ctrl.queryStats("proxy", "downlink");
+            // Xray-core использует полный путь счётчика: "outbound>>>tag>>>traffic>>>direction"
+            long up   = ctrl.queryStats("outbound>>>proxy>>>traffic>>>uplink",   "");
+            long down = ctrl.queryStats("outbound>>>proxy>>>traffic>>>downlink", "");
+            FileLogger.d(TAG, "queryStats up=" + up + " down=" + down);
             if (callback != null) callback.onStatsUpdate(up, down);
             return new long[]{up, down};
         } catch (Exception e) {
+            FileLogger.w(TAG, "queryStats error: " + e.getMessage());
             return new long[]{0, 0};
         }
     }

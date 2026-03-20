@@ -25,8 +25,11 @@ public class MainViewModel extends AndroidViewModel {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // VPN статус
-    private final MutableLiveData<Boolean>     isConnected    = new MutableLiveData<>(false);
-    private final MutableLiveData<VlessServer> connectedServer = new MutableLiveData<>(null);
+    private final MutableLiveData<Boolean>     isConnected       = new MutableLiveData<>(false);
+    private final MutableLiveData<VlessServer> connectedServer   = new MutableLiveData<>(null);
+
+    // Статус сканирования и трафик
+    private final MutableLiveData<String>      lastStatusMessage = new MutableLiveData<>("");
 
     public MainViewModel(@NonNull Application application) {
         super(application);
@@ -36,11 +39,10 @@ public class MainViewModel extends AndroidViewModel {
         // Слушаем изменения VPN состояния
         VpnTunnelService.registerConnectionListener(application, this::setConnected);
 
-        // Слушаем StatusBus (прогресс сканирования показывается через broadcast в MainActivity)
+        // Слушаем StatusBus — пробрасываем сообщение в lastStatusMessage (трафик + прогресс)
         StatusBus.get().observeForever(event -> {
-            if (event != null) {
-                // ViewModel больше не пытается разбирать progress-сообщения —
-                // это делает statusReceiver в MainActivity напрямую.
+            if (event != null && event.message != null && !event.message.isEmpty()) {
+                lastStatusMessage.postValue(event.message);
             }
         });
 
@@ -54,7 +56,8 @@ public class MainViewModel extends AndroidViewModel {
 
     // ── VPN статус ────────────────────────────────────────────────────────────
 
-    public LiveData<Boolean>     getIsConnected()    { return isConnected; }
+    public LiveData<Boolean>     getIsConnected()      { return isConnected; }
+    public LiveData<String>      getLastStatusMessage() { return lastStatusMessage; }
     public LiveData<VlessServer> getConnectedServer() { return connectedServer; }
 
     private void setConnected(boolean connected) {

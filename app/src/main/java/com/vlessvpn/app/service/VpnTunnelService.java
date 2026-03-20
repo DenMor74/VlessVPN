@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
@@ -79,31 +80,31 @@ public class VpnTunnelService extends VpnService {
     private final Handler mainHandler  = new Handler(Looper.getMainLooper());
     private final Handler statsHandler = new Handler(Looper.getMainLooper());
 
+    // Предыдущие значения для расчёта скорости за секунду
+    private long prevUp   = 0;
+    private long prevDown = 0;
+
     private final Runnable statsPoller = new Runnable() {
         @Override public void run() {
             if (!isRunning) return;
 
-            // Читаем трафик из /proc/net/dev (tun интерфейс) — не зависит от xray stats API
+            // Текущий накопленный трафик UID с момента подключения
             long[] tun = readTunStats();
-            if (tun[0] > 0 || tun[1] > 0) {
-                totalUp   = tun[0];
-                totalDown = tun[1];
-            } else {
-                // Fallback на xray queryStats
-                V2RayManager mgr = v2RayManager;
-                if (mgr != null) {
-                    long[] s = mgr.getStats();
-                    totalUp   = s[0];
-                    totalDown = s[1];
-                }
-            }
+            totalUp   = tun[0];
+            totalDown = tun[1];
+
+            // Скорость = разница с предыдущим замером (за ~1 сек)
+            long speedUp   = Math.max(0, totalUp   - prevUp);
+            long speedDown = Math.max(0, totalDown - prevDown);
+            prevUp   = totalUp;
+            prevDown = totalDown;
+
+            String speedStr = "↑ " + fmtSpeed(speedUp) + "  ↓ " + fmtSpeed(speedDown);
 
             VlessServer srv = connectedServer;
-            if (srv != null) {
-                updateNotification(
-                    "↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), srv.host);
-            }
-            StatusBus.post("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), true);
+            if (srv != null) updateNotification(speedStr, srv.host);
+
+            StatusBus.post(speedStr, true);
 
             statsHandler.postDelayed(this, 1_000);
         }
@@ -122,7 +123,7 @@ public class VpnTunnelService extends VpnService {
         public void run() {
             // Сначала проверяем что VPN ещё активен
             if (!isRunning) {
-                //FileLogger.d(TAG, "checkRunnable: VPN неактивен — останавливаем цикл");
+                FileLogger.d(TAG, "checkRunnable: VPN неактивен — останавливаем цикл");
                 return;
             }
             if (bgExecutor == null || bgExecutor.isShutdown()) {
@@ -132,7 +133,7 @@ public class VpnTunnelService extends VpnService {
 
             // Планируем СЛЕДУЮЩУЮ проверку только если всё ок
             checkHandler.postDelayed(this, 60_000L);
-            //FileLogger.i(TAG, "=== 1-min проверка соединения ===");
+            // FileLogger.i(TAG, "=== 1-min проверка соединения ===");
 
             bgExecutor.execute(VpnTunnelService.this::doConnectivityCheck);
         }
@@ -304,6 +305,8 @@ public class VpnTunnelService extends VpnService {
                     connectedServer = s;
                     currentServer  = s;
                     totalUp = 0; totalDown = 0;
+                    prevUp = 0; prevDown = 0;
+                    resetTunBase(VpnTunnelService.this); // фиксируем нулевую точку для UID счётчиков
                     StatusBus.post(VpnTunnelService.this, "Подключено: " + s.host, true);
                     statsHandler.postDelayed(statsPoller, 500);
                     startPeriodicCheck(); // единственное место планирования periodic check
@@ -399,7 +402,7 @@ public class VpnTunnelService extends VpnService {
             }
         }
         VlessServer next = servers.get((currIdx + 1) % servers.size());
-        FileLogger.i(TAG, "---> " + next.host);
+        FileLogger.i(TAG, "Переключаемся на: " + next.host);
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this,
                 "Переключение на " + next.remark, true));
 
@@ -439,6 +442,8 @@ public class VpnTunnelService extends VpnService {
         FileLogger.i(TAG, "fullStop()");
         isRunning = false;
         connectedServer = null;
+        totalUp   = 0;
+        totalDown = 0;
 
         if (Looper.myLooper() == Looper.getMainLooper()) {
             statsHandler.removeCallbacks(statsPoller);
@@ -567,29 +572,39 @@ public class VpnTunnelService extends VpnService {
 
     // ── Notification ──────────────────────────────────────────────────────────
 
-    /** Читает байты трафика через tun-интерфейс из /proc/net/dev */
-    private static long[] readTunStats() {
-        try {
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                new java.io.FileReader("/proc/net/dev"));
-            String line;
-            while ((line = br.readLine()) != null) {
-                String t = line.trim();
-                if (t.startsWith("tun")) {
-                    String data = t.substring(t.indexOf(':') + 1).trim()
-                                   .replaceAll("  +", " ");
-                    String[] p = data.split(" ");
-                    if (p.length >= 9) {
-                        long rx = Long.parseLong(p[0]); // download
-                        long tx = Long.parseLong(p[8]); // upload
-                        br.close();
-                        return new long[]{tx, rx};
-                    }
-                }
-            }
-            br.close();
-        } catch (Exception ignored) {}
-        return new long[]{0, 0};
+    /** Базовые значения трафика UID на момент старта VPN */
+    private static long uidBaseUp   = 0;
+    private static long uidBaseDown = 0;
+
+    /**
+     * Сохраняет текущий трафик UID как нулевую точку.
+     * Вызывается при подключении VPN.
+     */
+    private static void resetTunBase(Context ctx) {
+        int uid = ctx.getApplicationInfo().uid;
+        long tx = android.net.TrafficStats.getUidTxBytes(uid);
+        long rx = android.net.TrafficStats.getUidRxBytes(uid);
+        uidBaseUp   = (tx == android.net.TrafficStats.UNSUPPORTED) ? 0 : tx;
+        uidBaseDown = (rx == android.net.TrafficStats.UNSUPPORTED) ? 0 : rx;
+        FileLogger.d(TAG, "resetTunBase: baseUp=" + uidBaseUp + " baseDown=" + uidBaseDown);
+    }
+
+    /**
+     * Трафик нашего приложения с момента подключения VPN.
+     * getUidTxBytes/RxBytes — трафик только нашего UID (pid приложения).
+     * Когда VPN активен — весь трафик устройства идёт через наш процесс,
+     * поэтому это и есть туннельный трафик.
+     */
+    private long[] readTunStats() {
+        int uid = getApplicationInfo().uid;
+        long tx = android.net.TrafficStats.getUidTxBytes(uid);
+        long rx = android.net.TrafficStats.getUidRxBytes(uid);
+        if (tx == android.net.TrafficStats.UNSUPPORTED || rx == android.net.TrafficStats.UNSUPPORTED) {
+            return new long[]{0, 0};
+        }
+        long up   = Math.max(0, tx - uidBaseUp);
+        long down = Math.max(0, rx - uidBaseDown);
+        return new long[]{up, down};
     }
 
     private static String fmtBytes(long bytes) {
@@ -597,6 +612,13 @@ public class VpnTunnelService extends VpnService {
         if (bytes < 1024 * 1024)       return String.format("%.1f KB", bytes / 1024.0);
         if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
         return String.format("%.2f GB", bytes / (1024.0 * 1024 * 1024));
+    }
+
+    /** Форматирует скорость в байт/с → KB/s, MB/s */
+    private static String fmtSpeed(long bytesPerSec) {
+        if (bytesPerSec < 1024)        return bytesPerSec + " B/s";
+        if (bytesPerSec < 1024 * 1024) return String.format("%.1f KB/s", bytesPerSec / 1024.0);
+        return String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024));
     }
 
     private void createNotificationChannel() {

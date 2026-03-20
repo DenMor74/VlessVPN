@@ -155,19 +155,7 @@
         android:background="#111827"
         android:visibility="gone"/>
 
-    <!-- ===== ЗАГОЛОВОК СПИСКА ===== -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Топ серверов по скорости"
-        android:textSize="12sp"
-        android:textColor="@color/text_secondary"
-        android:textAllCaps="true"
-        android:letterSpacing="0.08"
-        android:paddingLeft="16dp"
-        android:paddingRight="16dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="6dp"/>
+
 
     <!-- ===== СПИСОК СЕРВЕРОВ ===== -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout

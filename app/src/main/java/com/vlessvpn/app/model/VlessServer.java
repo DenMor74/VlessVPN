@@ -55,7 +55,8 @@ public class VlessServer {
 
     // ========== РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ==========
 
-    public long pingMs = -1;
+    public long pingMs = -1; // ← VLESS задержка (основная)
+    public int tcpPingMs = -1;
     public boolean trafficOk = false;
     public long lastTestedAt = 0;
     public String sourceUrl = "";

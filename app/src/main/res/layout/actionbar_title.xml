@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="start">
+
+    <!-- Название приложения (крупно, сверху) -->
+    <TextView
+        android:id="@+id/tv_actionbar_app_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/app_name"
+        android:textSize="25sp"
+        android:textStyle="bold"
+        android:textColor="#03A9F4"
+        android:layout_marginTop="10dp"
+        android:paddingHorizontal="-12dp"
+        android:letterSpacing="0.05"/>
+
+    <!-- Версия (мелко, снизу) -->
+    <TextView
+        android:id="@+id/tv_actionbar_version"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="-5dp"
+        android:fontFamily="monospace"
+        android:gravity="right"
+        android:text="v1.0.0"
+        android:textColor="#6A8AAA"
+
+        android:textSize="10sp" />
+
+</LinearLayout>

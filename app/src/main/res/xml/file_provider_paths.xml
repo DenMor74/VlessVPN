@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Пути для FileProvider — нужен чтобы передавать файлы другим приложениям -->
-<paths>
-    <!-- files-path = context.getFilesDir() = /data/data/com.vlessvpn.app/files/ -->
-    <files-path name="logs" path="." />
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ════════════════════════════════════════════════════════════════ -->
+    ← ВАЖНО: external-files-path для Android 10+
+    <!-- ════════════════════════════════════════════════════════════════ -->
+
+    <external-files-path
+        name="downloads"
+        path="Download/"/>
+
+    <external-path
+        name="external"
+        path="."/>
+
+    <cache-path
+        name="cache"
+        path="."/>
+
+    <files-path
+        name="files"
+        path="."/>
 </paths>

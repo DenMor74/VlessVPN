@@ -6,6 +6,7 @@
     android:orientation="vertical"
     android:background="@color/bg_dark">
 
+
     <TextView
         android:id="@+id/tv_auto_connect_status"
         android:layout_width="wrap_content"
@@ -86,101 +87,68 @@
 
     </LinearLayout>
 
-    <!-- ===== ПАНЕЛЬ ПРОГРЕССА ===== -->
+    <!-- ════════════════════════════════════════════════════════════════ -->
+    <!-- ПАНЕЛЬ ИНФОРМАЦИИ (4 строки, всегда видны) -->
+    <!-- ════════════════════════════════════════════════════════════════ -->
+
     <LinearLayout
-        android:id="@+id/panel_progress"
+        android:id="@+id/panel_info"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#1A1F3A"
-        android:paddingLeft="16dp"
-        android:paddingRight="16dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="10dp"
-        android:visibility="gone">
+        android:background="@color/bg_card"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:layout_marginTop="8dp"
+        android:visibility="visible">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <ProgressBar
-                android:id="@+id/progress_spinner"
-                android:layout_width="18dp"
-                android:layout_height="18dp"
-                android:layout_marginRight="8dp"
-                style="?android:attr/progressBarStyleSmall"/>
-
-            <TextView
-                android:id="@+id/tv_progress_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Проверка серверов..."
-                android:textSize="13sp"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"/>
-
-        </LinearLayout>
-
+        <!-- Строка 1: Текущий режим ИЛИ прогресс проверки -->
         <TextView
-            android:id="@+id/tv_progress_detail"
+            android:id="@+id/tv_status_mode"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:text="Готов к подключению"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:gravity="start"/>
+
+        <!-- Строка 2: Количество серверов (всегда) -->
+        <TextView
+            android:id="@+id/tv_server_counts"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📊 Всего: 0 | ✓ Рабочих: 0 | ✗ Нет связи: 0"
+            android:textSize="11sp"
+            android:textColor="#8899AA"
+            android:gravity="start"
             android:layout_marginTop="4dp"
-            android:text=""
-            android:textSize="12sp"
-            android:textColor="#AABBDD"
             android:fontFamily="monospace"/>
 
-        <LinearLayout
+        <!-- Строка 3: Последнее обновление списка (всегда) -->
+        <TextView
+            android:id="@+id/tv_last_update"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="6dp">
+            android:text="📥 Обновлено: не обновлялось"
+            android:textSize="11sp"
+            android:textColor="#667788"
+            android:gravity="start"
+            android:layout_marginTop="2dp"/>
 
-            <TextView
-                android:id="@+id/tv_count_total"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="В листе: —"
-                android:textSize="11sp"
-                android:textColor="#7799BB"/>
-
-            <TextView
-                android:id="@+id/tv_count_ok"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="✓ Рабочих: —"
-                android:textSize="11sp"
-                android:textColor="#4CAF50"/>
-
-            <TextView
-                android:id="@+id/tv_count_fail"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="✗ Нет связи: —"
-                android:textSize="11sp"
-                android:textColor="#FF5555"/>
-
-        </LinearLayout>
-
-        <ProgressBar
-            android:id="@+id/progress_bar"
-            style="?android:attr/progressBarStyleHorizontal"
+        <!-- Строка 4: Последняя проверка серверов (всегда) -->
+        <TextView
+            android:id="@+id/tv_last_scan"
             android:layout_width="match_parent"
-            android:layout_height="6dp"
-            android:layout_marginTop="8dp"
-            android:max="100"
-            android:progress="0"
-            android:progressTint="#1A56DB"
-            android:indeterminate="false"/>
+            android:layout_height="wrap_content"
+            android:text="🔍 Проверка: не проверялся"
+            android:textSize="11sp"
+            android:textColor="#667788"
+            android:gravity="start"
+            android:layout_marginTop="2dp"/>
 
     </LinearLayout>
+
 
     <!-- ===== ПОСЛЕДНИЙ СТАТУС ===== -->
     <TextView
@@ -196,19 +164,6 @@
         android:textColor="#6688AA"
         android:background="#111827"
         android:visibility="visible"/>
-
-    <!-- ===== ВРЕМЯ ОБНОВЛЕНИЯ ===== -->
-    <TextView
-        android:id="@+id/tv_last_update"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingLeft="16dp"
-        android:paddingRight="16dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="2dp"
-        android:text="Список не обновлялся"
-        android:textSize="11sp"
-        android:textColor="#556677"/>
 
     <!-- ===== ЗАГОЛОВОК ===== -->
     <TextView

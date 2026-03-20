@@ -43,7 +43,7 @@ public class ServerRepository {
     public static final String PREF_LAST_WORKING_SERVER = "last_working_server_json";
 
     public static final String DEFAULT_CONFIG_URL =
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt  ";
+            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt\nhttps://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt";
 
     public static final String PREF_SCAN_INTERVAL = "scan_interval_minutes";  // ← НОВОЕ
     public static final int DEFAULT_SCAN_INTERVAL = 30;  // 30 минут по умолчанию
@@ -52,6 +52,11 @@ public class ServerRepository {
     public static final String PREF_NIGHT_START_HOUR = "night_start_hour";
     public static final String PREF_NIGHT_END_HOUR = "night_end_hour";
 
+    public static final String PREF_AUTO_CONNECT_AFTER_SCAN = "auto_connect_after_scan";
+    public static final String PREF_LAST_SCAN_TIMESTAMP = "last_scan_timestamp";
+    public static final String PREF_LAST_UPDATE_TIMESTAMP = "last_update_timestamp";
+
+
     /**
      * Получить интервал сканирования текущего списка (минуты)
      * @return интервал в минутах (10-1440)
@@ -59,8 +64,6 @@ public class ServerRepository {
     public int getScanIntervalMinutes() {
         return prefs.getInt(PREF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL);
     }
-
-
 
     /**
      * Проверить: нужно ли сканировать текущий список
@@ -72,10 +75,12 @@ public class ServerRepository {
     }
 
     /**
-     * Отметить время сканирования
+     * Сохранить время проверки серверов
      */
     public void markScanned() {
-        prefs.edit().putLong("last_scan_timestamp", System.currentTimeMillis()).apply();
+        long now = System.currentTimeMillis();
+        prefs.edit().putLong(PREF_LAST_SCAN_TIMESTAMP, now).apply();
+        //FileLogger.i("ServerRepository", "markScanned: " + now);
     }
 
     public ServerRepository(Context context) {
@@ -160,13 +165,32 @@ public class ServerRepository {
         prefs.edit().putLong(PREF_LAST_UPDATE, System.currentTimeMillis()).apply();
     }
 
+    /**
+     * Получить время последнего обновления списка
+     */
     public long getLastUpdateTimestamp() {
-        return prefs.getLong(PREF_LAST_UPDATE, 0);
+        long ts = prefs.getLong(PREF_LAST_UPDATE_TIMESTAMP, 0);
+        //FileLogger.d("ServerRepository", "getLastUpdateTimestamp: " + ts);
+        return ts;
     }
 
-    public void resetUpdateTime() {
-        prefs.edit().putLong(PREF_LAST_UPDATE, 0).apply();
+    /**
+     * Сохранить время обновления списка
+     */
+    public void saveUpdateTimestamp() {
+        long now = System.currentTimeMillis();
+        prefs.edit().putLong(PREF_LAST_UPDATE_TIMESTAMP, now).apply();
+        //FileLogger.i("ServerRepository", "saveUpdateTimestamp: " + now);
     }
+
+    /**
+     * Сбросить время обновления (для принудительной загрузки)
+     */
+    public void resetUpdateTime() {
+        prefs.edit().putLong(PREF_LAST_UPDATE_TIMESTAMP, 0).apply();
+       // FileLogger.i("ServerRepository", "resetUpdateTime");
+    }
+
 
     public void resetAllTestTimes() {
         executor.execute(dao::resetAllTestTimes);
@@ -429,10 +453,12 @@ public class ServerRepository {
 
 
     /**
-     * Получить время последней проверки списка
+     * Получить время последней проверки серверов
      */
     public long getLastScanTimestamp() {
-        return prefs.getLong("last_scan_timestamp", 0);
+        long ts = prefs.getLong(PREF_LAST_SCAN_TIMESTAMP, 0);
+        FileLogger.d("ServerRepository", "getLastScanTimestamp: " + ts);
+        return ts;
     }
 
     /**
@@ -485,5 +511,13 @@ public class ServerRepository {
         }
 
         return false;
+    }
+
+    public boolean isAutoConnectAfterScan() {
+        return prefs.getBoolean(PREF_AUTO_CONNECT_AFTER_SCAN, false);
+    }
+
+    public void saveAutoConnectAfterScan(boolean enabled) {
+        prefs.edit().putBoolean(PREF_AUTO_CONNECT_AFTER_SCAN, enabled).apply();
     }
 }

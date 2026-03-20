@@ -83,10 +83,13 @@ public class VpnTunnelService extends VpnService {
                 if (srv != null) {
                     updateNotification("↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown), srv.host);
                 }
-
-                String trafficMsg = "↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown);
+                String trafficMsg = "TRAFFIC:" + fmtBytes(totalUp) + "|" + fmtBytes(totalDown);
                 StatusBus.post(VpnTunnelService.this, trafficMsg, true);
 
+                Intent broadcast = new Intent("com.vlessvpn.TRAFFIC_UPDATE");
+                broadcast.putExtra("totalUp", totalUp);
+                broadcast.putExtra("totalDown", totalDown);
+                sendBroadcast(broadcast);
                 statsHandler.postDelayed(this, 1_000);
             }
         }
@@ -155,10 +158,14 @@ public class VpnTunnelService extends VpnService {
         checkHandler = new Handler(Looper.getMainLooper());
     }
 
+// ════════════════════════════════════════════════════════════════
+// В onStartCommand() — добавить обработку флага
+// ════════════════════════════════════════════════════════════════
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
-        //FileLogger.i(TAG, "onStartCommand: " + action);
+       // FileLogger.i(TAG, "onStartCommand: " + action);
 
         if (ACTION_DISCONNECT.equals(action)) {
             disconnect();
@@ -170,7 +177,7 @@ public class VpnTunnelService extends VpnService {
 
         if (intent != null) {
             String json = intent.getStringExtra(EXTRA_SERVER);
-            isAutoConnect = intent.getBooleanExtra(EXTRA_AUTO_CONNECT, false);
+            isAutoConnect = intent.getBooleanExtra(EXTRA_AUTO_CONNECT, false);  // ← Флаг
 
             if (json != null) {
                 try {
@@ -180,6 +187,14 @@ public class VpnTunnelService extends VpnService {
                 }
             }
         }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← Если авто-подключение — не показывать уведомление
+        // ════════════════════════════════════════════════════════════════
+        if (isAutoConnect) {
+            //FileLogger.i(TAG, "Авто-подключение (без уведомления)");
+        }
+
         if (server == null) {
             stopSelf();
             return START_NOT_STICKY;
@@ -457,7 +472,7 @@ public class VpnTunnelService extends VpnService {
 // ════════════════════════════════════════════════════════════════
 
     private void doConnectivityCheck() {
-        FileLogger.i(TAG, "=== 1-min Тест соединения:");
+        //FileLogger.i(TAG, "=== 1-min Тест соединения:");
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Проверка соединения...", true));
 
         // ════════════════════════════════════════════════════════════════
@@ -862,5 +877,35 @@ public class VpnTunnelService extends VpnService {
         if (nm != null) {
             nm.notify(NOTIF_ID, buildNotification(title, text));
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+// В VpnTunnelService.java — добавить статический метод
+// ════════════════════════════════════════════════════════════════
+
+    private static long bytesUploaded = 0;
+    private static long bytesDownloaded = 0;
+
+    public static String getTrafficStats() {
+        // Форматировать трафик
+        String up = formatBytes(bytesUploaded);
+        String down = formatBytes(bytesDownloaded);
+        return "↑ " + up + "  ↓ " + down;
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024) + " KB";
+        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)) + " MB";
+        return (bytes / (1024 * 1024 * 1024)) + " GB";
+    }
+
+// ════════════════════════════════════════════════════════════════
+// Обновлять счётчики в процессе работы VPN
+// ════════════════════════════════════════════════════════════════
+
+    private void updateTrafficStats(long up, long down) {
+        bytesUploaded = up;
+        bytesDownloaded = down;
     }
 }

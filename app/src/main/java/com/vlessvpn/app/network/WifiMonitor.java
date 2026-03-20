@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 import android.net.NetworkRequest;
 import androidx.annotation.NonNull;
 
@@ -48,13 +49,13 @@ public class WifiMonitor {
 
                 // 2. ← НОВОЕ: Если VPN запущен — отключаем его
                 if (VpnTunnelService.isRunning) {
-                    FileLogger.i(TAG, "VPN активен — отключаем (WiFi восстановлен)");
+                    //FileLogger.i(TAG, "VPN активен — отключаем (WiFi восстановлен)");
 
                     Intent disconnectIntent = new Intent(appContext, VpnTunnelService.class);
                     disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
                     appContext.startService(disconnectIntent);
 
-                    FileLogger.i(TAG, "Отправлен ACTION_DISCONNECT");
+                    //FileLogger.i(TAG, "Отправлен ACTION_DISCONNECT");
                 }
             }
 
@@ -90,5 +91,43 @@ public class WifiMonitor {
                 FileLogger.e(TAG, "Ошибка остановки мониторинга", e);
             }
         }
+    }
+
+// ════════════════════════════════════════════════════════════════
+// В WifiMonitor.java — исправить метод isWifiConnected()
+// ════════════════════════════════════════════════════════════════
+
+    /**
+     * Проверить: подключён ли WiFi с интернетом
+     * @param ctx контекст
+     * @return true если WiFi активен и имеет интернет
+     */
+    public static boolean isWifiConnected(Context ctx) {
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return false;
+
+        // ════════════════════════════════════════════════════════════════
+        // ← СОВРЕМЕННЫЙ API (API 23+)
+        // ════════════════════════════════════════════════════════════════
+
+        // Проверяем все активные сети
+        for (Network net : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+            if (caps == null) continue;
+
+            // Проверяем что это WiFi
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                // Проверяем что есть интернет и он валидирован
+                boolean hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+                boolean isVerified = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+
+                FileLogger.d("WifiMonitor", "WiFi найден: internet=" + hasInternet + ", verified=" + isVerified);
+
+                return hasInternet && isVerified;
+            }
+        }
+
+        FileLogger.d("WifiMonitor", "WiFi не найден");
+        return false;
     }
 }

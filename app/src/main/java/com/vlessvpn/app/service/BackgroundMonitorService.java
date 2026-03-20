@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
@@ -26,10 +27,11 @@ import com.vlessvpn.app.core.V2RayManager;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.network.ConfigDownloader;
 import com.vlessvpn.app.network.ServerTester;
+import com.vlessvpn.app.network.WifiMonitor;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 import com.vlessvpn.app.util.StatusBus;
-
+import com.google.gson.Gson;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -202,7 +204,7 @@ public class BackgroundMonitorService extends Service {
                 StatusBus.post(ctx, "⚠️ Нет интернета — скачивание пропущено", true);
                 return Result.retry();
             }
-
+            repo.saveUpdateTimestamp();
             return Result.success();
         }
 
@@ -298,6 +300,7 @@ public class BackgroundMonitorService extends Service {
                             if (!tcp.trafficOk) {
                                 server.trafficOk = false;
                                 server.lastTestedAt = System.currentTimeMillis();
+                                server.tcpPingMs = (int) tcp.pingMs;
                                 repo.updateServerSync(server);
                                 StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
                                 StatusBus.postServer(
@@ -320,7 +323,8 @@ public class BackgroundMonitorService extends Service {
                                             ctx, server.id, server.host, "ok", vlessDelay, true,
                                             "✓ VLESS " + vlessDelay + "ms"
                                     );
-                                    server.pingMs = vlessDelay;
+                                    server.pingMs = vlessDelay;      // ← VLESS задержка
+                                    server.tcpPingMs = (int) tcp.pingMs;  // ← TCP ping
                                     server.trafficOk = true;
                                     server.lastTestedAt = System.currentTimeMillis();
                                     repo.updateServerSync(server);
@@ -332,7 +336,8 @@ public class BackgroundMonitorService extends Service {
                                             "✗ VLESS (TCP " + tcp.pingMs + "ms)"  // ← TCP пинг в detail
                                     );
                                     server.trafficOk = false;
-                                    server.pingMs = tcp.pingMs;
+                                    server.pingMs = -1;              // ← VLESS не прошёл
+                                    server.tcpPingMs = (int) tcp.pingMs;  // ← Но TCP ping сохраняем
                                     server.lastTestedAt = System.currentTimeMillis();
                                     repo.updateServerSync(server);
                                     StatusBus.postServer(ctx, server.id, server.host, "fail", tcp.pingMs, false, "✗ VLESS");
@@ -356,10 +361,13 @@ public class BackgroundMonitorService extends Service {
 
                 repo.markScanned();
 
+                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
                 int finalOk = ok.get();
                 int finalFail = total - finalOk;
                 StatusBus.setWorking(ctx, false);
                 StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total + " (✗ " + finalFail + ")");
+
+                checkWifiAndManageVpn(ctx, repo);  // ← НОВОЕ: Проверка WiFi и авто-подключение/отключение VPN
 
                 FileLogger.i(W, "=== Завершено: " + finalOk + "/" + total + " ===");
                 return Result.success();
@@ -369,6 +377,77 @@ public class BackgroundMonitorService extends Service {
                     wakeLock.release();
                 }
             }
+        }
+
+        private static void checkWifiAndManageVpn(Context ctx, ServerRepository repo) {
+            // Проверяем только после сканирования (не монитор)
+            if (!repo.isAutoConnectAfterScan()) {
+                FileLogger.d(W, "Авто-подключение после сканирования отключено");
+                return;
+            }
+
+            boolean wifiConnected = WifiMonitor.isWifiConnected(ctx);
+            boolean vpnRunning = VpnTunnelService.isRunning;
+
+            FileLogger.i(W, "После сканирования — WiFi: " + (wifiConnected ? "ПОДКЛЮЧЕН" : "ОТКЛЮЧЕН") +
+                    ", VPN: " + (vpnRunning ? "ПОДКЛЮЧЕН" : "ОТКЛЮЧЕН"));
+
+            if (!wifiConnected && !vpnRunning) {
+                FileLogger.i(W, "WiFi отсутствует → подключаем VPN");
+                autoConnectVpn(ctx, repo);
+            }
+
+            if (wifiConnected && vpnRunning) {
+                FileLogger.i(W, "WiFi появился → отключаем VPN");
+                autoDisconnectVpn(ctx);
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВЫЙ МЕТОД: Авто-подключение к последнему рабочему серверу
+        // ════════════════════════════════════════════════════════════════
+
+        private static void autoConnectVpn(Context ctx, ServerRepository repo) {
+            // Получаем последний рабочий сервер
+            VlessServer server = repo.getLastWorkingServer();
+
+            if (server == null) {
+                // Если нет сохранённого — берём первый из рабочих
+                List<VlessServer> working = repo.getTopServersSync();
+                if (working.isEmpty()) {
+                    FileLogger.w(W, "Нет рабочих серверов для авто-подключения");
+                    return;
+                }
+                server = working.get(0);
+            }
+
+            FileLogger.i(W, "Авто-подключение к: " + server.host + ":" + server.port);
+
+            // Запускаем VPN сервис
+            Intent intent = new Intent(ctx, VpnTunnelService.class);
+            intent.setAction(VpnTunnelService.ACTION_CONNECT);
+            intent.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(server));
+            intent.putExtra(VpnTunnelService.EXTRA_AUTO_CONNECT, true);  // ← Флаг авто-подключения
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ctx.startForegroundService(intent);
+            } else {
+                ctx.startService(intent);
+            }
+
+            FileLogger.i(W, "VPN запущен (авто-подключение)");
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВЫЙ МЕТОД: Авто-отключение VPN
+        // ════════════════════════════════════════════════════════════════
+
+        private static void autoDisconnectVpn(Context ctx) {
+            Intent intent = new Intent(ctx, VpnTunnelService.class);
+            intent.setAction(VpnTunnelService.ACTION_DISCONNECT);
+            ctx.startService(intent);
+
+            FileLogger.i(W, "VPN остановлен (авто-отключение)");
         }
     }
 }

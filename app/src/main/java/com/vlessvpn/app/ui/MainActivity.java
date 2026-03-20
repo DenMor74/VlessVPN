@@ -6,6 +6,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.VpnService;
 import android.os.Build;
@@ -35,11 +37,13 @@ import com.vlessvpn.app.R;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.network.WifiMonitor;
 import com.vlessvpn.app.service.BackgroundMonitorService;
+import com.vlessvpn.app.service.UpdateDownloadService;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 import com.vlessvpn.app.util.StatusBus;
 import com.google.gson.Gson;
+import com.vlessvpn.app.util.UpdateChecker;
 
 import android.app.Dialog;
 import android.graphics.drawable.ColorDrawable;
@@ -48,6 +52,14 @@ import android.view.WindowManager;
 import android.content.ClipboardManager;
 import android.content.ClipData;
 import java.util.List;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.view.Gravity;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.TextView;
+import androidx.appcompat.app.ActionBar;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -74,11 +86,17 @@ public class MainActivity extends AppCompatActivity {
     private TextView    tvCountFail;
     private TextView    tvLastStatus;
     private TextView    tvTraffic;
-    private TextView    tvLastUpdate;
+    // private TextView    tvLastUpdate;
     private TextView    tvAutoConnectStatus;
 
     private VlessServer pendingServer = null;
     private boolean     receiverRegistered = false;
+    private UpdateChecker updateChecker;
+
+    private TextView tvStatusMode;
+    private TextView tvServerCounts;
+    private TextView tvLastUpdate;
+    private TextView tvLastScan;
 
     @SuppressLint("RestrictedApi")
     @Override
@@ -90,42 +108,56 @@ public class MainActivity extends AppCompatActivity {
         return super.onPrepareOptionsMenu(menu);
     }
 
-    // ── VPN разрешение ───────────────────────────────────────────────────────
+
+
     private final ActivityResultLauncher<Intent> vpnPermLauncher =
             registerForActivityResult(
                     new ActivityResultContracts.StartActivityForResult(),
                     result -> {
                         if (result.getResultCode() == RESULT_OK && pendingServer != null) {
-                            doStartVpn(pendingServer);
+                            doStartVpn(pendingServer);  // ← Проверка уже внутри doStartVpn()
                             pendingServer = null;
                         } else {
                             Toast.makeText(this, "Разрешение VPN отклонено", Toast.LENGTH_SHORT).show();
+                            pendingServer = null;
                         }
                     });
 
-    // ── Broadcast receiver для VPN статуса ───────────────────────────────────
-    private final BroadcastReceiver vpnReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context ctx, Intent intent) {
-            //FileLogger.i(TAG, "=== VPN_STATUS_CHANGED broadcast получен ===");
-            refreshStatus();
+    private final BroadcastReceiver trafficReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            if (intent == null) return;
+
+            String action = intent.getAction();
+
+            if ("com.vlessvpn.TRAFFIC_UPDATE".equals(action)) {
+                long totalUp = intent.getLongExtra("totalUp", 0);
+                long totalDown = intent.getLongExtra("totalDown", 0);
+
+                String traffic = "↑ " + fmtBytes(totalUp) + "  ↓ " + fmtBytes(totalDown);
+
+                mainHandler.post(() -> {
+                    if (tvTraffic != null) {
+                        tvTraffic.setText(traffic);
+                    }
+                });
+            }
         }
     };
 
-    // ── Broadcast receiver для StatusBus (прогресс сканирования) ─────────────
-// ════════════════════════════════════════════════════════════════
-// В MainActivity.java — упростить statusReceiver
-// ════════════════════════════════════════════════════════════════
+    private final BroadcastReceiver vpnReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context ctx, Intent intent) {
+            //FileLogger.i(TAG, "=== VPN_STATUS_CHANGED broadcast получен ===");
 
-// ════════════════════════════════════════════════════════════════
-// В statusReceiver.onReceive() — НЕ скрывать панель после завершения
-// ════════════════════════════════════════════════════════════════
+            refreshStatus();
+        }
+    };
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context ctx, Intent intent) {
             if (intent == null) return;
 
             String action = intent.getAction();
-            //FileLogger.i(TAG, "statusReceiver: " + action);
 
             if (StatusBus.ACTION_STATUS_CHANGED.equals(action)) {
                 String message = intent.getStringExtra(StatusBus.EXTRA_MESSAGE);
@@ -135,34 +167,45 @@ public class MainActivity extends AppCompatActivity {
                 int ok = intent.getIntExtra(StatusBus.EXTRA_OK, 0);
                 int fail = intent.getIntExtra(StatusBus.EXTRA_FAIL, 0);
 
-                //FileLogger.d(TAG, "Progress: " + message + " run=" + isRunning);
+               // FileLogger.d(TAG, "Progress: " + message + " run=" + isRunning);
+                // ════════════════════════════════════════════════════════════════
+                // ← Обработка трафика (сообщение начинается с "TRAFFIC:")
+                // ════════════════════════════════════════════════════════════════
+                if (message != null && message.startsWith("TRAFFIC:")) {
+                    String[] parts = message.substring(8).split("\\|");
+                    if (parts.length == 2) {
+                        String traffic = "↑ " + parts[0] + "  ↓ " + parts[1];
+
+                        mainHandler.post(() -> {
+                            if (tvTraffic != null) {
+                                tvTraffic.setText(traffic);
+                                //FileLogger.d(TAG, "tvTraffic updated: " + traffic);
+                            }
+                        });
+                    }
+                    return; // ← Выходим, не обрабатываем как обычный статус
+                }
 
                 if (message != null && !message.isEmpty()) {
                     mainHandler.post(() -> {
-                        // ════════════════════════════════════════════════════════════════
-                        // ← НОВОЕ: Разделяем трафик и прогресс
-                        // ════════════════════════════════════════════════════════════════
-                        if (message.contains("↑") || message.contains("↓")) {
-                            // Это трафик → tvTraffic
-                            tvTraffic.setText(message);
-                            tvTraffic.setVisibility(View.VISIBLE);
+                        // ════════════════════════════════════════════════════
+                        // ← Обновляем ТОЛЬКО строку режима
+                        // ════════════════════════════════════════════════════
+                        if (isRunning) {
+                            tvStatusMode.setText("🔍 " + message);
+
                         } else {
-                            // Это прогресс/итог → tvLastStatus и tvProgressTitle
-                            tvProgressTitle.setText(message);
-                            tvLastStatus.setText(message);
+                            tvStatusMode.setText("✅ " + message);
+                        }
+
+                        // ════════════════════════════════════════════════════
+                        // ← Обновляем счётчики если есть данные
+                        // ════════════════════════════════════════════════════
+                        if (total > 0) {
+                            tvServerCounts.setText("📊 Всего: " + total + " | ✓ Рабочих: " + ok + " | ✗ Нет связи: " + fail);
                         }
                     });
                 }
-                mainHandler.post(() -> {
-                    progressSpinner.setVisibility(isRunning ? View.VISIBLE : View.GONE);
-                    progressBar.setProgress(progress);
-
-                    if (total > 0) {
-                        tvCountTotal.setText("В листе: " + total);
-                        tvCountOk.setText("✓ Рабочих: " + ok);
-                        tvCountFail.setText("✗ Нет связи: " + fail);
-                    }
-                });
             }
 
             if (StatusBus.ACTION_SERVER_EVENT.equals(action)) {
@@ -192,11 +235,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-// ════════════════════════════════════════════════════════════════
-// В onResume() — регистрируем с RECEIVER_EXPORTED
-// ════════════════════════════════════════════════════════════════
-
-
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     @Override
@@ -204,12 +242,15 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         FileLogger.i(TAG, "=== onCreate ===");
         setContentView(R.layout.activity_main);
+
         viewModel = new ViewModelProvider(this).get(MainViewModel.class);
         initViews();
         setupRecyclerView();
         observeData();
         updateAutoConnectStatus();
         WifiMonitor.startMonitoring(this);
+        checkUpdateIfNeeded();
+        setCustomActionBarTitle();
     }
 
     @Override
@@ -220,8 +261,16 @@ public class MainActivity extends AppCompatActivity {
         // ← Обновляем информацию о листе при каждом входе
         // ════════════════════════════════════════════════════════════════
         updateSheetInfo();
-        updateLastUpdateTime();
         updateAutoConnectStatus();
+        updateInfoPanel();  // ← Обновить всю панель
+
+        // ← Зарегистрировать traffic receiver
+        IntentFilter trafficFilter = new IntentFilter("com.vlessvpn.TRAFFIC_UPDATE");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(trafficReceiver, trafficFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(trafficReceiver, trafficFilter);
+        }
 
         // Регистрируем VPN receiver
         IntentFilter vpnFilter = new IntentFilter("com.vlessvpn.VPN_STATUS_CHANGED");
@@ -253,11 +302,74 @@ public class MainActivity extends AppCompatActivity {
             try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
             receiverRegistered = false;
         }
+        try { unregisterReceiver(trafficReceiver); } catch (Exception ignored) {}
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+    }
+
+    private void setCustomActionBarTitle() {
+        if (getSupportActionBar() != null) {
+            // Включаем отображение кастомного view
+            getSupportActionBar().setDisplayShowCustomEnabled(true);
+            getSupportActionBar().setDisplayShowTitleEnabled(false);  // ← Скрыть стандартный заголовок
+
+            // Загружаем кастомный layout
+            LayoutInflater inflater = LayoutInflater.from(this);
+            View customView = inflater.inflate(R.layout.actionbar_title, null);
+
+            // Устанавливаем layout params
+            ActionBar.LayoutParams params = new ActionBar.LayoutParams(
+                    ActionBar.LayoutParams.WRAP_CONTENT,
+                    ActionBar.LayoutParams.WRAP_CONTENT
+            );
+            params.gravity = Gravity.CENTER;  // ← Центрировать заголовок
+            getSupportActionBar().setCustomView(customView, params);
+
+            // Получаем версию и устанавливаем
+            try {
+                PackageInfo info = getPackageInfo();
+                String versionName = info.versionName;
+
+                TextView tvAppName = customView.findViewById(R.id.tv_actionbar_app_name);
+                TextView tvVersion = customView.findViewById(R.id.tv_actionbar_version);
+
+                tvAppName.setText(getString(R.string.app_name));
+                tvVersion.setText("v" + versionName);
+
+                //FileLogger.i(TAG, "Кастомный заголовок установлен");
+
+            } catch (Exception e) {
+                FileLogger.e(TAG, "Ошибка получения версии: " + e.getMessage());
+            }
+        }
+    }
+
+// ════════════════════════════════════════════════════════════════
+// ← Вспомогательный метод (совместимость API 33+)
+// ════════════════════════════════════════════════════════════════
+
+    private String fmtBytes(long bytes) {
+        if (bytes < 1024)             return bytes + " B";
+        if (bytes < 1024 * 1024)      return String.format("%.1f KB", bytes / 1024.0);
+        if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
+        return String.format("%.2f GB", bytes / (1024.0 * 1024 * 1024));
+    }
+
+    private PackageInfo getPackageInfo() throws PackageManager.NameNotFoundException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return getPackageManager().getPackageInfo(
+                    getPackageName(),
+                    PackageManager.PackageInfoFlags.of(0)
+            );
+        } else {
+            return getPackageManager().getPackageInfo(
+                    getPackageName(),
+                    0
+            );
+        }
     }
 
 // ════════════════════════════════════════════════════════════════
@@ -316,19 +428,22 @@ public class MainActivity extends AppCompatActivity {
         recyclerView      = findViewById(R.id.recycler_servers);
         swipeRefresh      = findViewById(R.id.swipe_refresh);
         tvEmptyState      = findViewById(R.id.tv_empty_state);
-        panelProgress     = findViewById(R.id.panel_progress);
-        progressSpinner   = findViewById(R.id.progress_spinner);
-        progressBar       = findViewById(R.id.progress_bar);
-        tvProgressTitle   = findViewById(R.id.tv_progress_title);
-        tvProgressDetail  = findViewById(R.id.tv_progress_detail);
-        tvCountTotal      = findViewById(R.id.tv_count_total);
-        tvCountOk         = findViewById(R.id.tv_count_ok);
-        tvCountFail       = findViewById(R.id.tv_count_fail);
+//        panelProgress     = findViewById(R.id.panel_progress);
+//        progressSpinner   = findViewById(R.id.progress_spinner);
+//        progressBar       = findViewById(R.id.progress_bar);
+//        tvProgressTitle   = findViewById(R.id.tv_progress_title);
+//        tvProgressDetail  = findViewById(R.id.tv_progress_detail);
+//        tvCountTotal      = findViewById(R.id.tv_count_total);
+//        tvCountOk         = findViewById(R.id.tv_count_ok);
+//        tvCountFail       = findViewById(R.id.tv_count_fail);
         tvLastStatus      = findViewById(R.id.tv_last_status);
         tvTraffic         = findViewById(R.id.tv_traffic);
         tvLastUpdate      = findViewById(R.id.tv_last_update);
         tvAutoConnectStatus = findViewById(R.id.tv_auto_connect_status);
-
+        tvStatusMode = findViewById(R.id.tv_status_mode);
+        tvServerCounts = findViewById(R.id.tv_server_counts);
+        tvLastUpdate = findViewById(R.id.tv_last_update);
+        tvLastScan = findViewById(R.id.tv_last_scan);
         btnDisconnect.setOnClickListener(v -> disconnectVpn());
 
         swipeRefresh.setOnRefreshListener(() -> {
@@ -361,23 +476,20 @@ public class MainActivity extends AppCompatActivity {
     private void observeData() {
         viewModel.getAllServers().observe(this, servers -> {
             if (servers != null) {
-               // FileLogger.i(TAG, "═══════════════════════════════════════");
-               // FileLogger.i(TAG, "OBSERVE: servers.size() = " + servers.size());
-
+                //FileLogger.i(TAG, "OBSERVE: " + servers.size() + " серверов");
                 serverAdapter.setServers(servers);
                 boolean empty = servers.isEmpty();
-
                 tvEmptyState.setVisibility(empty ? View.VISIBLE : View.GONE);
                 recyclerView.setVisibility(empty ? View.GONE : View.VISIBLE);
 
-              //  FileLogger.i(TAG, "tvEmptyState = " + (empty ? "VISIBLE" : "GONE"));
-               // FileLogger.i(TAG, "recyclerView = " + (empty ? "GONE" : "VISIBLE"));
-               // FileLogger.i(TAG, "═══════════════════════════════════════");
+                // ════════════════════════════════════════════════════════════════
+                // ← Обновлять счётчики серверов
+                // ════════════════════════════════════════════════════════════════
+                updateServerCounts(servers);
             }
         });
 
         viewModel.getIsConnected().observe(this, connected -> {
-           // FileLogger.d(TAG, "isConnected.observe: " + connected);
             renderConnectionState(connected);
         });
 
@@ -391,18 +503,67 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        viewModel.getIsWorking().observe(this, working -> {
-            panelProgress.setVisibility(working ? View.VISIBLE : View.GONE);
-            progressSpinner.setVisibility(working ? View.VISIBLE : View.GONE);
-            swipeRefresh.setRefreshing(working);
-        });
+        // ════════════════════════════════════════════════════════════════
+        // ← УДАЛИТЬ observe за isWorking (больше не нужно)
+        // ════════════════════════════════════════════════════════════════
+    }
+
+// ════════════════════════════════════════════════════════════════
+// В updateServerCounts() — запускать в фоне
+// ════════════════════════════════════════════════════════════════
+
+    private void updateServerCounts(List<VlessServer> displayedServers) {
+        // ════════════════════════════════════════════════════════════════
+        // ← ВАЖНО: Запускаем в фоне (не на главном потоке!)
+        // ════════════════════════════════════════════════════════════════
+        new Thread(() -> {
+            ServerRepository repo = new ServerRepository(this);
+            List<VlessServer> allServers = repo.getAllServersSync();
+
+            int total = allServers.size();
+            int working = 0;
+            int failed = 0;
+
+            for (VlessServer s : allServers) {
+                if (s.trafficOk) {
+                    working++;
+                } else {
+                    failed++;
+                }
+            }
+
+            int finalTotal = total;
+            int finalWorking = working;
+            int finalFailed = failed;
+
+            // ← Обновляем UI на главном потоке
+            mainHandler.post(() -> {
+               // FileLogger.i(TAG, "Server counts: total=" + finalTotal + ", working=" + finalWorking + ", failed=" + finalFailed);
+
+                if (tvServerCounts != null) {
+                    tvServerCounts.setText("📊 Всего: " + finalTotal + " | ✓ Рабочих: " + finalWorking + " | ✗ Нет связи: " + finalFailed);
+                }
+            });
+        }).start();
+    }
+// ════════════════════════════════════════════════════════════════
+// ← НОВЫЙ МЕТОД: Обновить всю информацию панели
+// ════════════════════════════════════════════════════════════════
+
+    private void updateInfoPanel() {
+        updateLastUpdateTime();
+        updateLastScanTime();
     }
 
     private void updateLastUpdateTime() {
         if (tvLastUpdate == null) return;
-        long ts = new ServerRepository(this).getLastUpdateTimestamp();
+
+        ServerRepository repo = new ServerRepository(this);
+        long ts = repo.getLastUpdateTimestamp();
+
+        String text;
         if (ts == 0) {
-            tvLastUpdate.setText("Список не обновлялся");
+            text = "📥 Обновлено: не обновлялось";
         } else {
             long mins = (System.currentTimeMillis() - ts) / 60000;
             String ago;
@@ -410,8 +571,32 @@ public class MainActivity extends AppCompatActivity {
             else if (mins < 60)  ago = mins + " мин назад";
             else if (mins < 1440) ago = (mins / 60) + " ч назад";
             else                  ago = (mins / 1440) + " дн назад";
-            tvLastUpdate.setText("Обновлено: " + ago);
+            text = "📥 Обновлено: " + ago;
         }
+
+        tvLastUpdate.setText(text);
+    }
+
+    private void updateLastScanTime() {
+        if (tvLastScan == null) return;
+
+        ServerRepository repo = new ServerRepository(this);
+        long ts = repo.getLastScanTimestamp();
+
+        String text;
+        if (ts == 0) {
+            text = "🔍 Проверка: не проверялся";
+        } else {
+            long mins = (System.currentTimeMillis() - ts) / 60000;
+            String ago;
+            if (mins < 1)        ago = "только что";
+            else if (mins < 60)  ago = mins + " мин назад";
+            else if (mins < 1440) ago = (mins / 60) + " ч назад";
+            else                  ago = (mins / 1440) + " дн назад";
+            text = "🔍 Проверка: " + ago;
+        }
+
+        tvLastScan.setText(text);
     }
 
     private void updateAutoConnectStatus() {
@@ -437,20 +622,89 @@ public class MainActivity extends AppCompatActivity {
 
     // ── VPN управление ───────────────────────────────────────────────────────
 
+// ════════════════════════════════════════════════════════════════
+// В onConnectClicked() — исправить логику
+// ════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════
+// В onConnectClicked() — исправить переключение серверов
+// ════════════════════════════════════════════════════════════════
+
     private void onConnectClicked(VlessServer server) {
-        FileLogger.i(TAG, "=== Ручное подключение: " + server.host);
-        pendingServer = server;
+        FileLogger.i(TAG, "onConnectClicked: " + server.host);
+
+        // ════════════════════════════════════════════════════════════════
+        // ← ПРОВЕРКА: server не должен быть null
+        // ════════════════════════════════════════════════════════════════
+        if (server == null) {
+            FileLogger.e(TAG, "ERROR: server is null!");
+            Toast.makeText(this, "Ошибка: сервер не найден", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← Если уже подключён — отключаем и подключаем к новому
+        // ════════════════════════════════════════════════════════════════
+        if (VpnTunnelService.isRunning) {
+            FileLogger.i(TAG, "VPN уже запущен — переключаемся на новый сервер");
+
+            // ════════════════════════════════════════════════════════════════
+            // ← ВАЖНО: Создаём копию server для lambda (чтобы не обнулилась)
+            // ════════════════════════════════════════════════════════════════
+            VlessServer serverToConnect = server;
+
+            // Отключаем текущий VPN
+            disconnectVpn();
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Задержка перед подключением к новому серверу
+            // ════════════════════════════════════════════════════════════════
+            mainHandler.postDelayed(() -> {
+                // ← Проверяем что serverToConnect не null
+                if (serverToConnect != null) {
+                    doStartVpn(serverToConnect);
+                } else {
+                    FileLogger.e(TAG, "ERROR: serverToConnect is null in delayed runnable!");
+                    Toast.makeText(MainActivity.this, "Ошибка подключения", Toast.LENGTH_SHORT).show();
+                }
+            }, 800);  // ← Увеличил задержку до 800ms
+
+            return;
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← Если не подключён — подключаемся сразу
+        // ════════════════════════════════════════════════════════════════
         Intent perm = VpnService.prepare(this);
         if (perm != null) {
+            pendingServer = server;
             vpnPermLauncher.launch(perm);
         } else {
             doStartVpn(server);
-            pendingServer = null;
         }
     }
 
+// ════════════════════════════════════════════════════════════════
+// В doStartVpn() — добавить проверку на null
+// ════════════════════════════════════════════════════════════════
+
     private void doStartVpn(VlessServer server) {
-        FileLogger.i(TAG, "=== Старт VPN: " + server.host + ":" + server.port);
+        // ════════════════════════════════════════════════════════════════
+        // ← ПРОВЕРКА: server не должен быть null
+        // ════════════════════════════════════════════════════════════════
+        if (server == null) {
+            FileLogger.e(TAG, "ERROR: doStartVpn called with null server!");
+            Toast.makeText(this, "Ошибка: сервер не найден", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        FileLogger.i(TAG, "Старт VPN: " + server.host);
+
+        // Обновить строку режима
+        if (tvStatusMode != null) {
+            tvStatusMode.setText("⏳ Подключение к " + (server.remark.isEmpty() ? server.host : server.remark));
+        }
+
         Intent i = new Intent(this, VpnTunnelService.class);
         i.setAction(VpnTunnelService.ACTION_CONNECT);
         i.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(server));
@@ -470,12 +724,26 @@ public class MainActivity extends AppCompatActivity {
         mainHandler.postDelayed(this::refreshStatus, 6000);
     }
 
+
+// ════════════════════════════════════════════════════════════════
+// В disconnectVpn() — обновить статус
+// ════════════════════════════════════════════════════════════════
+
     private void disconnectVpn() {
-        FileLogger.i(TAG, "=== Отключение VPN");
+        FileLogger.i(TAG, "disconnectVpn");
         Intent i = new Intent(this, VpnTunnelService.class);
         i.setAction(VpnTunnelService.ACTION_DISCONNECT);
         startService(i);
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Сразу обновить UI
+        // ════════════════════════════════════════════════════════════════
         renderConnectionState(false);
+
+        if (tvProgressTitle != null) {
+            tvProgressTitle.setText("Отключено");
+        }
+
         mainHandler.postDelayed(this::refreshStatus, 1000);
     }
 
@@ -483,12 +751,24 @@ public class MainActivity extends AppCompatActivity {
         viewModel.refreshVpnStatus();
     }
 
+// ════════════════════════════════════════════════════════════════
+// В renderConnectionState() — очистить прогресс
+// ════════════════════════════════════════════════════════════════
+
     private void renderConnectionState(boolean connected) {
         if (connected) {
             tvStatus.setText("🟢 Подключено");
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
             tvTraffic.setVisibility(View.VISIBLE);
+            startTrafficMonitor();
+            // ════════════════════════════════════════════════════════════════
+            // ← Обновить строку режима
+            // ════════════════════════════════════════════════════════════════
+            if (tvStatusMode != null) {
+                tvStatusMode.setText("🟢 VPN активен");
+            }
+
         } else {
             tvStatus.setText("🔴 Отключено");
             tvStatus.setTextColor(getColor(R.color.color_disconnected));
@@ -496,7 +776,39 @@ public class MainActivity extends AppCompatActivity {
             tvConnectedServer.setText("—");
             tvTraffic.setVisibility(View.GONE);
             tvTraffic.setText("");
+            stopTrafficMonitor();
+            // ════════════════════════════════════════════════════════════════
+            // ← Обновить строку режима
+            // ════════════════════════════════════════════════════════════════
+            if (tvStatusMode != null) {
+                tvStatusMode.setText("Готов к подключению");
+            }
         }
+    }
+
+    private Handler trafficHandler = new Handler(Looper.getMainLooper());
+    private Runnable trafficRunnable;
+
+    private void startTrafficMonitor() {
+        trafficRunnable = new Runnable() {
+            @Override
+            public void run() {
+                // Получить статистику трафика из VpnTunnelService
+                String traffic = VpnTunnelService.getTrafficStats();
+                if (traffic != null && !traffic.isEmpty()) {
+                    tvTraffic.setText(traffic);
+                }
+                trafficHandler.postDelayed(this, 1000);
+            }
+        };
+        trafficHandler.post(trafficRunnable);
+    }
+
+    private void stopTrafficMonitor() {
+        if (trafficHandler != null && trafficRunnable != null) {
+            trafficHandler.removeCallbacks(trafficRunnable);
+        }
+        tvTraffic.setText("");
     }
 
     // ── Меню ─────────────────────────────────────────────────────────────────
@@ -507,12 +819,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == R.id.menu_log) {
+        int id = item.getItemId();
+        if (id == R.id.menu_log) {
             showLogDialog();
             return true;
         }
-        int id = item.getItemId();
 
+        if (id == R.id.action_check_update) {
+            // ← Ручная проверка обновлений
+            checkUpdateManual();
+            return true;
+        }
 /*        if (id == R.id.action_download) {
             ServerRepository repo = new ServerRepository(this);
             repo.resetUpdateTime();
@@ -595,5 +912,92 @@ public class MainActivity extends AppCompatActivity {
         dialog.findViewById(R.id.btn_close).setOnClickListener(v -> dialog.dismiss());
 
         dialog.show();
+    }
+
+
+// ════════════════════════════════════════════════════════════════
+// ← НОВЫЙ МЕТОД: Автопроверка (не чаще 1 раза в 24 часа)
+// ════════════════════════════════════════════════════════════════
+
+    private void checkUpdateIfNeeded() {
+        if (!UpdateChecker.shouldCheckUpdate(this)) {
+            FileLogger.d(TAG, "Проверка обновлений — слишком рано");
+            return;
+        }
+
+        updateChecker = new UpdateChecker(this, new UpdateChecker.OnUpdateCheckListener() {
+            @Override
+            public void onUpdateAvailable(String versionName, int versionCode, String downloadUrl, String changelog) {
+                runOnUiThread(() -> showUpdateDialog(versionName, versionCode, downloadUrl, changelog));
+            }
+
+            @Override
+            public void onNoUpdate() {
+                FileLogger.d(TAG, "Обновлений нет");
+            }
+
+            @Override
+            public void onError(String error) {
+                FileLogger.w(TAG, "Ошибка проверки обновлений: " + error);
+            }
+        });
+
+        updateChecker.checkForUpdate();
+        UpdateChecker.markUpdateChecked(this);
+    }
+
+// ════════════════════════════════════════════════════════════════
+// ← НОВЫЙ МЕТОД: Диалог обновления
+// ════════════════════════════════════════════════════════════════
+
+    private void showUpdateDialog(String versionName, int versionCode, String downloadUrl, String changelog) {
+        new AlertDialog.Builder(this)
+                .setTitle("📦 Доступно обновление")
+                .setMessage("Версия: " + versionName + "\n\n" +
+                        (changelog.isEmpty() ? "Доступна новая версия приложения!" : changelog))
+                .setPositiveButton("Скачать", (dialog, which) -> {
+                    // Запускаем скачивание
+                    Intent intent = new Intent(this, UpdateDownloadService.class);
+                    intent.putExtra(UpdateDownloadService.EXTRA_DOWNLOAD_URL, downloadUrl);
+                    intent.putExtra(UpdateDownloadService.EXTRA_VERSION_NAME, versionName);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent);
+                    } else {
+                        startService(intent);
+                    }
+                })
+                .setNegativeButton("Позже", null)
+                .show();
+    }
+
+// ════════════════════════════════════════════════════════════════
+// ← НОВЫЙ МЕТОД: Ручная проверка (с прогрессом)
+// ════════════════════════════════════════════════════════════════
+
+    private void checkUpdateManual() {
+        Toast.makeText(this, "🔍 Проверка обновлений...", Toast.LENGTH_SHORT).show();
+
+        updateChecker = new UpdateChecker(this, new UpdateChecker.OnUpdateCheckListener() {
+            @Override
+            public void onUpdateAvailable(String versionName, int versionCode, String downloadUrl, String changelog) {
+                runOnUiThread(() -> showUpdateDialog(versionName, versionCode, downloadUrl, changelog));
+            }
+
+            @Override
+            public void onNoUpdate() {
+                runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "✅ Установлена последняя версия", Toast.LENGTH_SHORT).show()
+                );
+            }
+
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "❌ Ошибка: " + error, Toast.LENGTH_LONG).show()
+                );
+            }
+        });
+
+        updateChecker.checkForUpdate();
     }
 }

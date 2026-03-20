@@ -83,7 +83,7 @@
         android:id="@+id/tv_server_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="0dp"
         android:layout_marginStart="34dp"
         android:text=""
         android:textSize="12sp"

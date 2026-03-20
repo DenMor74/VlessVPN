@@ -32,6 +32,8 @@ public class SettingsActivity extends AppCompatActivity {
     private Switch switchDisableNightCheck;
     private TextView tvNightCheckInfo;
 
+    private Switch switchAutoConnectAfterScan;
+
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ: Для интервала сканирования
     // ════════════════════════════════════════════════════════════════
@@ -138,6 +140,8 @@ public class SettingsActivity extends AppCompatActivity {
             tvNightCheckInfo.setVisibility(isChecked ? View.VISIBLE : View.GONE);
         });
 
+        switchAutoConnectWifi = findViewById(R.id.switch_auto_connect_wifi);
+        switchAutoConnectAfterScan = findViewById(R.id.switch_auto_connect_after_scan);
     }
 
     private void loadCurrentSettings() {
@@ -175,6 +179,7 @@ public class SettingsActivity extends AppCompatActivity {
         // ← НОВОЕ: Ночной режим
         switchDisableNightCheck.setChecked(repository.isDisableNightCheck());
         tvNightCheckInfo.setVisibility(repository.isDisableNightCheck() ? View.VISIBLE : View.GONE);
+        switchAutoConnectAfterScan.setChecked(repository.isAutoConnectAfterScan());
     }
 
     private void saveSettings() {
@@ -223,7 +228,8 @@ public class SettingsActivity extends AppCompatActivity {
         } else {
             Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
         }
-
+        repository.saveAutoConnectOnWifiDisconnect(switchAutoConnectWifi.isChecked());
+        repository.saveAutoConnectAfterScan(switchAutoConnectAfterScan.isChecked());
         finish();
     }
 

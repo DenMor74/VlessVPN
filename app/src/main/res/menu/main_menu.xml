@@ -43,4 +43,10 @@
         android:icon="@drawable/delete"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_check_update"
+        android:title="Проверить обновление"
+        android:icon="@drawable/update"
+        app:showAsAction="never"/>
+
 </menu>

@@ -10,7 +10,7 @@ import com.vlessvpn.app.model.VlessServer;
 
 @Database(
         entities = {VlessServer.class},
-        version = 2,  // ← Увеличили с 1 до 2
+        version = 3,  // ← Увеличили с 1 до 2
         exportSchema = false
 )
 public abstract class AppDatabase extends RoomDatabase {

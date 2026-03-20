@@ -197,6 +197,43 @@
             android:layout_marginBottom="8dp"/>
 
         <!-- ════════════════════════════════════════════════════════════════ -->
+        <!-- Авто-подключение при потере WiFi -->
+        <!-- ════════════════════════════════════════════════════════════════ -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/bg_card"
+            android:paddingHorizontal="12dp"
+            android:layout_marginVertical="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📡 Авто-подключение при проверках"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <Switch
+                android:id="@+id/switch_auto_connect_after_scan"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Подключать VPN при потере WiFi"
+                android:textSize="14sp"
+                android:layout_marginTop="8dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="После проверки серверов: если WiFi отключён → включить VPN, если WiFi появился → выключить VPN"
+                android:textSize="12sp"
+                android:textColor="#667788"
+                android:layout_marginTop="4dp"/>
+
+        </LinearLayout>
+
+        <!-- ════════════════════════════════════════════════════════════════ -->
         <!-- Ночной режим (добавить перед кнопкой "Сохранить") -->
         <!-- ════════════════════════════════════════════════════════════════ -->
 

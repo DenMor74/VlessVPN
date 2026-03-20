@@ -1,28 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/bg_dark">
 
-
-    <TextView
-        android:id="@+id/tv_auto_connect_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="⚡ AUTO"
-        android:textSize="8sp"
-        android:textStyle="bold"
-        android:textColor="#FFFFFF"
-        android:background="#000102"
-        android:paddingLeft="10dp"
-        android:paddingRight="10dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:gravity="right"
-        android:visibility="gone"/>
-    <!-- ===== БЛОК СТАТУСА VPN ===== -->
+    <!-- ===== БЛОК СТАТУСА VPN — фиксированная высота, ничего не прыгает ===== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -31,6 +14,7 @@
         android:padding="10dp"
         android:elevation="4dp">
 
+        <!-- Строка: статус + кнопка отключить (всегда справа, просто невидима) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -46,10 +30,23 @@
                 android:textSize="22sp"
                 android:textStyle="bold"
                 android:textColor="@color/color_disconnected"
-                android:gravity="center"/>
+                android:gravity="center_vertical"/>
+
+            <!-- Кнопка справа — всегда занимает место, только меняет видимость через invisible -->
+            <Button
+                android:id="@+id/btn_disconnect"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:text="✕ Откл"
+                android:textSize="13sp"
+                android:backgroundTint="@color/color_disconnected"
+                android:textColor="#FFFFFF"
+                android:visibility="invisible"/>
 
         </LinearLayout>
 
+        <!-- Подключённый сервер — всегда одна строка -->
         <TextView
             android:id="@+id/tv_connected_server"
             android:layout_width="match_parent"
@@ -57,40 +54,39 @@
             android:text="—"
             android:textSize="13sp"
             android:textColor="@color/text_secondary"
-            android:gravity="center"
-            android:layout_marginTop="0dp"/>
+            android:gravity="start"
+            android:layout_marginTop="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"/>
 
-        <Button
-            android:id="@+id/btn_disconnect"
-            android:layout_width="200dp"
-            android:layout_height="60dp"
-            android:layout_gravity="center"
-            android:layout_marginTop="8dp"
-            android:textSize="20sp"
-            android:text="Отключить"
-            android:backgroundTint="@color/color_disconnected"
-            android:textColor="#FFFFFF"
-            android:visibility="gone"/>
-
+        <!-- Трафик — всегда одна строка, просто пустая когда не подключено -->
         <TextView
             android:id="@+id/tv_traffic"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="20sp"
+            android:text=" "
+            android:textSize="16sp"
             android:textStyle="bold"
-            android:textColor="#FFFFFF"
-            android:gravity="center"
+            android:textColor="#4CAF50"
+            android:gravity="start"
             android:fontFamily="monospace"
-            android:layout_marginTop="6dp"
-            android:visibility="gone"/>
+            android:layout_marginTop="2dp"
+            android:visibility="visible"/>
+
+        <!-- Авто-режим — всегда одна строка, пустая если выкл -->
+        <TextView
+            android:id="@+id/tv_auto_connect_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=" "
+            android:textSize="11sp"
+            android:textColor="#AABBCC"
+            android:gravity="start"
+            android:visibility="visible"/>
 
     </LinearLayout>
 
-    <!-- ════════════════════════════════════════════════════════════════ -->
-    <!-- ПАНЕЛЬ ИНФОРМАЦИИ (4 строки, всегда видны) -->
-    <!-- ════════════════════════════════════════════════════════════════ -->
-
+    <!-- ===== ПАНЕЛЬ ИНФОРМАЦИИ (4 строки, всегда видны) ===== -->
     <LinearLayout
         android:id="@+id/panel_info"
         android:layout_width="match_parent"
@@ -99,10 +95,8 @@
         android:background="@color/bg_card"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
-        android:layout_marginTop="8dp"
-        android:visibility="visible">
+        android:layout_marginTop="8dp">
 
-        <!-- Строка 1: Текущий режим ИЛИ прогресс проверки -->
         <TextView
             android:id="@+id/tv_status_mode"
             android:layout_width="match_parent"
@@ -113,7 +107,6 @@
             android:textColor="#FFFFFF"
             android:gravity="start"/>
 
-        <!-- Строка 2: Количество серверов (всегда) -->
         <TextView
             android:id="@+id/tv_server_counts"
             android:layout_width="match_parent"
@@ -125,7 +118,6 @@
             android:layout_marginTop="4dp"
             android:fontFamily="monospace"/>
 
-        <!-- Строка 3: Последнее обновление списка (всегда) -->
         <TextView
             android:id="@+id/tv_last_update"
             android:layout_width="match_parent"
@@ -136,7 +128,6 @@
             android:gravity="start"
             android:layout_marginTop="2dp"/>
 
-        <!-- Строка 4: Последняя проверка серверов (всегда) -->
         <TextView
             android:id="@+id/tv_last_scan"
             android:layout_width="match_parent"
@@ -149,7 +140,6 @@
 
     </LinearLayout>
 
-
     <!-- ===== ПОСЛЕДНИЙ СТАТУС ===== -->
     <TextView
         android:id="@+id/tv_last_status"
@@ -157,15 +147,15 @@
         android:layout_height="wrap_content"
         android:paddingLeft="16dp"
         android:paddingRight="16dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
         android:text="📊 Всего: 0 | ✓ Рабочих: 0 | Последняя проверка: не проверялся"
         android:textSize="12sp"
         android:textColor="#6688AA"
         android:background="#111827"
         android:visibility="visible"/>
 
-    <!-- ===== ЗАГОЛОВОК ===== -->
+    <!-- ===== ЗАГОЛОВОК СПИСКА ===== -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -176,10 +166,10 @@
         android:letterSpacing="0.08"
         android:paddingLeft="16dp"
         android:paddingRight="16dp"
-        android:paddingTop="12dp"
+        android:paddingTop="10dp"
         android:paddingBottom="6dp"/>
 
-    <!-- ===== СПИСОК ===== -->
+    <!-- ===== СПИСОК СЕРВЕРОВ ===== -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipe_refresh"
         android:layout_width="match_parent"

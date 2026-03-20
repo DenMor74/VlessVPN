@@ -760,7 +760,7 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText("🟢 Подключено");
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
-            tvTraffic.setVisibility(View.VISIBLE);
+            
             startTrafficMonitor();
             // ════════════════════════════════════════════════════════════════
             // ← Обновить строку режима
@@ -772,10 +772,10 @@ public class MainActivity extends AppCompatActivity {
         } else {
             tvStatus.setText("🔴 Отключено");
             tvStatus.setTextColor(getColor(R.color.color_disconnected));
-            btnDisconnect.setVisibility(View.GONE);
+            btnDisconnect.setVisibility(View.INVISIBLE);
             tvConnectedServer.setText("—");
-            tvTraffic.setVisibility(View.GONE);
-            tvTraffic.setText("");
+            
+            tvTraffic.setText(" ");
             stopTrafficMonitor();
             // ════════════════════════════════════════════════════════════════
             // ← Обновить строку режима
@@ -794,7 +794,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void run() {
                 // Получить статистику трафика из VpnTunnelService
-                String traffic = VpnTunnelService.getTrafficStats();
+                String traffic = "↑ " + fmtBytes(VpnTunnelService.totalUp) + "  ↓ " + fmtBytes(VpnTunnelService.totalDown);
                 if (traffic != null && !traffic.isEmpty()) {
                     tvTraffic.setText(traffic);
                 }
@@ -808,7 +808,7 @@ public class MainActivity extends AppCompatActivity {
         if (trafficHandler != null && trafficRunnable != null) {
             trafficHandler.removeCallbacks(trafficRunnable);
         }
-        tvTraffic.setText("");
+        tvTraffic.setText(" ");
     }
 
     // ── Меню ─────────────────────────────────────────────────────────────────

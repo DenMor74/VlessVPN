@@ -204,7 +204,7 @@ public class BackgroundMonitorService extends Service {
                 StatusBus.post(ctx, "⚠️ Нет интернета — скачивание пропущено", true);
                 return Result.retry();
             }
-            repo.saveUpdateTimestamp();
+            repo.markUpdated();
             return Result.success();
         }
 

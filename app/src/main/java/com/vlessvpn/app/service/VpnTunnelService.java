@@ -323,6 +323,11 @@ public class VpnTunnelService extends VpnService {
                     statsHandler.postDelayed(statsPoller, 500);
                     startPeriodicCheck(); // единственное место планирования periodic check
                     ServerTester.setVpnActive(true);
+                    // Глубокая проверка IP при подключении (если включена)
+                    if (new com.vlessvpn.app.storage.ServerRepository(VpnTunnelService.this)
+                            .isDeepCheckOnConnect()) {
+                        bgExecutor.execute(VpnTunnelService.this::doDeepCheck);
+                    }
                     new ServerRepository(VpnTunnelService.this).saveLastWorkingServer(s);
                     sendVpnBroadcast(true, s, null);
                     notifyConnectionChanged(true);
@@ -404,9 +409,9 @@ public class VpnTunnelService extends VpnService {
                 return;
             }
 
-            // Засекаем время только с момента начала получения данных
+            // Замеряем чистую скорость передачи данных
             java.io.InputStream is = conn.getInputStream();
-            byte[] buf = new byte[4096];
+            byte[] buf = new byte[8192];
             long downloaded = 0;
             long t0 = System.currentTimeMillis();
             int n;
@@ -417,15 +422,15 @@ public class VpnTunnelService extends VpnService {
             is.close();
             conn.disconnect();
 
-            if (ms == 0) ms = 1;
-            double speedKBs = (downloaded / 1024.0) / (ms / 1000.0);
+            if (ms < 100) ms = 100; // минимум 100мс чтоб не делить на 0
+            double speedMBs = downloaded / 1024.0 / 1024.0 / (ms / 1000.0);
             String speedStr;
-            if (speedKBs >= 1024) {
-                speedStr = String.format("%.1f MB/s", speedKBs / 1024.0);
+            if (speedMBs >= 1.0) {
+                speedStr = String.format("%.2f MB/s", speedMBs);
             } else {
-                speedStr = String.format("%.0f KB/s", speedKBs);
+                speedStr = String.format("%.0f KB/s", speedMBs * 1024);
             }
-            String result = "⏱ ✓ " + speedStr + " (" + downloaded/1024 + "KB за " + ms + "ms)";
+            String result = "⏱ ✓ " + speedStr + " (" + downloaded/1024 + " KB за " + ms + " ms)";
             FileLogger.i(TAG, result);
             mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
 
@@ -438,6 +443,72 @@ public class VpnTunnelService extends VpnService {
             FileLogger.w(TAG, r);
             mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
         }
+    }
+
+
+    private void doDeepCheck() {
+        mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "🔬 Проверка IP...", true));
+        try {
+            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                    new java.net.InetSocketAddress("127.0.0.1", 10808));
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                    new java.net.URL("http://ip-api.com/json?fields=query,city,countryCode,isp")
+                    .openConnection(proxy);
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(10_000);
+            conn.setRequestProperty("User-Agent", "VlessVPN/1.0");
+            long t0 = System.currentTimeMillis();
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                conn.disconnect();
+                String r = "🔬 IP: ✗ HTTP " + code;
+                FileLogger.w(TAG, r);
+                mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+                return;
+            }
+            java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            br.close();
+            conn.disconnect();
+            long ms = System.currentTimeMillis() - t0;
+            String json    = sb.toString();
+            String ip      = extractJson(json, "query");
+            String city    = extractJson(json, "city");
+            String country = extractJson(json, "countryCode");
+            String org     = extractJson(json, "isp");
+            String location = (city != null && country != null) ? city + ", " + country
+                            : (country != null ? country : "");
+            String result  = ip != null
+                    ? "🔬 ✓ " + ip + " " + location + " (" + ms + "ms)"
+                    : "🔬 ✓ ответ получен (" + ms + "ms)";
+            FileLogger.i(TAG, result);
+            if (org != null) FileLogger.d(TAG, "isp: " + org);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
+        } catch (java.net.SocketTimeoutException e) {
+            String r = "🔬 IP: ✗ таймаут";
+            FileLogger.w(TAG, r);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+        } catch (Exception e) {
+            String r = "🔬 IP: ✗ " + e.getMessage();
+            FileLogger.w(TAG, r);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+        }
+    }
+
+    private static String extractJson(String json, String key) {
+        try {
+            String q = String.valueOf('"');
+            String search = q + key + q + ":" + q;
+            int start = json.indexOf(search);
+            if (start < 0) return null;
+            start += search.length();
+            int end = json.indexOf(q, start);
+            if (end < 0) return null;
+            return json.substring(start, end);
+        } catch (Exception e) { return null; }
     }
 
     private void doConnectivityCheck() {
@@ -690,11 +761,12 @@ public class VpnTunnelService extends VpnService {
         return String.format("%.2f GB", bytes / (1024.0 * 1024 * 1024));
     }
 
-    /** Форматирует скорость в байт/с → KB/s, MB/s */
+    /** Форматирует скорость — фиксированная ширина, единица не меняется до 10 MB/s */
     private static String fmtSpeed(long bytesPerSec) {
-        if (bytesPerSec < 1024)        return bytesPerSec + " B/s";
-        if (bytesPerSec < 1024 * 1024) return String.format("%.1f KB/s", bytesPerSec / 1024.0);
-        return String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024));
+        if (bytesPerSec < 10L * 1024 * 1024) {
+            return String.format("%6.1f KB/s", bytesPerSec / 1024.0);
+        }
+        return String.format("%6.1f MB/s", bytesPerSec / (1024.0 * 1024));
     }
 
     private void createNotificationChannel() {

@@ -72,7 +72,7 @@ public class MainActivity extends AppCompatActivity {
     // UI
     private TextView    tvStatus;
     private TextView    tvConnectedServer;
-    private Button      btnDisconnect;
+    private android.widget.ImageButton btnDisconnect;
     private RecyclerView recyclerView;
     private SwipeRefreshLayout swipeRefresh;
     private View        tvEmptyState;
@@ -764,6 +764,8 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
             if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.VISIBLE);
+            if (panelDeepCheck != null && new com.vlessvpn.app.storage.ServerRepository(MainActivity.this).isDeepCheckOnConnect())
+                panelDeepCheck.setVisibility(View.VISIBLE);
             if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
 
         } else {

@@ -228,7 +228,6 @@ public class MainActivity extends AppCompatActivity {
         // ════════════════════════════════════════════════════════════════
         // ← Обновляем информацию о листе при каждом входе
         // ════════════════════════════════════════════════════════════════
-        updateSheetInfo();
         updateAutoConnectStatus();
         updateInfoPanel();  // ← Обновить всю панель
 
@@ -335,49 +334,6 @@ public class MainActivity extends AppCompatActivity {
 // ════════════════════════════════════════════════════════════════
 // ← НОВЫЙ МЕТОД: Информация о текущем листе
 // ════════════════════════════════════════════════════════════════
-    private void updateSheetInfo() {
-        // ════════════════════════════════════════════════════════════════
-        // ← ЗАПУСКАЕМ В ФОНЕ (не на главном потоке!)
-        // ════════════════════════════════════════════════════════════════
-        new Thread(() -> {
-            ServerRepository repo = new ServerRepository(this);
-
-            // Получаем все серверы (в фоне — можно sync)
-            List<VlessServer> allServers = repo.getAllServersSync();
-            int total = allServers.size();
-
-            // Считаем рабочие
-            int working = 0;
-            for (VlessServer s : allServers) {
-                if (s.trafficOk) working++;
-            }
-
-            // Время последней проверки
-            long lastScan = repo.getLastScanTimestamp();
-            String scanAgo;
-            if (lastScan == 0) {
-                scanAgo = "не проверялся";
-            } else {
-                long mins = (System.currentTimeMillis() - lastScan) / 60000;
-                if (mins < 1) scanAgo = "только что";
-                else if (mins < 60) scanAgo = mins + " мин назад";
-                else if (mins < 1440) scanAgo = (mins / 60) + " ч назад";
-                else scanAgo = (mins / 1440) + " дн назад";
-            }
-
-            // ← Обновляем UI на главном потоке
-            String sheetInfo = "📊 Всего: " + total + " | ✓ Рабочих: " + working + " | Последняя проверка: " + scanAgo;
-
-            mainHandler.post(() -> {
-                if (tvLastStatus != null) {
-                    tvLastStatus.setText(sheetInfo);
-                    tvLastStatus.setVisibility(View.VISIBLE);
-                }
-            });
-
-            //FileLogger.i(TAG, "Sheet info: " + sheetInfo);
-        }).start();
-    }
 
     // ── Init ─────────────────────────────────────────────────────────────────
 
@@ -494,16 +450,39 @@ public class MainActivity extends AppCompatActivity {
         viewModel.getLastStatusMessage().observe(this, msg -> {
             if (msg == null || msg.isEmpty()) return;
 
-            // ════════════════════════════════════════════════════════════════
-            // ← Если сообщение содержит трафик (↑ и ↓)
-            // ════════════════════════════════════════════════════════════════
-            if (msg.contains("↑") && msg.contains("↓") && VpnTunnelService.isRunning) {
-                if (tvTraffic != null) {
-                    tvTraffic.setText(msg);
-                    //FileLogger.d(TAG, "tvTraffic updated from LiveData: " + msg);
+            if (msg.contains("↑") && msg.contains("↓")) {
+                // Скорость трафика
+                if (VpnTunnelService.isRunning) {
+                    if (tvTraffic != null) tvTraffic.setText(msg);
+                } else {
+                    if (tvTraffic != null) tvTraffic.setText(" ");
                 }
-            } else if (!msg.contains("↑")) {
-                // Прогресс сканирования
+            } else if (msg.startsWith("🔬")) {
+                // Результат глубокой проверки IP
+                if (VpnTunnelService.isRunning && tvLastStatus != null) {
+                    tvLastStatus.setText(msg);
+                    boolean ok = msg.contains("✓");
+                    tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
+                    if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    if (panelDeepCheck != null) {
+                        panelDeepCheck.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
+                        panelDeepCheck.setVisibility(View.VISIBLE);
+                    }
+                }
+            } else if (msg.startsWith("⏱")) {
+                // Результат теста скорости
+                if (tvSpeedTest != null) {
+                    tvSpeedTest.setText(msg);
+                    boolean ok = msg.contains("✓");
+                    tvSpeedTest.setTextColor(ok ? 0xFF7E9FFF : 0xFFFF5252);
+                    if (btnSpeedTest != null) btnSpeedTest.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(ok ? 0xFF7E9FFF : 0xFFFF5252));
+                    if (panelSpeedTest != null)
+                        panelSpeedTest.setBackgroundColor(ok ? 0xFF0D0D1F : 0xFF1F0D0D);
+                }
+            } else {
+                // Статус / прогресс сканирования
                 if (tvStatusMode != null) {
                     tvStatusMode.setText(VpnTunnelService.isRunning ? msg : "🔍 " + msg);
                 }

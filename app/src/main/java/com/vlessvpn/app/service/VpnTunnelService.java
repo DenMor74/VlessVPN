@@ -392,11 +392,12 @@ public class VpnTunnelService extends VpnService {
             java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
                     new java.net.InetSocketAddress("127.0.0.1", 10808));
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
-                    new java.net.URL("http://proof.ovh.net/files/256Kb.dat")
+                    new java.net.URL("http://speed.cloudflare.com/__down?bytes=262144")
                     .openConnection(proxy);
             conn.setConnectTimeout(10_000);
             conn.setReadTimeout(30_000);
             conn.setRequestProperty("User-Agent", "VlessVPN/1.0");
+            conn.setInstanceFollowRedirects(true);
 
             // Подключаемся — latency не считаем
             conn.connect();

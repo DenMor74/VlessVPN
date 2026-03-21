@@ -13,9 +13,13 @@ import com.vlessvpn.app.util.FileLogger;
 
 import java.io.FileDescriptor;
 import java.net.HttpURLConnection;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.net.InetSocketAddress;
 import java.net.URL;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * ServerTester — два типа проверок:
@@ -29,9 +33,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ServerTester {
 
     private static final String TAG      = "ServerTester";
-    private static final int TIMEOUT_MS  = 6_000;
+    private static final int TIMEOUT_MS  = 10_000;
     private static final int REPEAT      = 2;
-    private static final String CHECK_URL = "http://www.gstatic.com/generate_204";
+    private static final String[] CHECK_URLS = {
+        "http://www.gstatic.com/generate_204",
+        "http://connectivitycheck.gstatic.com/generate_204",
+        "http://cp.cloudflare.com/generate_204"
+    };
 
     private static final AtomicBoolean vpnActive = new AtomicBoolean(false);
 
@@ -81,22 +89,48 @@ public class ServerTester {
 
     // ── 2. Проверка трафика через VPN ──────────────────────────────────────
 
+    /**
+     * Проверка трафика через VPN — 3 параллельных запроса к разным URL.
+     * Возвращает true при первом успешном ответе.
+     * Быстрее последовательной проверки при медленном туннеле.
+     */
     public static boolean trafficTest() {
         if (!vpnActive.get()) return false;
-        try {
-            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                    new InetSocketAddress("127.0.0.1", 10808));
-            HttpURLConnection conn = (HttpURLConnection)
-                    new URL(CHECK_URL).openConnection(proxy);
-            conn.setConnectTimeout(TIMEOUT_MS);
-            conn.setReadTimeout(TIMEOUT_MS);
-            conn.setRequestMethod("GET");
-            int code = conn.getResponseCode();
-            conn.disconnect();
-            return code >= 200 && code < 400;
-        } catch (Exception e) {
-            return false;
+
+        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                new InetSocketAddress("127.0.0.1", 10808));
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        CountDownLatch latch  = new CountDownLatch(CHECK_URLS.length);
+        ExecutorService pool  = Executors.newFixedThreadPool(CHECK_URLS.length);
+
+        for (String urlStr : CHECK_URLS) {
+            pool.execute(() -> {
+                try {
+                    HttpURLConnection conn = (HttpURLConnection)
+                            new URL(urlStr).openConnection(proxy);
+                    conn.setConnectTimeout(TIMEOUT_MS);
+                    conn.setReadTimeout(TIMEOUT_MS);
+                    conn.setRequestMethod("GET");
+                    int code = conn.getResponseCode();
+                    conn.disconnect();
+                    if (code >= 200 && code < 400) {
+                        success.set(true);
+                        // Сигналим остальным потокам что можно заканчивать
+                        while (latch.getCount() > 0) latch.countDown();
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    latch.countDown();
+                }
+            });
         }
+
+        try { latch.await(TIMEOUT_MS + 1000L, TimeUnit.MILLISECONDS); }
+        catch (InterruptedException ignored) {}
+        pool.shutdownNow();
+
+        return success.get();
     }
 
     // ── Сетевые утилиты ────────────────────────────────────────────────────

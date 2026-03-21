@@ -3,7 +3,7 @@ package com.vlessvpn.app.ui;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -151,11 +151,11 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
         if (status == TestStatus.PINGING) {
             h.tvStatus.setText("⏳ TCP проверка...");
             h.tvStatus.setTextColor(0xFF7799BB);
-            h.tvStatus.setVisibility(View.VISIBLE);
+            h.tvStatus.setVisibility(View.GONE); //VISIBLE
         } else if (status == TestStatus.TESTING) {
             h.tvStatus.setText("🔄 VLESS проверка...");
             h.tvStatus.setTextColor(0xFFFFB300);
-            h.tvStatus.setVisibility(View.VISIBLE);
+            h.tvStatus.setVisibility(View.GONE); //VISIBLE
         } else if (status == TestStatus.OK || s.trafficOk) {
             // Показываем TCP ping под названием
             if (tcpPing > 0 && vlessDelay > 0) {
@@ -171,7 +171,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
                 h.tvStatus.setText("✓ OK");
                 h.tvStatus.setTextColor(0xFF4CAF50);
             }
-            h.tvStatus.setVisibility(View.VISIBLE);
+            h.tvStatus.setVisibility(View.GONE); //VISIBLE
         } else if (status == TestStatus.FAIL || !s.trafficOk) {
             if (tcpPing > 0) {
                 h.tvStatus.setText("✗ TCP: " + tcpPing + "ms (VLESS failed)");
@@ -180,20 +180,22 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
                 h.tvStatus.setText("✗ Недоступен");
                 h.tvStatus.setTextColor(0xFFFF5555);
             }
-            h.tvStatus.setVisibility(View.VISIBLE);
+            h.tvStatus.setVisibility(View.GONE); //VISIBLE
         } else {
             h.tvStatus.setVisibility(View.GONE);
         }
 
-        // ── Кнопка подключить ─────────────────────────────
+        // ── Кнопка подключить / отключить ─────────────────
         if (s.trafficOk || status == TestStatus.OK) {
             h.btnConnect.setVisibility(View.VISIBLE);
             if (isConnected) {
-                h.btnConnect.setText("●");
+                // Подключён — красная кнопка с иконкой стоп (квадрат)
+                h.btnConnect.setImageResource(R.drawable.ic_stop);
                 h.btnConnect.setBackgroundTintList(
-                        android.content.res.ColorStateList.valueOf(0xFF4CAF50));
+                        android.content.res.ColorStateList.valueOf(0xFFE53935));
             } else {
-                h.btnConnect.setText("▶");
+                // Не подключён — синяя кнопка с иконкой плей
+                h.btnConnect.setImageResource(R.drawable.ic_play);
                 h.btnConnect.setBackgroundTintList(
                         android.content.res.ColorStateList.valueOf(0xFF1A56DB));
             }
@@ -234,7 +236,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
 
     static class ViewHolder extends RecyclerView.ViewHolder {
         TextView tvIcon, tvHost, tvRemark, tvPing, tvStatus;
-        Button btnConnect;
+        ImageButton btnConnect;
 
         ViewHolder(View v) {
             super(v);
@@ -243,7 +245,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
             tvRemark  = v.findViewById(R.id.tv_server_remark);
             tvPing    = v.findViewById(R.id.tv_server_ping);
             tvStatus  = v.findViewById(R.id.tv_server_status);
-            btnConnect= v.findViewById(R.id.btn_connect);
+            btnConnect = v.findViewById(R.id.btn_connect);
         }
     }
 }

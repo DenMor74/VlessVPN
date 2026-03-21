@@ -142,7 +142,14 @@ public class BackgroundMonitorService extends Service {
                 try {
                     List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
                     if (!fresh.isEmpty()) {
-                        repo.deleteBySourceUrlSync(url.trim());
+                        if (!VpnTunnelService.isRunning) {
+                            // VPN не активен — безопасно удалить старые и вставить новые
+                            repo.deleteBySourceUrlSync(url.trim());
+                        } else {
+                            // VPN активен — НЕ удаляем старые проверенные серверы,
+                            // insertAll с REPLACE обновит существующие по id
+                            FileLogger.i(W, "VPN активен — сохраняем проверенные серверы");
+                        }
                         repo.insertAll(fresh);
                         totalDownloaded += fresh.size();
                         FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);

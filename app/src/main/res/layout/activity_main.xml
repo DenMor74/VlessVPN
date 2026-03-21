@@ -11,7 +11,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="@color/bg_card"
-        android:padding="10dp"
+        android:paddingHorizontal="10dp"
         android:elevation="4dp">
 
         <!-- Строка: статус + кнопка отключить (всегда справа, просто невидима) -->
@@ -27,21 +27,23 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="🔴 Отключено"
-                android:textSize="22sp"
+                android:textSize="30sp"
                 android:textStyle="bold"
+                android:layout_marginTop="-10dp"
                 android:textColor="@color/color_disconnected"
                 android:gravity="center_vertical"/>
 
             <!-- Кнопка справа — всегда занимает место, только меняет видимость через invisible -->
-            <Button
+            <ImageButton
                 android:id="@+id/btn_disconnect"
-                android:layout_width="wrap_content"
+                android:layout_width="60dp"
                 android:layout_height="60dp"
                 android:layout_marginStart="8dp"
-                android:text="✕ Откл"
-                android:textSize="13sp"
+                android:src="@drawable/ic_stop"
+                android:scaleType="fitCenter"
+                android:padding="16dp"
+                android:background="@drawable/bg_connect_button"
                 android:backgroundTint="@color/color_disconnected"
-                android:textColor="#FFFFFF"
                 android:visibility="invisible"/>
 
         </LinearLayout>
@@ -55,7 +57,8 @@
             android:textSize="13sp"
             android:textColor="@color/text_secondary"
             android:gravity="start"
-            android:layout_marginTop="2dp"
+            android:layout_marginStart="45dp"
+            android:layout_marginTop="-25dp"
             android:singleLine="true"
             android:ellipsize="end"/>
 
@@ -65,12 +68,12 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text=" "
-            android:textSize="16sp"
+            android:textSize="20sp"
             android:textStyle="bold"
-            android:textColor="#4CAF50"
+            android:textColor="#FFEB3B"
             android:gravity="start"
             android:fontFamily="monospace"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="20dp"
             android:visibility="visible"/>
 
         <!-- Авто-режим — всегда одна строка, пустая если выкл -->
@@ -140,22 +143,75 @@
 
     </LinearLayout>
 
-    <!-- ===== ПОСЛЕДНИЙ СТАТУС ===== -->
-    <TextView
-        android:id="@+id/tv_last_status"
+    <!-- Результат глубокой проверки IP — показывается только при подключении -->
+    <LinearLayout
+        android:id="@+id/panel_deep_check"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingLeft="16dp"
-        android:paddingRight="16dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp"
-        android:text="📊 Всего: 0 | ✓ Рабочих: 0 | Последняя проверка: не проверялся"
-        android:textSize="12sp"
-        android:textColor="#6688AA"
-        android:background="#111827"
-        android:visibility="gone"/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#0D1F0D"
+        android:visibility="gone">
 
+        <TextView
+            android:id="@+id/tv_last_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingLeft="16dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text=""
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#4CAF50"/>
 
+        <ImageButton
+            android:id="@+id/btn_deep_check_refresh"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_refresh"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="#4CAF50"
+            android:contentDescription="Повторить проверку"/>
+
+    </LinearLayout>
+
+    <!-- Тест скорости — показывается только при подключении -->
+    <LinearLayout
+        android:id="@+id/panel_speed_test"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#0D0D1F"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_speed_test"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingLeft="16dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="⏱ Тест скорости"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#7E9FFF"/>
+
+        <ImageButton
+            android:id="@+id/btn_speed_test"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_play"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:tint="#7E9FFF"
+            android:contentDescription="Запустить тест скорости"/>
+
+    </LinearLayout>
 
     <!-- ===== СПИСОК СЕРВЕРОВ ===== -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout

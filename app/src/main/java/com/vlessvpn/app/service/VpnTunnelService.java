@@ -162,6 +162,18 @@ public class VpnTunnelService extends VpnService {
 
     public static int getTunFd() { return 0; }
 
+    public static VpnTunnelService getInstance() { return instance; }
+
+    public void runDeepCheck() {
+        if (bgExecutor != null && !bgExecutor.isShutdown())
+            bgExecutor.execute(this::doDeepCheck);
+    }
+
+    public void runSpeedTest() {
+        if (bgExecutor != null && !bgExecutor.isShutdown())
+            bgExecutor.execute(this::doSpeedTest);
+    }
+
     public static boolean protectSocket(int fd) {
         VpnTunnelService svc = instance;
         return svc != null && svc.protect(fd);
@@ -363,6 +375,70 @@ public class VpnTunnelService extends VpnService {
     }
 
     // ── Периодическая проверка соединения ────────────────────────────────────
+
+
+    /**
+     * Тест скорости — скачиваем 256KB файл через VPN туннель.
+     * Измеряем время получения данных (без latency подключения).
+     */
+    private void doSpeedTest() {
+        mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "⏱ Тест скорости...", true));
+        try {
+            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                    new java.net.InetSocketAddress("127.0.0.1", 10808));
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                    new java.net.URL("http://proof.ovh.net/files/256Kb.dat")
+                    .openConnection(proxy);
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(30_000);
+            conn.setRequestProperty("User-Agent", "VlessVPN/1.0");
+
+            // Подключаемся — latency не считаем
+            conn.connect();
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                conn.disconnect();
+                String r = "⏱ Тест: ✗ HTTP " + code;
+                FileLogger.w(TAG, r);
+                mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+                return;
+            }
+
+            // Засекаем время только с момента начала получения данных
+            java.io.InputStream is = conn.getInputStream();
+            byte[] buf = new byte[4096];
+            long downloaded = 0;
+            long t0 = System.currentTimeMillis();
+            int n;
+            while ((n = is.read(buf)) != -1) {
+                downloaded += n;
+            }
+            long ms = System.currentTimeMillis() - t0;
+            is.close();
+            conn.disconnect();
+
+            if (ms == 0) ms = 1;
+            double speedKBs = (downloaded / 1024.0) / (ms / 1000.0);
+            String speedStr;
+            if (speedKBs >= 1024) {
+                speedStr = String.format("%.1f MB/s", speedKBs / 1024.0);
+            } else {
+                speedStr = String.format("%.0f KB/s", speedKBs);
+            }
+            String result = "⏱ ✓ " + speedStr + " (" + downloaded/1024 + "KB за " + ms + "ms)";
+            FileLogger.i(TAG, result);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
+
+        } catch (java.net.SocketTimeoutException e) {
+            String r = "⏱ Тест: ✗ таймаут";
+            FileLogger.w(TAG, r);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+        } catch (Exception e) {
+            String r = "⏱ Тест: ✗ " + e.getMessage();
+            FileLogger.w(TAG, r);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+        }
+    }
 
     private void doConnectivityCheck() {
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Проверка соединения...", true));

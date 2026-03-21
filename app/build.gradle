@@ -114,3 +114,49 @@ android.applicationVariants.all { variant ->
     }
 
 }
+
+/* ================= FTP UPLOAD ================= */
+
+import java.net.URL
+import java.net.URLConnection
+
+android.applicationVariants.all { variant ->
+
+    if (variant.buildType.name == "release") {
+
+        variant.assembleProvider.get().doLast {
+
+            def ftpUrl = "ftp://moroz:5y8mJ3h7@ftp.orel.ru/public_html/Denmor_vpn/"
+
+            def apkDir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+            def metaFile = layout.buildDirectory.file("outputs/apk/release/output-metadata.json").get().asFile
+
+            def apk = apkDir.listFiles().find { it.name.endsWith(".apk") }
+
+            if (apk == null) {
+                println "APK не найден"
+                return
+            }
+
+            println "Загружаю APK: " + apk.name
+
+            uploadFile(apk, ftpUrl + apk.name)
+            uploadFile(metaFile, ftpUrl + "output-metadata.json")
+
+            println "Загрузка завершена"
+        }
+    }
+}
+
+def uploadFile(File file, String urlString) {
+
+    def url = new URL(urlString)
+    def conn = url.openConnection()
+
+    conn.setDoOutput(true)
+    conn.getOutputStream().withStream { output ->
+        file.withInputStream { input ->
+            input.transferTo(output)
+        }
+    }
+}

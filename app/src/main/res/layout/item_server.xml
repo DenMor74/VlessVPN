@@ -66,16 +66,17 @@
             android:fontFamily="monospace"/>
 
         <!-- ✅ Оставили Button (как в коде), но сделали красивым -->
-        <Button
+        <ImageButton
             android:id="@+id/btn_connect"
             android:layout_width="60dp"
             android:layout_height="60dp"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_connect_button"
-            android:drawableStart="@drawable/ic_play"
-            android:gravity="center"
-            android:padding="0dp"
-            android:visibility="gone"/>
+            android:src="@drawable/ic_play"
+            android:scaleType="fitCenter"
+            android:padding="16dp"
+            android:visibility="visible"/>
+
     </LinearLayout>
 
     <!-- Статус -->

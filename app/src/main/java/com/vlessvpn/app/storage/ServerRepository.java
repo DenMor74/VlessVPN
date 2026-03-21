@@ -43,6 +43,7 @@ public class ServerRepository {
     public static final String PREF_NIGHT_START_HOUR    = "night_start_hour";
     public static final String PREF_NIGHT_END_HOUR      = "night_end_hour";
     public static final String PREF_FORCE_MOBILE_TESTS  = "force_mobile_for_tests";
+    public static final String PREF_DEEP_CHECK_ON_CONNECT = "deep_check_on_connect";
 
     // Единая константа для времени обновления (устранён дубль PREF_LAST_UPDATE vs PREF_LAST_UPDATE_TIMESTAMP)
     private static final String PREF_LAST_UPDATE_TS     = "last_update_timestamp";
@@ -71,6 +72,18 @@ public class ServerRepository {
     public List<VlessServer> getAllServersSync() { return dao.getAllServersSync(); }
 
     /** Топ-N рабочих серверов для AutoConnect и switchToNextServer */
+    /** Все рабочие серверы (без лимита топ-N) — для перебора при переключении */
+    public List<VlessServer> getAllWorkingServersSync() {
+        List<VlessServer> all = dao.getAllServersSync();
+        List<VlessServer> ready = new ArrayList<>();
+        for (VlessServer s : all) {
+            if (s.pingMs >= 0 && s.trafficOk) ready.add(s);
+        }
+        if (ready.isEmpty()) ready = all;
+        ready.sort((a, b) -> Long.compare(a.pingMs, b.pingMs));
+        return ready;
+    }
+
     public List<VlessServer> getTopServersSync() {
         int limit = getTopCount();
         List<VlessServer> all = dao.getAllServersSync();
@@ -222,6 +235,14 @@ public class ServerRepository {
     }
 
     // ── Настройки: принудительные мобильные тесты ─────────────────────────
+
+    public boolean isDeepCheckOnConnect() {
+        return prefs.getBoolean(PREF_DEEP_CHECK_ON_CONNECT, false);
+    }
+
+    public void saveDeepCheckOnConnect(boolean v) {
+        prefs.edit().putBoolean(PREF_DEEP_CHECK_ON_CONNECT, v).apply();
+    }
 
     public boolean isForceMobileTests() {
         return prefs.getBoolean(PREF_FORCE_MOBILE_TESTS, true);

@@ -85,6 +85,11 @@ public class MainActivity extends AppCompatActivity {
     private TextView    tvCountOk;
     private TextView    tvCountFail;
     private TextView    tvLastStatus;
+    private View        panelDeepCheck;
+    private android.widget.ImageButton btnDeepCheckRefresh;
+    private View        panelSpeedTest;
+    private TextView    tvSpeedTest;
+    private android.widget.ImageButton btnSpeedTest;
     private TextView    tvTraffic;
     // private TextView    tvLastUpdate;
     private TextView    tvAutoConnectStatus;
@@ -391,7 +396,34 @@ public class MainActivity extends AppCompatActivity {
 //        tvCountTotal      = findViewById(R.id.tv_count_total);
 //        tvCountOk         = findViewById(R.id.tv_count_ok);
 //        tvCountFail       = findViewById(R.id.tv_count_fail);
-        tvLastStatus      = findViewById(R.id.tv_last_status);
+        tvLastStatus         = findViewById(R.id.tv_last_status);
+        panelDeepCheck       = findViewById(R.id.panel_deep_check);
+        btnDeepCheckRefresh  = findViewById(R.id.btn_deep_check_refresh);
+        panelSpeedTest       = findViewById(R.id.panel_speed_test);
+        tvSpeedTest          = findViewById(R.id.tv_speed_test);
+        btnSpeedTest         = findViewById(R.id.btn_speed_test);
+
+        if (btnDeepCheckRefresh != null) {
+            btnDeepCheckRefresh.setOnClickListener(v -> {
+                if (VpnTunnelService.isRunning) {
+                    VpnTunnelService svc = VpnTunnelService.getInstance();
+                    if (svc != null) svc.runDeepCheck();
+                }
+            });
+        }
+
+        if (btnSpeedTest != null) {
+            btnSpeedTest.setOnClickListener(v -> {
+                if (VpnTunnelService.isRunning) {
+                    if (tvSpeedTest != null) tvSpeedTest.setText("⏱ Тест скорости...");
+                    VpnTunnelService svc = VpnTunnelService.getInstance();
+                    if (svc != null) svc.runSpeedTest();
+                } else {
+                    android.widget.Toast.makeText(MainActivity.this,
+                        "Подключите VPN для теста скорости", android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
         tvTraffic         = findViewById(R.id.tv_traffic);
         tvLastUpdate      = findViewById(R.id.tv_last_update);
         tvAutoConnectStatus = findViewById(R.id.tv_auto_connect_status);
@@ -731,13 +763,8 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText("🟢 Подключено");
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
-
-            // ════════════════════════════════════════════════════════════════
-            // ← Обновить строку режима
-            // ════════════════════════════════════════════════════════════════
-            if (tvStatusMode != null) {
-                tvStatusMode.setText("🟢 VPN активен");
-            }
+            if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.VISIBLE);
+            if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
 
         } else {
             tvStatus.setText("🔴 Отключено");

@@ -33,6 +33,7 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView tvNightCheckInfo;
 
     private Switch switchAutoConnectAfterScan;
+    private Switch switchDeepCheck;
 
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ: Для интервала сканирования
@@ -142,6 +143,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         switchAutoConnectWifi = findViewById(R.id.switch_auto_connect_wifi);
         switchAutoConnectAfterScan = findViewById(R.id.switch_auto_connect_after_scan);
+        switchDeepCheck = findViewById(R.id.switch_deep_check);
     }
 
     private void loadCurrentSettings() {
@@ -180,6 +182,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchDisableNightCheck.setChecked(repository.isDisableNightCheck());
         tvNightCheckInfo.setVisibility(repository.isDisableNightCheck() ? View.VISIBLE : View.GONE);
         switchAutoConnectAfterScan.setChecked(repository.isAutoConnectAfterScan());
+        switchDeepCheck.setChecked(repository.isDeepCheckOnConnect());
     }
 
     private void saveSettings() {
@@ -230,6 +233,7 @@ public class SettingsActivity extends AppCompatActivity {
         }
         repository.saveAutoConnectOnWifiDisconnect(switchAutoConnectWifi.isChecked());
         repository.saveAutoConnectAfterScan(switchAutoConnectAfterScan.isChecked());
+        repository.saveDeepCheckOnConnect(switchDeepCheck.isChecked());
         finish();
     }
 

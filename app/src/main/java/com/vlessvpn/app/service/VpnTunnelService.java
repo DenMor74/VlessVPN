@@ -331,16 +331,23 @@ public class VpnTunnelService extends VpnService {
                     totalUp = 0; totalDown = 0;
                     prevUp = 0; prevDown = 0;
                     failCount = 0;
+                    deepCheckRetryCount = 0;
                     resetTunBase(VpnTunnelService.this); // фиксируем нулевую точку для UID счётчиков
                     StatusBus.post(VpnTunnelService.this, "Подключено: " + s.host, true);
                     statsHandler.postDelayed(statsPoller, 500);
                     startPeriodicCheck(); // единственное место планирования periodic check
                     ServerTester.setVpnActive(true);
-                    // AOD начальный статус
+                    // AOD: показываем "Определяем IP..." сразу при подключении
+                    deepCheckRetryCount = 0;
+                    AodOverlayService.sendStatus(VpnTunnelService.this, true,
+                            s.host, "Определяем IP...", null);
                     sendAodStatus();
-                    // Глубокая проверка (если включена в настройках) — после обычной проверки
+                    // Глубокая проверка — с задержкой 3 сек после подключения
                     if (new ServerRepository(VpnTunnelService.this).isDeepCheckOnConnect()) {
-                        bgExecutor.execute(VpnTunnelService.this::doDeepCheck);
+                        checkHandler.postDelayed(() -> {
+                            if (isRunning && bgExecutor != null && !bgExecutor.isShutdown())
+                                bgExecutor.execute(VpnTunnelService.this::doDeepCheckInternal);
+                        }, 3_000L);
                     }
                     new ServerRepository(VpnTunnelService.this).saveLastWorkingServer(s);
                     sendVpnBroadcast(true, s, null);
@@ -441,13 +448,20 @@ public class VpnTunnelService extends VpnService {
         });
     }
 
+    private int deepCheckRetryCount = 0;
+    private static final int DEEP_CHECK_MAX_RETRIES = 5;
+
     private void doDeepCheck() {
+        doDeepCheckInternal();
+    }
+
+    private void doDeepCheckInternal() {
         // Сразу показываем в поле IP что идёт проверка
         AodOverlayService.sendStatus(this, true,
                 currentServer != null ? currentServer.host : null,
                 "Определяем IP...", null);
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this,
-                "🔬 Проверка IP...", true));
+                "Проверка IP...", true));
         try {
             java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
                     new java.net.InetSocketAddress("127.0.0.1", 10808));
@@ -496,6 +510,7 @@ public class VpnTunnelService extends VpnService {
             } else {
                 result = "🔬 IP: ✓ ответ получен (" + ms + "ms)";
             }
+            deepCheckRetryCount = 0; // успех — сбрасываем счётчик
             FileLogger.i(TAG, result);
             if (org != null) FileLogger.d(TAG, "org: " + org);
             // AOD: IP передаём напрямую без дополнительного executor (уже в bgExecutor)
@@ -515,12 +530,23 @@ public class VpnTunnelService extends VpnService {
             mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
 
         } catch (java.net.SocketTimeoutException e) {
-            String r = "🔬 IP: ✗ таймаут";
-            FileLogger.w(TAG, r);
+            FileLogger.w(TAG, "🔬 IP: ✗ таймаут (попытка " + (deepCheckRetryCount+1) + ")");
+            deepCheckRetryCount++;
+            String retryMsg = deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES
+                    ? "✗ таймаут, повтор " + deepCheckRetryCount + "/" + DEEP_CHECK_MAX_RETRIES
+                    : "✗ IP не определён";
+            // Показываем статус в поле IP сразу
             AodOverlayService.sendStatus(this, true,
-                    currentServer != null ? currentServer.host : null,
-                    "✗ таймаут", null);
-            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+                    currentServer != null ? currentServer.host : null, retryMsg, null);
+            final String statusMsg = "🔬 IP: " + retryMsg;
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, statusMsg, true));
+            // Повторяем если лимит не исчерпан
+            if (isRunning && deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES) {
+                checkHandler.postDelayed(() -> {
+                    if (isRunning && bgExecutor != null && !bgExecutor.isShutdown())
+                        bgExecutor.execute(VpnTunnelService.this::doDeepCheckInternal);
+                }, 30_000L);
+            }
         } catch (Exception e) {
             String r = "🔬 IP: ✗ " + e.getMessage();
             FileLogger.w(TAG, r);

@@ -36,6 +36,26 @@ public class AodOverlayService extends AccessibilityService {
 
     public static boolean isRunning = false;
 
+    // ═══ НАСТРОЙКИ ОТОБРАЖЕНИЯ ═══════════════════════════════════════════════
+    // Положение: CENTER=центр, вертикальный сдвиг (+вниз, -вверх)
+    private static final int  POSITION_Y_DP   = -60;   // выше центра
+    // Размеры текста
+    private static final int  TEXT_VPN_SP      = 15;
+    private static final int  TEXT_IP_SP        = 12;
+    private static final int  TEXT_SERVERS_SP   = 11;
+    private static final int  TEXT_STATUS_SP    = 11;
+    // Цвета текста
+    private static final int  COLOR_VPN         = 0xFFFFFFFF; // белый
+    private static final int  COLOR_IP          = 0xFF88EE88; // зелёный
+    private static final int  COLOR_SERVERS     = 0xFFAAAAAA; // серый
+    private static final int  COLOR_STATUS      = 0xFF6699BB; // голубой
+    // Фон
+    private static final int  COLOR_BG          = 0xFF000000; // чёрный
+    private static final int  COLOR_BORDER      = 0x55FFFFFF; // рамка
+    private static final int  PADDING_DP        = 20;
+    private static final int  MAX_WIDTH_DP      = 380;
+    // ═════════════════════════════════════════════════════════════════════════
+
     private WindowManager wm;
     private LinearLayout  overlay;
     private TextView      tvVpn;     // 🟢 VPN • сервер
@@ -81,7 +101,7 @@ public class AodOverlayService extends AccessibilityService {
             String stat      = intent.getStringExtra(EXTRA_SERVERS_STAT);
 
             if (server    != null) lastServer = server;
-            if (ip        != null) lastIp     = ip;
+            if (ip        != null) lastIp = ip.isEmpty() ? null : ip; // "" = сброс
             if (stat      != null) lastStat   = stat;
             if (statusMsg != null) {
                 lastStatus = statusMsg;
@@ -276,7 +296,7 @@ public class AodOverlayService extends AccessibilityService {
         );
         p.gravity = Gravity.CENTER;
         p.x = burnDx[burnStep];
-        p.y = -dp(120) + burnDy[burnStep];
+        p.y = dp(POSITION_Y_DP) + burnDy[burnStep];
         return p;
     }
 
@@ -310,19 +330,19 @@ public class AodOverlayService extends AccessibilityService {
     private void buildViews() {
         overlay = new LinearLayout(this);
         overlay.setOrientation(LinearLayout.VERTICAL);
-        overlay.setPadding(dp(20), dp(16), dp(20), dp(16));
+        overlay.setPadding(dp(PADDING_DP), dp(PADDING_DP-4), dp(PADDING_DP), dp(PADDING_DP-4));
 
         android.graphics.drawable.GradientDrawable bg =
                 new android.graphics.drawable.GradientDrawable();
-        bg.setColor(Color.BLACK);
+        bg.setColor(COLOR_BG);
         bg.setCornerRadius(dp(14));
-        bg.setStroke(dp(1), 0x55FFFFFF);
+        bg.setStroke(dp(1), COLOR_BORDER);
         overlay.setBackground(bg);
 
-        tvVpn     = makeText(15, true,  0xFFFFFFFF);
-        tvIp      = makeText(12, false, 0xFF88EE88);
-        tvServers = makeText(11, false, 0xFFAAAAAA);
-        tvStatus  = makeText(11, false, 0xFF6699BB);
+        tvVpn     = makeText(TEXT_VPN_SP,     true,  COLOR_VPN);
+        tvIp      = makeText(TEXT_IP_SP,      false, COLOR_IP);
+        tvServers = makeText(TEXT_SERVERS_SP, false, COLOR_SERVERS);
+        tvStatus  = makeText(TEXT_STATUS_SP,  false, COLOR_STATUS);
 
         for (TextView tv : new TextView[]{tvVpn, tvIp, tvServers, tvStatus}) {
             tv.setMaxWidth(dp(380));

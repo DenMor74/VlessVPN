@@ -30,6 +30,8 @@ public class MainViewModel extends AndroidViewModel {
 
     // Статус сканирования и трафик
     private final MutableLiveData<String>      lastStatusMessage = new MutableLiveData<>("");
+    // IP результат — отдельная LiveData, не перезаписывается другими сообщениями
+    private final MutableLiveData<String>      lastIpResult = new MutableLiveData<>("");
 
     public MainViewModel(@NonNull Application application) {
         super(application);
@@ -39,10 +41,14 @@ public class MainViewModel extends AndroidViewModel {
         // Слушаем изменения VPN состояния
         VpnTunnelService.registerConnectionListener(application, this::setConnected);
 
-        // Слушаем StatusBus — пробрасываем сообщение в lastStatusMessage (трафик + прогресс)
+        // Слушаем StatusBus — IP результаты в отдельную LiveData
         StatusBus.get().observeForever(event -> {
             if (event != null && event.message != null && !event.message.isEmpty()) {
-                lastStatusMessage.postValue(event.message);
+                if (event.message.startsWith("🔬")) {
+                    lastIpResult.postValue(event.message);
+                } else {
+                    lastStatusMessage.postValue(event.message);
+                }
             }
         });
 
@@ -58,6 +64,8 @@ public class MainViewModel extends AndroidViewModel {
 
     public LiveData<Boolean>     getIsConnected()      { return isConnected; }
     public LiveData<String>      getLastStatusMessage() { return lastStatusMessage; }
+    public LiveData<String>      getLastIpResult()      { return lastIpResult; }
+    public void clearIpResult() { lastIpResult.postValue(""); }
     public LiveData<VlessServer> getConnectedServer() { return connectedServer; }
 
     private void setConnected(boolean connected) {

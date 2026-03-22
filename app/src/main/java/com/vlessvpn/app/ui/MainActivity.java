@@ -477,22 +477,6 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     if (tvTraffic != null) tvTraffic.setText(" ");
                 }
-            } else if (msg.startsWith("🔬")) {
-                // Результат глубокой проверки IP → panel_deep_check
-                if (tvLastStatus != null) {
-                    tvLastStatus.setText(msg);
-                    boolean ok = msg.contains("✓");
-                    tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
-                    if (btnDeepCheckRefresh != null) {
-                        btnDeepCheckRefresh.setImageResource(R.drawable.ic_refresh);
-                        btnDeepCheckRefresh.setImageTintList(
-                            android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
-                    }
-                    if (panelDeepCheck != null) {
-                        panelDeepCheck.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
-                        panelDeepCheck.setVisibility(View.VISIBLE);
-                    }
-                }
             } else if (msg.startsWith("⏱")) {
                 // Результат теста скорости → panel_speed_test
                 if (tvSpeedTest != null) {
@@ -514,6 +498,38 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+        // Отдельный observer для IP результата — не теряется при других сообщениях
+        viewModel.getLastIpResult().observe(this, ip -> {
+            if (ip == null || ip.isEmpty()) {
+                // Сброс — показываем placeholder
+                if (tvLastStatus != null && VpnTunnelService.isRunning) {
+                    tvLastStatus.setText("Определяем IP...");
+                    tvLastStatus.setTextColor(0xFFFFFFFF);
+                    if (btnDeepCheckRefresh != null) {
+                        btnDeepCheckRefresh.setImageResource(R.drawable.ic_hourglass);
+                        btnDeepCheckRefresh.setImageTintList(
+                            android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+                    }
+                    if (panelDeepCheck != null) panelDeepCheck.setBackgroundColor(0xFF111827);
+                }
+                return;
+            }
+            if (tvLastStatus != null) {
+                tvLastStatus.setText(ip);
+                boolean ok = ip.contains("✓");
+                tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
+                if (btnDeepCheckRefresh != null) {
+                    btnDeepCheckRefresh.setImageResource(R.drawable.ic_refresh);
+                    btnDeepCheckRefresh.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                }
+                if (panelDeepCheck != null) {
+                    panelDeepCheck.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
+                    panelDeepCheck.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+;
     }
 
 // ════════════════════════════════════════════════════════════════
@@ -765,12 +781,19 @@ public class MainActivity extends AppCompatActivity {
                     panelSpeedTest.setVisibility(View.VISIBLE);
                 }
             }
-            // Панель IP — показываем если галочка включена
-            // НИКОГДА не сбрасываем текст — только observe и кнопка меняют его
+            // Панель IP
             boolean deepEnabled = new com.vlessvpn.app.storage.ServerRepository(
                     MainActivity.this).isDeepCheckOnConnect();
             if (panelDeepCheck != null)
                 panelDeepCheck.setVisibility(deepEnabled ? View.VISIBLE : View.GONE);
+            // Если поле пустое — показываем "Определяем IP..."
+            if (deepEnabled && tvLastStatus != null) {
+                String cur = tvLastStatus.getText().toString();
+                if (cur.isEmpty()) {
+                    tvLastStatus.setText("Определяем IP...");
+                    tvLastStatus.setTextColor(0xFFFFFFFF);
+                }
+            }
             if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
 
         } else {
@@ -780,6 +803,8 @@ public class MainActivity extends AppCompatActivity {
             tvConnectedServer.setText("—");
             tvTraffic.setText(" ");
             if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
+            if (tvLastStatus != null) { tvLastStatus.setText(""); tvLastStatus.setTextColor(0xFFFFFFFF); }
+            viewModel.clearIpResult();
             if (panelSpeedTest != null) {
                 panelSpeedTest.setVisibility(View.GONE);
                 if (tvSpeedTest != null) tvSpeedTest.setText("⏱ Тест скорости");

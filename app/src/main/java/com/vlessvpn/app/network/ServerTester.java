@@ -36,9 +36,9 @@ public class ServerTester {
     private static final int TIMEOUT_MS  = 10_000;
     private static final int REPEAT      = 2;
     private static final String[] CHECK_URLS = {
-        "http://www.gstatic.com/generate_204",
-        "http://connectivitycheck.gstatic.com/generate_204",
-        "http://cp.cloudflare.com/generate_204"
+        "http://speed.cloudflare.com/__down?bytes=512",
+        "http://ip-api.com/json?fields=query",
+        "http://www.msftconnecttest.com/connecttest.txt"
     };
 
     private static final AtomicBoolean vpnActive = new AtomicBoolean(false);
@@ -126,7 +126,7 @@ public class ServerTester {
             });
         }
 
-        try { latch.await(TIMEOUT_MS + 1000L, TimeUnit.MILLISECONDS); }
+        try { latch.await(TIMEOUT_MS + 2000L, TimeUnit.MILLISECONDS); }
         catch (InterruptedException ignored) {}
         pool.shutdownNow();
 

@@ -4,6 +4,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -98,19 +99,20 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
         h.tvHost.setText(s.host + ":" + s.port);
         h.tvRemark.setText(s.remark.isEmpty() ? s.host : s.remark);
 
-        // ── Иконка статуса ─────────────────────────────────
-        String icon;
+        // ── Иконка статуса (Material, единый стиль) ──────────
+        int iconRes;
         switch (status) {
-            case PINGING: icon = "⏳"; break;
-            case TESTING: icon = "🔄"; break;
-            case OK:      icon = isConnected ? "🟢" : "✅"; break;
-            case FAIL:    icon = "❌"; break;
+            case PINGING:
+            case TESTING: iconRes = R.drawable.ic_hourglass; break;
+            case OK:      iconRes = isConnected ? R.drawable.ic_server_connected : R.drawable.ic_server_ok; break;
+            case FAIL:    iconRes = R.drawable.ic_server_fail; break;
             default:
-                if (s.trafficOk)       icon = isConnected ? "🟢" : "✅";
-                else if (s.pingMs > 0) icon = "⚠️";
-                else                   icon = "⬜";
+                if (isConnected)          iconRes = R.drawable.ic_server_connected;
+                else if (s.trafficOk)     iconRes = R.drawable.ic_server_ok;
+                else if (s.tcpPingMs > 0) iconRes = R.drawable.ic_server_warn;
+                else                      iconRes = R.drawable.ic_server_idle;
         }
-        h.tvIcon.setText(icon);
+        h.tvIcon.setImageResource(iconRes);
 
         // ════════════════════════════════════════════════════════════════
         // ← VLESS задержка (справа, как обычно)
@@ -235,7 +237,8 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
     }
 
     static class ViewHolder extends RecyclerView.ViewHolder {
-        TextView tvIcon, tvHost, tvRemark, tvPing, tvStatus;
+        ImageView tvIcon;
+        TextView tvHost, tvRemark, tvPing, tvStatus;
         ImageButton btnConnect;
 
         ViewHolder(View v) {

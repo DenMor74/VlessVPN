@@ -91,7 +91,7 @@ public class HevTunnel {
         sb.append("  task-stack-size: 81920\n");
         sb.append("  connect-timeout: 5000\n");
         sb.append("  read-write-timeout: 60000\n");
-        sb.append("  log-level: warn\n");
+        sb.append("  log-level: error\n");
 
         File configFile = new File(context.getFilesDir(), "hev-socks5-tunnel.yaml");
         try (FileWriter writer = new FileWriter(configFile)) {

@@ -107,7 +107,7 @@ public class TProxyService {
             "misc:\n" +
             "  tcp-read-write-timeout: 300000\n" +
             "  udp-read-write-timeout: 60000\n" +
-            "  log-level: warn\n";
+            "  log-level: error\n";
 
         File f = new File(context.getFilesDir(), "hev-socks5-tunnel.yaml");
         FileWriter w = new FileWriter(f);

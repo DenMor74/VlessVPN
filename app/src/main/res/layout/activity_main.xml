@@ -175,7 +175,7 @@
             android:scaleType="fitCenter"
             android:padding="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:tint="#4CAF50"
+            android:tint="#FFFFFF"
             android:contentDescription="Повторить проверку"/>
 
     </LinearLayout>
@@ -212,7 +212,7 @@
             android:scaleType="fitCenter"
             android:padding="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:tint="#7E9FFF"
+            android:tint="#FFFFFF"
             android:contentDescription="Запустить тест скорости"/>
 
     </LinearLayout>

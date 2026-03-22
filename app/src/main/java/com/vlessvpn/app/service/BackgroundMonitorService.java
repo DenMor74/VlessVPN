@@ -35,6 +35,7 @@ import com.vlessvpn.app.util.StatusBus;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -142,25 +143,26 @@ public class BackgroundMonitorService extends Service {
                 try {
                     List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
                     if (!fresh.isEmpty()) {
-                        if (!VpnTunnelService.isRunning) {
-                            // VPN не активен — удаляем старые и вставляем новые
-                            repo.deleteBySourceUrlSync(url.trim());
-                            repo.insertAll(fresh);
-                        } else {
-                            // VPN активен — вставляем только новые серверы (которых нет в БД)
-                            // Существующие не трогаем чтобы не сбросить trafficOk/pingMs
-                            List<com.vlessvpn.app.model.VlessServer> existing =
-                                    repo.getAllServersSync();
-                            java.util.Set<String> existingIds = new java.util.HashSet<>();
-                            for (com.vlessvpn.app.model.VlessServer s : existing)
-                                existingIds.add(s.id);
-                            List<com.vlessvpn.app.model.VlessServer> onlyNew = new java.util.ArrayList<>();
-                            for (com.vlessvpn.app.model.VlessServer s : fresh)
-                                if (!existingIds.contains(s.id)) onlyNew.add(s);
-                            if (!onlyNew.isEmpty()) repo.insertAll(onlyNew);
-                            FileLogger.i(W, "VPN активен — добавлено " + onlyNew.size()
-                                    + " новых серверов, существующие сохранены");
+                        // Сохраняем текущий подключённый сервер чтобы не потерять его
+                        VlessServer connectedServer = VpnTunnelService.connectedServer;
+
+                        // Удаляем старые и вставляем новые (бесшовная замена)
+                        repo.deleteBySourceUrlSync(url.trim());
+                        repo.insertAll(fresh);
+
+                        // Если VPN активен и текущего сервера нет в новом списке —
+                        // восстанавливаем его (помечаем рабочим чтобы не пропал с экрана)
+                        if (connectedServer != null && VpnTunnelService.isRunning) {
+                            boolean foundInFresh = false;
+                            for (VlessServer s : fresh)
+                                if (s.id.equals(connectedServer.id)) { foundInFresh = true; break; }
+                            if (!foundInFresh) {
+                                connectedServer.sourceUrl = url.trim();
+                                repo.insertAll(java.util.Collections.singletonList(connectedServer));
+                                FileLogger.i(W, "Текущий сервер сохранён: " + connectedServer.host);
+                            }
                         }
+
                         totalDownloaded += fresh.size();
                         FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
                     }
@@ -225,10 +227,6 @@ public class BackgroundMonitorService extends Service {
                 return Result.success();
             }
 
-            if (VpnTunnelService.isRunning) {
-                FileLogger.i(W, "VPN подключён — откладываем сканирование до отключения");
-                return Result.retry();
-            }
 
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             WakeLock wakeLock = pm.newWakeLock(

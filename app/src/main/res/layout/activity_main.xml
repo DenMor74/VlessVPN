@@ -172,13 +172,15 @@
             android:layout_height="36dp"
             android:layout_marginEnd="8dp"
             android:src="@drawable/ic_refresh"
+            android:scaleType="fitCenter"
+            android:padding="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:tint="#4CAF50"
             android:contentDescription="Повторить проверку"/>
 
     </LinearLayout>
 
-    <!-- Тест скорости — показывается только при подключении -->
+    <!-- Тест скорости — тот же стиль что и панель IP -->
     <LinearLayout
         android:id="@+id/panel_speed_test"
         android:layout_width="match_parent"
@@ -207,6 +209,8 @@
             android:layout_height="36dp"
             android:layout_marginEnd="8dp"
             android:src="@drawable/ic_play"
+            android:scaleType="fitCenter"
+            android:padding="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:tint="#7E9FFF"
             android:contentDescription="Запустить тест скорости"/>

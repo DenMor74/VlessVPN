@@ -727,13 +727,36 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText("🟢 Подключено");
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
-
-            // ════════════════════════════════════════════════════════════════
-            // ← Обновить строку режима
-            // ════════════════════════════════════════════════════════════════
-            if (tvStatusMode != null) {
-                tvStatusMode.setText("🟢 VPN активен");
+            // Панель скорости — показываем, сбрасываем в белый дефолт
+            if (panelSpeedTest != null) {
+                panelSpeedTest.setVisibility(View.VISIBLE);
+                panelSpeedTest.setBackgroundColor(0xFF111827);
             }
+            if (tvSpeedTest != null) {
+                tvSpeedTest.setText("⏱ Тест скорости");
+                tvSpeedTest.setTextColor(0xFFFFFFFF);
+            }
+            if (btnSpeedTest != null) {
+                btnSpeedTest.setImageResource(R.drawable.ic_play);
+                btnSpeedTest.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+            }
+            // Панель IP — показываем если галочка включена, иначе скрываем
+            boolean deepEnabled = new com.vlessvpn.app.storage.ServerRepository(
+                    MainActivity.this).isDeepCheckOnConnect();
+            if (panelDeepCheck != null)
+                panelDeepCheck.setVisibility(deepEnabled ? View.VISIBLE : View.GONE);
+            if (tvLastStatus != null) {
+                tvLastStatus.setText(deepEnabled ? "Определяем IP..." : "");
+                tvLastStatus.setTextColor(0xFFFFFFFF);
+            }
+            if (btnDeepCheckRefresh != null) {
+                btnDeepCheckRefresh.setImageResource(
+                    deepEnabled ? R.drawable.ic_hourglass : R.drawable.ic_refresh);
+                btnDeepCheckRefresh.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+            }
+            if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
 
         } else {
             tvStatus.setText("🔴 Отключено");
@@ -742,12 +765,11 @@ public class MainActivity extends AppCompatActivity {
             tvConnectedServer.setText("—");
             tvTraffic.setText(" ");
             if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
-            // ════════════════════════════════════════════════════════════════
-            // ← Обновить строку режима
-            // ════════════════════════════════════════════════════════════════
-            if (tvStatusMode != null) {
-                tvStatusMode.setText("Готов к подключению");
+            if (panelSpeedTest != null) {
+                panelSpeedTest.setVisibility(View.GONE);
+                if (tvSpeedTest != null) tvSpeedTest.setText("⏱ Тест скорости");
             }
+            if (tvStatusMode != null) tvStatusMode.setText("Готов к подключению");
         }
     }
 

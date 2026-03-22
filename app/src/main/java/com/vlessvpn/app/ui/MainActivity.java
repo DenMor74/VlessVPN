@@ -765,23 +765,12 @@ public class MainActivity extends AppCompatActivity {
                     panelSpeedTest.setVisibility(View.VISIBLE);
                 }
             }
-            // Панель IP — только при первом появлении (когда панель скрыта)
-            // НЕ сбрасываем если уже показана с результатом
+            // Панель IP — показываем если галочка включена
+            // НИКОГДА не сбрасываем текст — только observe и кнопка меняют его
             boolean deepEnabled = new com.vlessvpn.app.storage.ServerRepository(
                     MainActivity.this).isDeepCheckOnConnect();
-            if (panelDeepCheck != null && panelDeepCheck.getVisibility() != View.VISIBLE) {
+            if (panelDeepCheck != null)
                 panelDeepCheck.setVisibility(deepEnabled ? View.VISIBLE : View.GONE);
-                if (tvLastStatus != null) {
-                    tvLastStatus.setText(deepEnabled ? "Определяем IP..." : "");
-                    tvLastStatus.setTextColor(0xFFFFFFFF);
-                }
-                if (btnDeepCheckRefresh != null) {
-                    btnDeepCheckRefresh.setImageResource(
-                        deepEnabled ? R.drawable.ic_hourglass : R.drawable.ic_refresh);
-                    btnDeepCheckRefresh.setImageTintList(
-                        android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
-                }
-            }
             if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
 
         } else {

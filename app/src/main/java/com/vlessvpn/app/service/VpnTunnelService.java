@@ -494,8 +494,20 @@ public class VpnTunnelService extends VpnService {
             }
             FileLogger.i(TAG, result);
             if (org != null) FileLogger.d(TAG, "org: " + org);
-            // Передаём IP в AOD
-            if (ip != null) sendAodStatusWithIp(ip + " " + location);
+            // AOD: IP передаём напрямую без дополнительного executor (уже в bgExecutor)
+            if (ip != null) {
+                final String ipLocation = ip + " " + location;
+                com.vlessvpn.app.storage.ServerRepository repo =
+                        new com.vlessvpn.app.storage.ServerRepository(VpnTunnelService.this);
+                java.util.List<com.vlessvpn.app.model.VlessServer> all = repo.getAllServersSync();
+                int total = all.size(), working = 0;
+                for (com.vlessvpn.app.model.VlessServer s : all) if (s.trafficOk) working++;
+                com.vlessvpn.app.service.AodOverlayService.sendStatus(VpnTunnelService.this,
+                        true,
+                        currentServer != null ? currentServer.host : null,
+                        ipLocation,
+                        working + "/" + total);
+            }
             mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
 
         } catch (java.net.SocketTimeoutException e) {

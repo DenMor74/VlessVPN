@@ -202,7 +202,7 @@ public class AodOverlayService extends AccessibilityService {
             try {
                 wm.addView(overlay, p);
                 overlayAdded = true;
-                android.util.Log.i("AodOverlay", "Overlay добавлен");
+                android.util.Log.i("AodOverlay", "Overlay добавлен vpnActive=" + vpnActive);
             } catch (Exception e) {
                 android.util.Log.e("AodOverlay", "addView: " + e.getMessage());
             }
@@ -229,10 +229,18 @@ public class AodOverlayService extends AccessibilityService {
         String status = lastStatus != null ? lastStatus : "";
 
         if (!vpnActive) {
-            if (tvVpn    != null) tvVpn.setText("🔴 VPN отключён");
+            if (tvVpn    != null) tvVpn.setText("🔴 VPN");
             if (tvIp     != null) tvIp.setVisibility(View.GONE);
-            if (tvServers!= null) tvServers.setVisibility(View.GONE);
-            if (tvStatus != null) tvStatus.setVisibility(View.GONE);
+            // Серверов — показываем если есть данные
+            if (tvServers != null) {
+                tvServers.setText(!stat.isEmpty() ? "Серверов: " + stat : "");
+                tvServers.setVisibility(!stat.isEmpty() ? View.VISIBLE : View.GONE);
+            }
+            // Статус — показываем последнее сообщение
+            if (tvStatus != null) {
+                tvStatus.setText(!status.isEmpty() ? status : "Отключено");
+                tvStatus.setVisibility(View.VISIBLE);
+            }
             return;
         }
 
@@ -265,47 +273,26 @@ public class AodOverlayService extends AccessibilityService {
     private final Runnable hideRunnable = this::removeOverlayNow;
 
     private void showDisconnected() {
-        // Сбрасываем данные
-        lastServer = null; lastIp = null; lastStat = null;
-        lastStatus = "🔴 VPN отключён";
-        shownServer = "X"; // форсируем перерисовку
+        android.util.Log.i("AodOverlay", "showDisconnected: inAod=" + inAod
+                + " overlayAdded=" + overlayAdded + " vpnActive=" + vpnActive);
+        // Сохраняем stat для отображения, сбрасываем только сервер и IP
+        lastServer = null;
+        lastIp     = null;
+        lastStatus = "Отключено";
+        // Форсируем перерисовку
+        shownServer = "X"; shownIp = "X"; shownStatus = "X";
 
-        handler.post(() -> {
-            if (tvVpn    != null) tvVpn.setText("🔴 VPN отключён");
-            if (tvIp     != null) tvIp.setVisibility(View.GONE);
-            if (tvServers!= null) tvServers.setVisibility(View.GONE);
-            if (tvStatus != null) tvStatus.setVisibility(View.GONE);
-        });
+        // Всегда делаем remove+add — единственный способ обновить в AOD
+        addOverlayFull();
 
-        // В AOD — перерисовываем через remove+add
-        if (inAod && overlayAdded) {
-            addOverlayFull();
-        }
-
-        // Убираем overlay через 10 сек
+        // Убираем через 10 сек
         handler.removeCallbacks(hideRunnable);
         handler.postDelayed(hideRunnable, 10_000L);
     }
 
     private void removeOverlayNow() {
         handler.post(() -> {
-            // В AOD простой removeView может не сработать — сначала делаем remove+add с невидимым видом
-            if (overlayAdded && inAod) {
-                try { wm.removeView(overlay); } catch (Exception ignored) {}
-                // Создаём пустой невидимый overlay и добавляем чтобы Samsung перерисовал
-                LinearLayout empty = new LinearLayout(AodOverlayService.this);
-                empty.setBackgroundColor(0x00000000);
-                WindowManager.LayoutParams p = makeParams();
-                p.width  = 1;
-                p.height = 1;
-                try { wm.addView(empty, p); } catch (Exception ignored) {}
-                // Убираем и его
-                handler.postDelayed(() -> {
-                    try { wm.removeView(empty); } catch (Exception ignored) {}
-                }, 500);
-            } else {
-                try { if (overlay != null) wm.removeView(overlay); } catch (Exception ignored) {}
-            }
+            try { if (overlay != null) wm.removeView(overlay); } catch (Exception ignored) {}
             overlayAdded = false;
         });
     }

@@ -18,6 +18,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -72,7 +73,7 @@ public class MainActivity extends AppCompatActivity {
     // UI
     private TextView    tvStatus;
     private TextView    tvConnectedServer;
-    private android.widget.ImageButton btnDisconnect;
+    private ImageButton btnDisconnect;
     private RecyclerView recyclerView;
     private SwipeRefreshLayout swipeRefresh;
     private View        tvEmptyState;
@@ -87,9 +88,6 @@ public class MainActivity extends AppCompatActivity {
     private TextView    tvLastStatus;
     private View        panelDeepCheck;
     private android.widget.ImageButton btnDeepCheckRefresh;
-    private View        panelSpeedTest;
-    private TextView    tvSpeedTest;
-    private android.widget.ImageButton btnSpeedTest;
     private TextView    tvTraffic;
     // private TextView    tvLastUpdate;
     private TextView    tvAutoConnectStatus;
@@ -335,6 +333,7 @@ public class MainActivity extends AppCompatActivity {
 // ← НОВЫЙ МЕТОД: Информация о текущем листе
 // ════════════════════════════════════════════════════════════════
 
+
     // ── Init ─────────────────────────────────────────────────────────────────
 
     private void initViews() {
@@ -355,28 +354,15 @@ public class MainActivity extends AppCompatActivity {
         tvLastStatus         = findViewById(R.id.tv_last_status);
         panelDeepCheck       = findViewById(R.id.panel_deep_check);
         btnDeepCheckRefresh  = findViewById(R.id.btn_deep_check_refresh);
-        panelSpeedTest       = findViewById(R.id.panel_speed_test);
-        tvSpeedTest          = findViewById(R.id.tv_speed_test);
-        btnSpeedTest         = findViewById(R.id.btn_speed_test);
-
         if (btnDeepCheckRefresh != null) {
             btnDeepCheckRefresh.setOnClickListener(v -> {
-                if (VpnTunnelService.isRunning) {
-                    VpnTunnelService svc = VpnTunnelService.getInstance();
-                    if (svc != null) svc.runDeepCheck();
-                }
-            });
-        }
-
-        if (btnSpeedTest != null) {
-            btnSpeedTest.setOnClickListener(v -> {
-                if (VpnTunnelService.isRunning) {
-                    if (tvSpeedTest != null) tvSpeedTest.setText("⏱ Тест скорости...");
-                    VpnTunnelService svc = VpnTunnelService.getInstance();
-                    if (svc != null) svc.runSpeedTest();
-                } else {
-                    android.widget.Toast.makeText(MainActivity.this,
-                        "Подключите VPN для теста скорости", android.widget.Toast.LENGTH_SHORT).show();
+                if (VpnTunnelService.isRunning && com.vlessvpn.app.service.BackgroundMonitorService.class != null) {
+                    tvLastStatus.setText("🔬 Проверка...");
+                    new Thread(() -> {
+                        com.vlessvpn.app.service.VpnTunnelService svc =
+                            com.vlessvpn.app.service.VpnTunnelService.getInstance();
+                        if (svc != null) svc.runDeepCheck();
+                    }).start();
                 }
             });
         }
@@ -451,38 +437,31 @@ public class MainActivity extends AppCompatActivity {
             if (msg == null || msg.isEmpty()) return;
 
             if (msg.contains("↑") && msg.contains("↓")) {
-                // Скорость трафика
+                // Трафик
                 if (VpnTunnelService.isRunning) {
                     if (tvTraffic != null) tvTraffic.setText(msg);
                 } else {
                     if (tvTraffic != null) tvTraffic.setText(" ");
                 }
             } else if (msg.startsWith("🔬")) {
-                // Результат глубокой проверки IP
+                // Результат глубокой проверки → tv_last_status (только при подключении)
                 if (VpnTunnelService.isRunning && tvLastStatus != null) {
                     tvLastStatus.setText(msg);
-                    boolean ok = msg.contains("✓");
-                    tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
-                    if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
-                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
-                    if (panelDeepCheck != null) {
-                        panelDeepCheck.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
-                        panelDeepCheck.setVisibility(View.VISIBLE);
+                    if (msg.contains("✓")) {
+                        tvLastStatus.setTextColor(0xFF4CAF50);
+                        if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
+                            android.content.res.ColorStateList.valueOf(0xFF4CAF50));
+                        if (panelDeepCheck != null) panelDeepCheck.setBackgroundColor(0xFF0D1F0D);
+                    } else {
+                        tvLastStatus.setTextColor(0xFFFF5252);
+                        if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
+                            android.content.res.ColorStateList.valueOf(0xFFFF5252));
+                        if (panelDeepCheck != null) panelDeepCheck.setBackgroundColor(0xFF1F0D0D);
                     }
-                }
-            } else if (msg.startsWith("⏱")) {
-                // Результат теста скорости
-                if (tvSpeedTest != null) {
-                    tvSpeedTest.setText(msg);
-                    boolean ok = msg.contains("✓");
-                    tvSpeedTest.setTextColor(ok ? 0xFF7E9FFF : 0xFFFF5252);
-                    if (btnSpeedTest != null) btnSpeedTest.setImageTintList(
-                        android.content.res.ColorStateList.valueOf(ok ? 0xFF7E9FFF : 0xFFFF5252));
-                    if (panelSpeedTest != null)
-                        panelSpeedTest.setBackgroundColor(ok ? 0xFF0D0D1F : 0xFF1F0D0D);
+                    if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.VISIBLE);
                 }
             } else {
-                // Статус / прогресс сканирования
+                // Прогресс сканирования → tvStatusMode
                 if (tvStatusMode != null) {
                     tvStatusMode.setText(VpnTunnelService.isRunning ? msg : "🔍 " + msg);
                 }
@@ -613,50 +592,29 @@ public class MainActivity extends AppCompatActivity {
 // ════════════════════════════════════════════════════════════════
 
     private void onConnectClicked(VlessServer server) {
+        if (server == null) return;
+
         FileLogger.i(TAG, "onConnectClicked: " + server.host);
 
-        // ════════════════════════════════════════════════════════════════
-        // ← ПРОВЕРКА: server не должен быть null
-        // ════════════════════════════════════════════════════════════════
-        if (server == null) {
-            FileLogger.e(TAG, "ERROR: server is null!");
-            Toast.makeText(this, "Ошибка: сервер не найден", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // ════════════════════════════════════════════════════════════════
-        // ← Если уже подключён — отключаем и подключаем к новому
-        // ════════════════════════════════════════════════════════════════
         if (VpnTunnelService.isRunning) {
-            FileLogger.i(TAG, "VPN уже запущен — переключаемся на новый сервер");
+            VlessServer connected = VpnTunnelService.connectedServer;
+            boolean isSameServer = connected != null && connected.id.equals(server.id);
 
-            // ════════════════════════════════════════════════════════════════
-            // ← ВАЖНО: Создаём копию server для lambda (чтобы не обнулилась)
-            // ════════════════════════════════════════════════════════════════
-            VlessServer serverToConnect = server;
-
-            // Отключаем текущий VPN
-            disconnectVpn();
-
-            // ════════════════════════════════════════════════════════════════
-            // ← Задержка перед подключением к новому серверу
-            // ════════════════════════════════════════════════════════════════
-            mainHandler.postDelayed(() -> {
-                // ← Проверяем что serverToConnect не null
-                if (serverToConnect != null) {
-                    doStartVpn(serverToConnect);
-                } else {
-                    FileLogger.e(TAG, "ERROR: serverToConnect is null in delayed runnable!");
-                    Toast.makeText(MainActivity.this, "Ошибка подключения", Toast.LENGTH_SHORT).show();
-                }
-            }, 800);  // ← Увеличил задержку до 800ms
-
+            if (isSameServer) {
+                // Нажали на кнопку стоп подключённого сервера — отключаем
+                FileLogger.i(TAG, "Отключаем VPN (нажата кнопка стоп)");
+                disconnectVpn();
+            } else {
+                // Нажали на другой сервер — переключаемся
+                FileLogger.i(TAG, "Переключаемся на: " + server.host);
+                final VlessServer next = server;
+                disconnectVpn();
+                mainHandler.postDelayed(() -> doStartVpn(next), 800);
+            }
             return;
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // ← Если не подключён — подключаемся сразу
-        // ════════════════════════════════════════════════════════════════
+        // VPN не активен — подключаемся
         Intent perm = VpnService.prepare(this);
         if (perm != null) {
             pendingServer = server;
@@ -742,18 +700,21 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText("🟢 Подключено");
             tvStatus.setTextColor(getColor(R.color.color_connected));
             btnDisconnect.setVisibility(View.VISIBLE);
-            if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.VISIBLE);
-            if (panelDeepCheck != null && new com.vlessvpn.app.storage.ServerRepository(MainActivity.this).isDeepCheckOnConnect())
-                panelDeepCheck.setVisibility(View.VISIBLE);
-            if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Обновить строку режима
+            // ════════════════════════════════════════════════════════════════
+            if (tvStatusMode != null) {
+                tvStatusMode.setText("🟢 VPN активен");
+            }
 
         } else {
             tvStatus.setText("🔴 Отключено");
             tvStatus.setTextColor(getColor(R.color.color_disconnected));
             btnDisconnect.setVisibility(View.INVISIBLE);
             tvConnectedServer.setText("—");
-            
             tvTraffic.setText(" ");
+            if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
             // ════════════════════════════════════════════════════════════════
             // ← Обновить строку режима
             // ════════════════════════════════════════════════════════════════

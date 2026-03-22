@@ -151,11 +151,11 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
         if (status == TestStatus.PINGING) {
             h.tvStatus.setText("⏳ TCP проверка...");
             h.tvStatus.setTextColor(0xFF7799BB);
-            h.tvStatus.setVisibility(View.GONE); //VISIBLE
+            h.tvStatus.setVisibility(View.VISIBLE);
         } else if (status == TestStatus.TESTING) {
             h.tvStatus.setText("🔄 VLESS проверка...");
             h.tvStatus.setTextColor(0xFFFFB300);
-            h.tvStatus.setVisibility(View.GONE); //VISIBLE
+            h.tvStatus.setVisibility(View.VISIBLE);
         } else if (status == TestStatus.OK || s.trafficOk) {
             // Показываем TCP ping под названием
             if (tcpPing > 0 && vlessDelay > 0) {
@@ -171,7 +171,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
                 h.tvStatus.setText("✓ OK");
                 h.tvStatus.setTextColor(0xFF4CAF50);
             }
-            h.tvStatus.setVisibility(View.GONE); //VISIBLE
+            h.tvStatus.setVisibility(View.VISIBLE);
         } else if (status == TestStatus.FAIL || !s.trafficOk) {
             if (tcpPing > 0) {
                 h.tvStatus.setText("✗ TCP: " + tcpPing + "ms (VLESS failed)");
@@ -180,7 +180,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
                 h.tvStatus.setText("✗ Недоступен");
                 h.tvStatus.setTextColor(0xFFFF5555);
             }
-            h.tvStatus.setVisibility(View.GONE); //VISIBLE
+            h.tvStatus.setVisibility(View.VISIBLE);
         } else {
             h.tvStatus.setVisibility(View.GONE);
         }

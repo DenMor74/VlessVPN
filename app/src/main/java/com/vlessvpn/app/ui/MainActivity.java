@@ -87,6 +87,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView    tvCountFail;
     private TextView    tvLastStatus;
     private View        panelDeepCheck;
+    private View        panelSpeedTest;
+    private TextView    tvSpeedTest;
+    private android.widget.ImageButton btnSpeedTest;
     private android.widget.ImageButton btnDeepCheckRefresh;
     private TextView    tvTraffic;
     // private TextView    tvLastUpdate;
@@ -353,6 +356,23 @@ public class MainActivity extends AppCompatActivity {
 //        tvCountFail       = findViewById(R.id.tv_count_fail);
         tvLastStatus         = findViewById(R.id.tv_last_status);
         panelDeepCheck       = findViewById(R.id.panel_deep_check);
+        panelSpeedTest       = findViewById(R.id.panel_speed_test);
+        tvSpeedTest          = findViewById(R.id.tv_speed_test);
+        btnSpeedTest         = findViewById(R.id.btn_speed_test);
+        if (btnSpeedTest != null) {
+            btnSpeedTest.setOnClickListener(v -> {
+                if (VpnTunnelService.isRunning) {
+                    if (tvSpeedTest != null) tvSpeedTest.setText("⏱ Тест скорости...");
+                    com.vlessvpn.app.service.VpnTunnelService svc =
+                        com.vlessvpn.app.service.VpnTunnelService.getInstance();
+                    if (svc != null) svc.runSpeedTest();
+                } else {
+                    android.widget.Toast.makeText(MainActivity.this,
+                        "Подключите VPN для теста скорости",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
         btnDeepCheckRefresh  = findViewById(R.id.btn_deep_check_refresh);
         if (btnDeepCheckRefresh != null) {
             btnDeepCheckRefresh.setOnClickListener(v -> {
@@ -444,21 +464,28 @@ public class MainActivity extends AppCompatActivity {
                     if (tvTraffic != null) tvTraffic.setText(" ");
                 }
             } else if (msg.startsWith("🔬")) {
-                // Результат глубокой проверки → tv_last_status (только при подключении)
+                // Результат глубокой проверки IP → panel_deep_check
                 if (VpnTunnelService.isRunning && tvLastStatus != null) {
                     tvLastStatus.setText(msg);
-                    if (msg.contains("✓")) {
-                        tvLastStatus.setTextColor(0xFF4CAF50);
-                        if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
-                            android.content.res.ColorStateList.valueOf(0xFF4CAF50));
-                        if (panelDeepCheck != null) panelDeepCheck.setBackgroundColor(0xFF0D1F0D);
-                    } else {
-                        tvLastStatus.setTextColor(0xFFFF5252);
-                        if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
-                            android.content.res.ColorStateList.valueOf(0xFFFF5252));
-                        if (panelDeepCheck != null) panelDeepCheck.setBackgroundColor(0xFF1F0D0D);
+                    boolean ok = msg.contains("✓");
+                    tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
+                    if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    if (panelDeepCheck != null) {
+                        panelDeepCheck.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
+                        panelDeepCheck.setVisibility(View.VISIBLE);
                     }
-                    if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.VISIBLE);
+                }
+            } else if (msg.startsWith("⏱")) {
+                // Результат теста скорости → panel_speed_test
+                if (tvSpeedTest != null) {
+                    tvSpeedTest.setText(msg);
+                    boolean ok = msg.contains("✓");
+                    tvSpeedTest.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
+                    if (btnSpeedTest != null) btnSpeedTest.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    if (panelSpeedTest != null)
+                        panelSpeedTest.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
                 }
             } else {
                 // Прогресс сканирования → tvStatusMode

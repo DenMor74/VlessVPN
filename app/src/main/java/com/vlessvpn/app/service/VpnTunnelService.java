@@ -169,6 +169,11 @@ public class VpnTunnelService extends VpnService {
     public static VpnTunnelService getInstance() { return instance; }
 
     /** Запускает глубокую проверку вручную (кнопка обновить) */
+    public void runSpeedTest() {
+        if (bgExecutor != null && !bgExecutor.isShutdown())
+            bgExecutor.execute(this::doSpeedTest);
+    }
+
     public void runDeepCheck() {
         if (bgExecutor != null && !bgExecutor.isShutdown()) {
             bgExecutor.execute(this::doDeepCheck);
@@ -485,6 +490,56 @@ public class VpnTunnelService extends VpnService {
             if (end < 0) return null;
             return json.substring(start, end);
         } catch (Exception e) { return null; }
+    }
+
+
+    private void doSpeedTest() {
+        mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "⏱ Тест скорости...", true));
+        try {
+            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                    new java.net.InetSocketAddress("127.0.0.1", 10808));
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                    new java.net.URL("http://speed.cloudflare.com/__down?bytes=262144")
+                    .openConnection(proxy);
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(30_000);
+            conn.setRequestProperty("User-Agent", "VlessVPN/1.0");
+            conn.setInstanceFollowRedirects(true);
+            conn.connect();
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                conn.disconnect();
+                String r = "⏱ Тест: ✗ HTTP " + code;
+                FileLogger.w(TAG, r);
+                mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+                return;
+            }
+            java.io.InputStream is = conn.getInputStream();
+            byte[] buf = new byte[8192];
+            long downloaded = 0;
+            long t0 = System.currentTimeMillis();
+            int n;
+            while ((n = is.read(buf)) != -1) downloaded += n;
+            long ms = System.currentTimeMillis() - t0;
+            is.close();
+            conn.disconnect();
+            if (ms < 100) ms = 100;
+            double speedMBs = downloaded / 1024.0 / 1024.0 / (ms / 1000.0);
+            String speedStr = speedMBs >= 1.0
+                    ? String.format("%.2f MB/s", speedMBs)
+                    : String.format("%.0f KB/s", speedMBs * 1024);
+            String result = "⏱ ✓ " + speedStr + " (" + downloaded/1024 + " KB / " + ms + " ms)";
+            FileLogger.i(TAG, result);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
+        } catch (java.net.SocketTimeoutException e) {
+            String r = "⏱ Тест: ✗ таймаут";
+            FileLogger.w(TAG, r);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+        } catch (Exception e) {
+            String r = "⏱ Тест: ✗ " + e.getMessage();
+            FileLogger.w(TAG, r);
+            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
+        }
     }
 
     private void doConnectivityCheck() {

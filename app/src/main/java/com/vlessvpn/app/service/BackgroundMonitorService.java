@@ -143,14 +143,24 @@ public class BackgroundMonitorService extends Service {
                     List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
                     if (!fresh.isEmpty()) {
                         if (!VpnTunnelService.isRunning) {
-                            // VPN не активен — безопасно удалить старые и вставить новые
+                            // VPN не активен — удаляем старые и вставляем новые
                             repo.deleteBySourceUrlSync(url.trim());
+                            repo.insertAll(fresh);
                         } else {
-                            // VPN активен — НЕ удаляем старые проверенные серверы,
-                            // insertAll с REPLACE обновит существующие по id
-                            FileLogger.i(W, "VPN активен — сохраняем проверенные серверы");
+                            // VPN активен — вставляем только новые серверы (которых нет в БД)
+                            // Существующие не трогаем чтобы не сбросить trafficOk/pingMs
+                            List<com.vlessvpn.app.model.VlessServer> existing =
+                                    repo.getAllServersSync();
+                            java.util.Set<String> existingIds = new java.util.HashSet<>();
+                            for (com.vlessvpn.app.model.VlessServer s : existing)
+                                existingIds.add(s.id);
+                            List<com.vlessvpn.app.model.VlessServer> onlyNew = new java.util.ArrayList<>();
+                            for (com.vlessvpn.app.model.VlessServer s : fresh)
+                                if (!existingIds.contains(s.id)) onlyNew.add(s);
+                            if (!onlyNew.isEmpty()) repo.insertAll(onlyNew);
+                            FileLogger.i(W, "VPN активен — добавлено " + onlyNew.size()
+                                    + " новых серверов, существующие сохранены");
                         }
-                        repo.insertAll(fresh);
                         totalDownloaded += fresh.size();
                         FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
                     }
@@ -216,8 +226,8 @@ public class BackgroundMonitorService extends Service {
             }
 
             if (VpnTunnelService.isRunning) {
-                FileLogger.i(W, "VPN подключён — пропускаем фоновое сканирование");
-                return Result.success();
+                FileLogger.i(W, "VPN подключён — откладываем сканирование до отключения");
+                return Result.retry();
             }
 
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);

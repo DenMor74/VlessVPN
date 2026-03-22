@@ -86,7 +86,8 @@ public class AodOverlayService extends AccessibilityService {
             if (statusMsg != null) lastStatus = statusMsg;
 
             if (!connected) {
-                removeOverlayNow();
+                // Показываем сообщение об отключении, потом убираем через 10 сек
+                showDisconnected();
                 return;
             }
             if (inAod) updateIfChanged();
@@ -227,6 +228,14 @@ public class AodOverlayService extends AccessibilityService {
         String stat   = lastStat   != null ? lastStat   : "";
         String status = lastStatus != null ? lastStatus : "";
 
+        if (!vpnActive) {
+            if (tvVpn    != null) tvVpn.setText("🔴 VPN отключён");
+            if (tvIp     != null) tvIp.setVisibility(View.GONE);
+            if (tvServers!= null) tvServers.setVisibility(View.GONE);
+            if (tvStatus != null) tvStatus.setVisibility(View.GONE);
+            return;
+        }
+
         if (tvVpn     != null) tvVpn.setText("🟢 VPN" + (!server.isEmpty() ? "  •  " + server : ""));
         if (tvIp      != null) { tvIp.setText(ip);     tvIp.setVisibility(!ip.isEmpty()     ? View.VISIBLE : View.GONE); }
         if (tvServers != null) { tvServers.setText(!stat.isEmpty() ? "Серверов: " + stat : "");
@@ -251,6 +260,31 @@ public class AodOverlayService extends AccessibilityService {
         p.x = burnDx[burnStep];
         p.y = -dp(120) + burnDy[burnStep];
         return p;
+    }
+
+    private final Runnable hideRunnable = this::removeOverlayNow;
+
+    private void showDisconnected() {
+        // Сбрасываем данные
+        lastServer = null; lastIp = null; lastStat = null;
+        lastStatus = "🔴 VPN отключён";
+        shownServer = "X"; // форсируем перерисовку
+
+        handler.post(() -> {
+            if (tvVpn    != null) tvVpn.setText("🔴 VPN отключён");
+            if (tvIp     != null) tvIp.setVisibility(View.GONE);
+            if (tvServers!= null) tvServers.setVisibility(View.GONE);
+            if (tvStatus != null) tvStatus.setVisibility(View.GONE);
+        });
+
+        // В AOD — перерисовываем через remove+add
+        if (inAod && overlayAdded) {
+            addOverlayFull();
+        }
+
+        // Убираем overlay через 10 сек
+        handler.removeCallbacks(hideRunnable);
+        handler.postDelayed(hideRunnable, 10_000L);
     }
 
     private void removeOverlayNow() {

@@ -416,6 +416,9 @@ public class VpnTunnelService extends VpnService {
     /** Отправляет статус в AOD overlay — всегда в фоновом потоке */
     private void sendAodStatus() {
         sendAodStatusWithIp(null);
+        // Дефолтный статус
+        com.vlessvpn.app.service.AodOverlayService.sendStatusMsg(
+                this, "Подключено");
     }
 
     private void sendAodStatusWithIp(String ip) {

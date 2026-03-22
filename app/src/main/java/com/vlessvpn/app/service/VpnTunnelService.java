@@ -494,6 +494,8 @@ public class VpnTunnelService extends VpnService {
             }
             FileLogger.i(TAG, result);
             if (org != null) FileLogger.d(TAG, "org: " + org);
+            // Передаём IP в AOD
+            if (ip != null) sendAodStatusWithIp(ip + " " + location);
             mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
 
         } catch (java.net.SocketTimeoutException e) {

@@ -263,7 +263,7 @@ public class AodOverlayService extends AccessibilityService {
     private void buildViews() {
         overlay = new LinearLayout(this);
         overlay.setOrientation(LinearLayout.VERTICAL);
-        overlay.setPadding(dp(18), dp(14), dp(18), dp(14));
+        overlay.setPadding(dp(20), dp(16), dp(20), dp(16));
 
         android.graphics.drawable.GradientDrawable bg =
                 new android.graphics.drawable.GradientDrawable();
@@ -278,7 +278,7 @@ public class AodOverlayService extends AccessibilityService {
         tvStatus  = makeText(11, false, 0xFF6699BB);
 
         for (TextView tv : new TextView[]{tvVpn, tvIp, tvServers, tvStatus}) {
-            tv.setMaxWidth(dp(300));
+            tv.setMaxWidth(dp(380));
             overlay.addView(tv);
         }
     }

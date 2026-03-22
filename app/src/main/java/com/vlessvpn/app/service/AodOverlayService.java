@@ -289,7 +289,23 @@ public class AodOverlayService extends AccessibilityService {
 
     private void removeOverlayNow() {
         handler.post(() -> {
-            try { if (overlay != null) wm.removeView(overlay); } catch (Exception ignored) {}
+            // В AOD простой removeView может не сработать — сначала делаем remove+add с невидимым видом
+            if (overlayAdded && inAod) {
+                try { wm.removeView(overlay); } catch (Exception ignored) {}
+                // Создаём пустой невидимый overlay и добавляем чтобы Samsung перерисовал
+                LinearLayout empty = new LinearLayout(AodOverlayService.this);
+                empty.setBackgroundColor(0x00000000);
+                WindowManager.LayoutParams p = makeParams();
+                p.width  = 1;
+                p.height = 1;
+                try { wm.addView(empty, p); } catch (Exception ignored) {}
+                // Убираем и его
+                handler.postDelayed(() -> {
+                    try { wm.removeView(empty); } catch (Exception ignored) {}
+                }, 500);
+            } else {
+                try { if (overlay != null) wm.removeView(overlay); } catch (Exception ignored) {}
+            }
             overlayAdded = false;
         });
     }

@@ -362,7 +362,15 @@ public class MainActivity extends AppCompatActivity {
         if (btnSpeedTest != null) {
             btnSpeedTest.setOnClickListener(v -> {
                 if (VpnTunnelService.isRunning) {
-                    if (tvSpeedTest != null) tvSpeedTest.setText("⏱ Тест скорости...");
+                    // Меняем на hourglass пока идёт тест
+                    btnSpeedTest.setImageResource(R.drawable.ic_hourglass);
+                    btnSpeedTest.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+                    if (tvSpeedTest != null) {
+                        tvSpeedTest.setText("Идёт тест скорости...");
+                        tvSpeedTest.setTextColor(0xFFFFFFFF);
+                    }
+                    if (panelSpeedTest != null) panelSpeedTest.setBackgroundColor(0xFF111827);
                     com.vlessvpn.app.service.VpnTunnelService svc =
                         com.vlessvpn.app.service.VpnTunnelService.getInstance();
                     if (svc != null) svc.runSpeedTest();
@@ -376,13 +384,19 @@ public class MainActivity extends AppCompatActivity {
         btnDeepCheckRefresh  = findViewById(R.id.btn_deep_check_refresh);
         if (btnDeepCheckRefresh != null) {
             btnDeepCheckRefresh.setOnClickListener(v -> {
-                if (VpnTunnelService.isRunning && com.vlessvpn.app.service.BackgroundMonitorService.class != null) {
-                    tvLastStatus.setText("🔬 Проверка...");
-                    new Thread(() -> {
-                        com.vlessvpn.app.service.VpnTunnelService svc =
-                            com.vlessvpn.app.service.VpnTunnelService.getInstance();
-                        if (svc != null) svc.runDeepCheck();
-                    }).start();
+                if (VpnTunnelService.isRunning) {
+                    // Меняем на hourglass пока идёт тест
+                    btnDeepCheckRefresh.setImageResource(R.drawable.ic_hourglass);
+                    btnDeepCheckRefresh.setImageTintList(
+                        android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+                    if (tvLastStatus != null) {
+                        tvLastStatus.setText("Определяем IP...");
+                        tvLastStatus.setTextColor(0xFFFFFFFF);
+                    }
+                    if (panelDeepCheck != null) panelDeepCheck.setBackgroundColor(0xFF111827);
+                    com.vlessvpn.app.service.VpnTunnelService svc =
+                        com.vlessvpn.app.service.VpnTunnelService.getInstance();
+                    if (svc != null) svc.runDeepCheck();
                 }
             });
         }
@@ -465,12 +479,15 @@ public class MainActivity extends AppCompatActivity {
                 }
             } else if (msg.startsWith("🔬")) {
                 // Результат глубокой проверки IP → panel_deep_check
-                if (VpnTunnelService.isRunning && tvLastStatus != null) {
+                if (tvLastStatus != null) {
                     tvLastStatus.setText(msg);
                     boolean ok = msg.contains("✓");
                     tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
-                    if (btnDeepCheckRefresh != null) btnDeepCheckRefresh.setImageTintList(
-                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    if (btnDeepCheckRefresh != null) {
+                        btnDeepCheckRefresh.setImageResource(R.drawable.ic_refresh);
+                        btnDeepCheckRefresh.setImageTintList(
+                            android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    }
                     if (panelDeepCheck != null) {
                         panelDeepCheck.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
                         panelDeepCheck.setVisibility(View.VISIBLE);
@@ -482,8 +499,11 @@ public class MainActivity extends AppCompatActivity {
                     tvSpeedTest.setText(msg);
                     boolean ok = msg.contains("✓");
                     tvSpeedTest.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
-                    if (btnSpeedTest != null) btnSpeedTest.setImageTintList(
-                        android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    if (btnSpeedTest != null) {
+                        btnSpeedTest.setImageResource(R.drawable.ic_play);
+                        btnSpeedTest.setImageTintList(
+                            android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
+                    }
                     if (panelSpeedTest != null)
                         panelSpeedTest.setBackgroundColor(ok ? 0xFF0D1F0D : 0xFF1F0D0D);
                 }

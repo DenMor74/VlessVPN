@@ -83,7 +83,14 @@ public class AodOverlayService extends AccessibilityService {
             if (server    != null) lastServer = server;
             if (ip        != null) lastIp     = ip;
             if (stat      != null) lastStat   = stat;
-            if (statusMsg != null) lastStatus = statusMsg;
+            if (statusMsg != null) {
+                lastStatus = statusMsg;
+                // Результат IP-проверки — дублируем в поле IP
+                if (statusMsg.startsWith("🔬")) {
+                    // "🔬 ✓ 1.2.3.4 City" или "🔬 IP: ✗ таймаут"
+                    lastIp = statusMsg.replace("🔬 ", "").replace("🔬", "");
+                }
+            }
 
             if (!connected) {
                 // Показываем сообщение об отключении, потом убираем через 10 сек
@@ -135,11 +142,14 @@ public class AodOverlayService extends AccessibilityService {
                             || state == android.view.Display.STATE_DOZE_SUSPEND;
 
                     if (nowInAod && !wasInAod) {
-                        // Вошли в AOD — показываем
                         inAod = true;
                         wasInAod = true;
-                        android.util.Log.i("AodOverlay", "Вошли в AOD state=" + state);
+                        // Синхронизируем vpnActive с реальным состоянием VPN
+                        vpnActive = com.vlessvpn.app.service.VpnTunnelService.isRunning;
+                        android.util.Log.i("AodOverlay", "Вошли в AOD state=" + state
+                                + " vpnActive=" + vpnActive);
                         if (vpnActive) addOverlayFull();
+                        else showDisconnected();
                     } else if (!nowInAod && wasInAod) {
                         // Вышли из AOD
                         inAod = false;

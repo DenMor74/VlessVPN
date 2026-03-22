@@ -442,6 +442,10 @@ public class VpnTunnelService extends VpnService {
     }
 
     private void doDeepCheck() {
+        // Сразу показываем в поле IP что идёт проверка
+        AodOverlayService.sendStatus(this, true,
+                currentServer != null ? currentServer.host : null,
+                "Определяем IP...", null);
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this,
                 "🔬 Проверка IP...", true));
         try {
@@ -513,6 +517,9 @@ public class VpnTunnelService extends VpnService {
         } catch (java.net.SocketTimeoutException e) {
             String r = "🔬 IP: ✗ таймаут";
             FileLogger.w(TAG, r);
+            AodOverlayService.sendStatus(this, true,
+                    currentServer != null ? currentServer.host : null,
+                    "✗ таймаут", null);
             mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
         } catch (Exception e) {
             String r = "🔬 IP: ✗ " + e.getMessage();

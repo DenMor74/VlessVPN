@@ -41,6 +41,30 @@ public class SettingsActivity extends AppCompatActivity {
     private SeekBar   seekScanInterval;
     private TextView  tvScanIntervalValue;
 
+    private void updateAodStatus() {
+        android.view.accessibility.AccessibilityManager am =
+            (android.view.accessibility.AccessibilityManager)
+                getSystemService(ACCESSIBILITY_SERVICE);
+        boolean enabled = false;
+        if (am != null) {
+            for (android.accessibilityservice.AccessibilityServiceInfo info :
+                    am.getEnabledAccessibilityServiceList(
+                    android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)) {
+                if (info.getId().contains("AodOverlayService")) {
+                    enabled = true;
+                    break;
+                }
+            }
+        }
+        android.util.Log.i("AodOverlay", "Accessibility enabled: " + enabled);
+        // Находим TextView статуса если есть
+        android.widget.TextView tvAod = findViewById(R.id.tv_aod_status);
+        if (tvAod != null) {
+            tvAod.setText(enabled ? "✓ AOD активен" : "✗ AOD выключен — включите в Настройки → Спец. возможности → VlessVPN AOD");
+            tvAod.setTextColor(enabled ? 0xFF4CAF50 : 0xFFFF9800);
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -60,6 +84,8 @@ public class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // Показываем статус AOD сервиса
+        updateAodStatus();
 
         // ... остальной код ...
 

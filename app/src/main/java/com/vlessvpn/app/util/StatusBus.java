@@ -91,6 +91,14 @@ public class StatusBus {
     public static void post(Context ctx, String message, boolean isRunning) {
         globalStatus.postValue(new StatusEvent(message, isRunning));
 
+        // Дублируем в AOD overlay (только если не трафик и не сканирование серверов)
+        if (ctx != null && isRunning
+                && !message.contains("↑") && !message.contains("↓")
+                && !message.contains("/") // прогресс сканирования типа "5/30"
+                && com.vlessvpn.app.service.AodOverlayService.isRunning) {
+            com.vlessvpn.app.service.AodOverlayService.sendStatusMsg(ctx, message);
+        }
+
         if (ctx != null) {
             Intent intent = new Intent(ACTION_STATUS_CHANGED);
             intent.putExtra(EXTRA_MESSAGE, message);

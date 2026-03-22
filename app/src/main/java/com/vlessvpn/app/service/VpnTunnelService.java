@@ -125,16 +125,13 @@ public class VpnTunnelService extends VpnService {
                 FileLogger.d(TAG, "checkRunnable: VPN неактивен — останавливаем");
                 return;
             }
-            // Пересоздаём executor если завершён (после onDestroy при переключении)
             if (bgExecutor == null || bgExecutor.isShutdown()) {
                 bgExecutor = Executors.newSingleThreadExecutor();
                 FileLogger.w(TAG, "checkRunnable: bgExecutor пересоздан");
             }
-
             FileLogger.i(TAG, "=== проверка соединения ===");
             bgExecutor.execute(() -> {
                 doConnectivityCheck();
-                // Планируем следующую проверку только если VPN ещё активен
                 if (isRunning) {
                     checkHandler.postDelayed(checkRunnable, 60_000L);
                     FileLogger.i(TAG, "следующая проверка через 60 сек");
@@ -145,9 +142,9 @@ public class VpnTunnelService extends VpnService {
 
     private void startPeriodicCheck() {
         checkHandler.removeCallbacks(checkRunnable);
-        // Первая проверка через 25 сек — даём время Reality/VLESS установить соединение
-        checkHandler.postDelayed(checkRunnable, 25_000L);
-        FileLogger.i(TAG, "Periodic check запущен (первый через 25 сек, далее каждые 60 сек)");
+        // Первая проверка через 5 сек — Reality handshake быстрый, не нужно ждать 25 сек
+        checkHandler.postDelayed(checkRunnable, 5_000L);
+        FileLogger.i(TAG, "Periodic check запущен (первый через 5 сек, далее каждые 60 сек)");
     }
 
     private ParcelFileDescriptor vpnInterface;
@@ -339,6 +336,8 @@ public class VpnTunnelService extends VpnService {
                     statsHandler.postDelayed(statsPoller, 500);
                     startPeriodicCheck(); // единственное место планирования periodic check
                     ServerTester.setVpnActive(true);
+                    // AOD начальный статус
+                    sendAodStatus();
                     // Глубокая проверка (если включена в настройках) — после обычной проверки
                     if (new ServerRepository(VpnTunnelService.this).isDeepCheckOnConnect()) {
                         bgExecutor.execute(VpnTunnelService.this::doDeepCheck);
@@ -355,6 +354,8 @@ public class VpnTunnelService extends VpnService {
                     StatusBus.done(VpnTunnelService.this, "Отключено");
                     sendVpnBroadcast(false, null, null);
                     notifyConnectionChanged(false);
+                    AodOverlayService.sendStatus(VpnTunnelService.this, false, null, null, null);
+                    android.util.Log.i("AodOverlay", "VPN отключён — overlay скрыт");
                 });
             }
 
@@ -411,6 +412,32 @@ public class VpnTunnelService extends VpnService {
      * именно через VPN сервер, а не напрямую.
      * Ответ ~200 байт JSON — очень лёгкий запрос.
      */
+
+    /** Отправляет статус в AOD overlay — всегда в фоновом потоке */
+    private void sendAodStatus() {
+        sendAodStatusWithIp(null);
+    }
+
+    private void sendAodStatusWithIp(String ip) {
+        final String ipFinal = ip;
+        bgExecutor.execute(() -> {
+            com.vlessvpn.app.storage.ServerRepository repo =
+                    new com.vlessvpn.app.storage.ServerRepository(VpnTunnelService.this);
+            java.util.List<com.vlessvpn.app.model.VlessServer> all =
+                    repo.getAllServersSync();
+            int total   = all.size();
+            int working = 0;
+            for (com.vlessvpn.app.model.VlessServer s : all)
+                if (s.trafficOk) working++;
+            String stat = working + "/" + total;
+            AodOverlayService.sendStatus(VpnTunnelService.this,
+                    true,
+                    currentServer != null ? currentServer.host : null,
+                    ipFinal,
+                    stat);
+        });
+    }
+
     private void doDeepCheck() {
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this,
                 "🔬 Проверка IP...", true));
@@ -553,10 +580,10 @@ public class VpnTunnelService extends VpnService {
                 new ServerRepository(this).clearLastWorkingServer();
                 switchToNextServer();
             } else {
-                // Первый провал — повторим через 15 сек (может Reality ещё не установился)
+                // Первый провал — повторяем немедленно (через 2 сек на освобождение соединений)
                 mainHandler.post(() -> StatusBus.post(VpnTunnelService.this,
                         "Нет связи, повторная проверка...", true));
-                checkHandler.postDelayed(checkRunnable, 15_000L);
+                checkHandler.postDelayed(checkRunnable, 2_000L);
             }
         } else {
             failCount = 0;

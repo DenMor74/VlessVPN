@@ -10,4 +10,5 @@
     <string name="updating">Обновление...</string>
     <string name="vpn_notification_channel">VPN Статус</string>
     <string name="monitor_notification_channel">Мониторинг серверов</string>
+    <string name="aod_service_description">Показывает статус VPN на Always On Display без разблокировки экрана</string>
 </resources>

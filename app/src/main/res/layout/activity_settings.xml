@@ -353,6 +353,41 @@
 
         </LinearLayout>
 
+        <!-- ===== AOD Overlay ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
+            android:background="@color/bg_card"
+            android:layout_marginTop="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📺 Always On Display"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/tv_aod_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Проверка..."
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Для включения: Настройки → Специальные возможности → Загруженные приложения → VlessVPN AOD → Включить"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:layout_marginTop="4dp"/>
+
+        </LinearLayout>
+
         <!-- ===== Кнопки ===== -->
 
         <Button

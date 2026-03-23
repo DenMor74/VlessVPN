@@ -38,7 +38,7 @@ public class AodOverlayService extends AccessibilityService {
 
     // ═══ НАСТРОЙКИ ОТОБРАЖЕНИЯ ═══════════════════════════════════════════════
     // Положение: CENTER=центр, вертикальный сдвиг (+вниз, -вверх)
-    private static final int  POSITION_Y_DP   = -60;   // выше центра
+    private static final int  POSITION_Y_DP   = -80;   // выше центра
     // Размеры текста
     private static final int  TEXT_VPN_SP      = 15;
     private static final int  TEXT_IP_SP        = 12;
@@ -169,7 +169,7 @@ public class AodOverlayService extends AccessibilityService {
                         android.util.Log.i("AodOverlay", "Вошли в AOD state=" + state
                                 + " vpnActive=" + vpnActive);
                         if (vpnActive) addOverlayFull();
-                        else showDisconnected();
+                        // VPN выключен — ничего не показываем
                     } else if (!nowInAod && wasInAod) {
                         // Вышли из AOD
                         inAod = false;

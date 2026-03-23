@@ -215,27 +215,51 @@ public class AutoConnectManager {
         }
     }
 
+    // Те же URL что и в ServerTester — надёжные, без generate_204
+    private static final String[] CHECK_URLS = {
+        "http://speed.cloudflare.com/__down?bytes=512",
+        "http://ip-api.com/json?fields=query",
+        "http://www.msftconnecttest.com/connecttest.txt"
+    };
+
     private static boolean performConnectivityCheck() {
-        try {
-            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                    new java.net.InetSocketAddress("127.0.0.1", 10808));
-            java.net.URL url = new java.net.URL("http://cp.cloudflare.com/generate_204");
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection(proxy);
+        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
+                new java.net.InetSocketAddress("127.0.0.1", 10808));
 
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(CONNECT_TIMEOUT_MS);
+        java.util.concurrent.atomic.AtomicBoolean success =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.CountDownLatch latch =
+                new java.util.concurrent.CountDownLatch(CHECK_URLS.length);
+        java.util.concurrent.ExecutorService pool =
+                java.util.concurrent.Executors.newFixedThreadPool(CHECK_URLS.length);
 
-            int code = conn.getResponseCode();
-            boolean ok = (code == 204 || code == 200);
-
-            FileLogger.d(TAG, "Connectivity check: HTTP " + code + " → " + (ok ? "OK" : "FAIL"));
-            conn.disconnect();
-
-            return ok;
-        } catch (Exception e) {
-            FileLogger.d(TAG, "Connectivity check FAIL: " + e.getMessage());
-            return false;
+        for (String urlStr : CHECK_URLS) {
+            pool.execute(() -> {
+                try {
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                            new java.net.URL(urlStr).openConnection(proxy);
+                    conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                    conn.setReadTimeout(CONNECT_TIMEOUT_MS);
+                    int code = conn.getResponseCode();
+                    conn.disconnect();
+                    if (code >= 200 && code < 400) {
+                        success.set(true);
+                        while (latch.getCount() > 0) latch.countDown();
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    latch.countDown();
+                }
+            });
         }
+
+        try { latch.await(CONNECT_TIMEOUT_MS + 1000L,
+                java.util.concurrent.TimeUnit.MILLISECONDS); }
+        catch (InterruptedException ignored) {}
+        pool.shutdownNow();
+
+        FileLogger.d(TAG, "Connectivity check: " + (success.get() ? "OK" : "FAIL"));
+        return success.get();
     }
 
     public static void resetServerIndex() {

@@ -5,8 +5,9 @@ import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.NetworkInfo;
 import android.net.NetworkRequest;
+import android.os.Handler;
+import android.os.Looper;
 import androidx.annotation.NonNull;
 
 import com.vlessvpn.app.service.AutoConnectManager;
@@ -15,119 +16,179 @@ import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
 /**
- * WifiMonitor — мониторинг подключения/отключения Wi-Fi.
- * Использует NetworkCallback (работает на Android 8–16).
- * При отключении Wi-Fi вызывает AutoConnectManager.startAutoConnect().
+ * WifiMonitor — мониторинг сетевых переходов.
+ *
+ * Улучшения:
+ * 1. Ждём появления мобильного интернета (VALIDATED) перед запуском VPN
+ * 2. Задержка после onLost — LTE поднимается ~1-2 сек
+ * 3. wasWifiConnected инициализируется реальным состоянием WiFi
  */
 public class WifiMonitor {
 
     private static final String TAG = "WifiMonitor";
-    private static ConnectivityManager.NetworkCallback callback;
+    private static final long WIFI_LOST_DELAY_MS = 2_000L; // ждём LTE после потери WiFi
+
+    private static ConnectivityManager.NetworkCallback wifiCallback;
+    private static ConnectivityManager.NetworkCallback defaultCallback;
     private static Context appContext;
+    private static final Handler handler = new Handler(Looper.getMainLooper());
+
+    // Флаги состояния
+    private static volatile boolean wifiLostPending  = false; // WiFi потерян, ждём LTE
+    private static volatile boolean hasInternet      = false; // есть любой интернет
 
     public static void startMonitoring(Context context) {
-        if (callback != null) return;
+        if (wifiCallback != null) return;
 
         appContext = context.getApplicationContext();
-        ConnectivityManager cm = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        ConnectivityManager cm = (ConnectivityManager)
+                appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return;
+
         ServerRepository repo = new ServerRepository(appContext);
 
-        NetworkRequest request = new NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .build();
+        // Инициализируем реальным состоянием WiFi
+        boolean wifiNow = isWifiConnected(appContext);
+        hasInternet = hasAnyInternet(appContext);
+        FileLogger.i(TAG, "WifiMonitor старт: wifi=" + wifiNow + " internet=" + hasInternet);
 
-        callback = new ConnectivityManager.NetworkCallback() {
-            private boolean wasWifiConnected = true;
-
+        // ── Callback 1: слушаем WiFi ─────────────────────────────────────────
+        wifiCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(@NonNull Network network) {
-                wasWifiConnected = true;
                 FileLogger.i(TAG, "Wi-Fi подключён → отменяем авто-подключение");
-
-                // 1. Отменяем.pending подключения
+                wifiLostPending = false;
+                handler.removeCallbacks(onWifiLostRunnable);
                 AutoConnectManager.cancelAutoConnect();
 
-                // 2. ← НОВОЕ: Если VPN запущен — отключаем его
+                // Если VPN запущен через LTE — отключаем (вернулись на WiFi)
                 if (VpnTunnelService.isRunning) {
-                    //FileLogger.i(TAG, "VPN активен — отключаем (WiFi восстановлен)");
-
-                    Intent disconnectIntent = new Intent(appContext, VpnTunnelService.class);
-                    disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
-                    appContext.startService(disconnectIntent);
-
-                    //FileLogger.i(TAG, "Отправлен ACTION_DISCONNECT");
+                    Intent i = new Intent(appContext, VpnTunnelService.class);
+                    i.setAction(VpnTunnelService.ACTION_DISCONNECT);
+                    appContext.startService(i);
                 }
             }
 
             @Override
             public void onLost(@NonNull Network network) {
-                if (!wasWifiConnected) return;
-                wasWifiConnected = false;
-
+                FileLogger.w(TAG, "Wi-Fi ОТКЛЮЧЁН — ждём " + WIFI_LOST_DELAY_MS + "мс");
                 if (!repo.isAutoConnectOnWifiDisconnect()) {
-                    FileLogger.d(TAG, "Авто-подключение при отключении WiFi выключено в настройках");
+                    FileLogger.d(TAG, "Авто-подключение выключено в настройках");
                     return;
                 }
-
-                if (!VpnTunnelService.isRunning && !AutoConnectManager.isFailoverInProgress()) {
-                    FileLogger.w(TAG, "Wi-Fi ОТКЛЮЧЁН! Запускаем AutoConnectManager");
-                    AutoConnectManager.startAutoConnect(appContext);
-                }
+                wifiLostPending = true;
+                // Ждём немного — LTE может подняться сам
+                handler.removeCallbacks(onWifiLostRunnable);
+                handler.postDelayed(onWifiLostRunnable, WIFI_LOST_DELAY_MS);
             }
         };
 
-        cm.registerNetworkCallback(request, callback);
-        FileLogger.i(TAG, "WifiMonitor запущен (NetworkCallback)");
+        // ── Callback 2: слушаем появление любого интернета (LTE) ────────────
+        defaultCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(@NonNull Network network) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                if (caps == null) return;
+                boolean isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+                if (isVpn) return; // наш VPN — игнорируем
+
+                hasInternet = true;
+                FileLogger.d(TAG, "Интернет появился (не VPN)");
+
+                // Если WiFi потерян и ждём LTE — запускаем VPN теперь
+                if (wifiLostPending && !VpnTunnelService.isRunning
+                        && !AutoConnectManager.isFailoverInProgress()) {
+                    FileLogger.i(TAG, "LTE появился после потери WiFi → запускаем VPN");
+                    wifiLostPending = false;
+                    handler.removeCallbacks(onWifiLostRunnable);
+                    AutoConnectManager.startAutoConnect(appContext);
+                }
+            }
+
+            @Override
+            public void onLost(@NonNull Network network) {
+                // Проверяем остался ли ещё какой-то интернет
+                hasInternet = hasAnyInternet(appContext);
+                FileLogger.d(TAG, "Сеть потеряна, hasInternet=" + hasInternet);
+            }
+        };
+
+        // Регистрируем оба callback
+        NetworkRequest wifiReq = new NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .build();
+        cm.registerNetworkCallback(wifiReq, wifiCallback);
+
+        // DEFAULT — любая сеть с интернетом (кроме VPN)
+        NetworkRequest defaultReq = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                .build();
+        cm.registerNetworkCallback(defaultReq, defaultCallback);
+
+        FileLogger.i(TAG, "WifiMonitor запущен (WiFi + DEFAULT callbacks)");
     }
 
+    // Запускаем VPN если интернет уже есть через LTE
+    private static final Runnable onWifiLostRunnable = () -> {
+        if (!wifiLostPending) return;
+        wifiLostPending = false;
+
+        if (VpnTunnelService.isRunning || AutoConnectManager.isFailoverInProgress()) return;
+
+        if (hasAnyInternet(appContext)) {
+            FileLogger.i(TAG, "WiFi потерян, LTE уже есть → запускаем VPN");
+            AutoConnectManager.startAutoConnect(appContext);
+        } else {
+            FileLogger.w(TAG, "WiFi потерян, нет интернета — ждём появления LTE");
+            // defaultCallback.onAvailable запустит VPN когда LTE появится
+        }
+    };
+
     public static void stopMonitoring() {
-        if (callback != null) {
-            try {
-                ConnectivityManager cm = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
-                cm.unregisterNetworkCallback(callback);
-                callback = null;
-                FileLogger.i(TAG, "WifiMonitor остановлен");
-            } catch (Exception e) {
-                FileLogger.e(TAG, "Ошибка остановки мониторинга", e);
-            }
+        handler.removeCallbacks(onWifiLostRunnable);
+        if (appContext == null) return;
+        ConnectivityManager cm = (ConnectivityManager)
+                appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return;
+        try {
+            if (wifiCallback    != null) { cm.unregisterNetworkCallback(wifiCallback);    wifiCallback = null; }
+            if (defaultCallback != null) { cm.unregisterNetworkCallback(defaultCallback); defaultCallback = null; }
+            FileLogger.i(TAG, "WifiMonitor остановлен");
+        } catch (Exception e) {
+            FileLogger.e(TAG, "Ошибка остановки", e);
         }
     }
 
-// ════════════════════════════════════════════════════════════════
-// В WifiMonitor.java — исправить метод isWifiConnected()
-// ════════════════════════════════════════════════════════════════
-
-    /**
-     * Проверить: подключён ли WiFi с интернетом
-     * @param ctx контекст
-     * @return true если WiFi активен и имеет интернет
-     */
-    public static boolean isWifiConnected(Context ctx) {
+    /** Есть ли хоть какой-то интернет (не VPN) */
+    private static boolean hasAnyInternet(Context ctx) {
         ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return false;
-
-        // ════════════════════════════════════════════════════════════════
-        // ← СОВРЕМЕННЫЙ API (API 23+)
-        // ════════════════════════════════════════════════════════════════
-
-        // Проверяем все активные сети
         for (Network net : cm.getAllNetworks()) {
             NetworkCapabilities caps = cm.getNetworkCapabilities(net);
             if (caps == null) continue;
-
-            // Проверяем что это WiFi
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                // Проверяем что есть интернет и он валидирован
-                boolean hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
-                boolean isVerified = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
-
-                FileLogger.d("WifiMonitor", "WiFi найден: internet=" + hasInternet + ", verified=" + isVerified);
-
-                return hasInternet && isVerified;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                return true;
             }
         }
+        return false;
+    }
 
-        FileLogger.d("WifiMonitor", "WiFi не найден");
+    /** Подключён ли WiFi с интернетом */
+    public static boolean isWifiConnected(Context ctx) {
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return false;
+        for (Network net : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+            if (caps == null) continue;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                return true;
+            }
+        }
         return false;
     }
 }

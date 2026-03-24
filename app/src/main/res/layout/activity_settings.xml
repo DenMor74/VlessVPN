@@ -233,6 +233,33 @@
 
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:background="@color/bg_card"
+            android:layout_marginTop="8dp"
+            android:paddingBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔬 Проверка IP при подключении"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp"/>
+
+            <Switch
+                android:id="@+id/switch_deep_check"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Запускать проверку IP при подключении "
+                android:textSize="14sp"
+                android:layout_marginTop="4dp"/>
+
+        </LinearLayout>
+
         <!-- ════════════════════════════════════════════════════════════════ -->
         <!-- Ночной режим (добавить перед кнопкой "Сохранить") -->
         <!-- ════════════════════════════════════════════════════════════════ -->
@@ -318,40 +345,7 @@
         </LinearLayout>
 
         <!-- ===== Глубокая проверка ===== -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingHorizontal="12dp"
-            android:background="@color/bg_card"
-            android:layout_marginTop="8dp"
-            android:paddingBottom="12dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🔬 Глубокая проверка"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginTop="8dp"/>
-
-            <Switch
-                android:id="@+id/switch_deep_check"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Проверять доступность Google при подключении"
-                android:textSize="14sp"
-                android:layout_marginTop="4dp"/>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="После обычной проверки делает HTTP-запрос к google.com. Результат отображается в строке статуса."
-                android:textSize="11sp"
-                android:textColor="#999999"
-                android:layout_marginTop="4dp"/>
-
-        </LinearLayout>
 
         <!-- ===== AOD Overlay ===== -->
         <LinearLayout

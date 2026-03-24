@@ -54,9 +54,9 @@ public class AutoConnectManager {
                     return;
                 }
 
-                FileLogger.i(TAG, "═══════════════════════════════════════");
+                //FileLogger.i(TAG, "═══════════════════════════════════════");
                 FileLogger.i(TAG, "Начинаем авто-подключение. Серверов: " + serverList.size());
-                FileLogger.i(TAG, "═══════════════════════════════════════");
+                //FileLogger.i(TAG, "═══════════════════════════════════════");
 
                 // 1. Сначала пробуем последний рабочий сервер
                 VlessServer lastServer = repo.getLastWorkingServer();

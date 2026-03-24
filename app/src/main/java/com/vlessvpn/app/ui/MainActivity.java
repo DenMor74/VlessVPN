@@ -461,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
                 tvConnectedServer.setText(server.remark.isEmpty() ? server.host : server.remark);
                 serverAdapter.setConnectedServerId(server.id);
             } else {
-                tvConnectedServer.setText("—");
+                tvConnectedServer.setText("");
                 serverAdapter.setConnectedServerId(null);
             }
         });
@@ -800,7 +800,7 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText("🔴 Отключено");
             tvStatus.setTextColor(getColor(R.color.color_disconnected));
             btnDisconnect.setVisibility(View.INVISIBLE);
-            tvConnectedServer.setText("—");
+            tvConnectedServer.setText("");
             tvTraffic.setText(" ");
             if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
             if (tvLastStatus != null) { tvLastStatus.setText(""); tvLastStatus.setTextColor(0xFFFFFFFF); }

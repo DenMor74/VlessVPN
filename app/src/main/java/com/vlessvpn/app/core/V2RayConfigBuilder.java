@@ -6,6 +6,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.List;
+
 /**
  * V2RayConfigBuilder — генерирует JSON конфигурацию для v2ray-core.
  *
@@ -261,6 +263,115 @@ public class V2RayConfigBuilder {
         // Переиспользуем build() с socksPort, без TUN (tunFd=-1)
         // measureDelay использует встроенный HTTP клиент Go, не наш SOCKS
         return build(server, socksPort, -1);
+    }
+
+    /**
+     * Генерирует "Мультиплекс-конфиг" для параллельного тестирования списка серверов.
+     * Не содержит TUN-интерфейса. Для каждого сервера открывается свой локальный HTTP-порт.
+     *
+     * @param servers  Список серверов (выживших после TCP Ping)
+     * @param basePort Стартовый порт для локальных прокси (например, 10800).
+     *                 Если передано 10 серверов, они займут порты 10800-10809.
+     * @return JSON строка конфигурации
+     */
+    public static String buildMultiplexTestConfig(List<VlessServer> servers, int basePort) {
+        try {
+            JSONObject config = new JSONObject();
+
+            JSONObject log = new JSONObject();
+            log.put("loglevel", "warning"); // Меньше логов для ускорения
+            config.put("log", log);
+
+            JSONArray inbounds = new JSONArray();
+            JSONArray outbounds = new JSONArray();
+            JSONArray rules = new JSONArray();
+
+            for (int i = 0; i < servers.size(); i++) {
+                VlessServer server = servers.get(i);
+                int localPort = basePort + i;
+                String inTag = "in-" + i;
+                String outTag = "proxy-" + i;
+
+                // 1. Создаем Inbound (Локальный HTTP прокси для этого сервера)
+                // Используем HTTP, так как HttpURLConnection в Java работает с ним быстрее и надежнее SOCKS
+                JSONObject inbound = new JSONObject();
+                inbound.put("tag", inTag);
+                inbound.put("port", localPort);
+                inbound.put("listen", "127.0.0.1");
+                inbound.put("protocol", "http");
+
+                JSONObject inSettings = new JSONObject();
+                inSettings.put("timeout", 0);
+                inbound.put("settings", inSettings);
+
+                inbounds.put(inbound);
+
+                // 2. Создаем Outbound (Сам удаленный VLESS сервер)
+                JSONObject vlessOut = new JSONObject();
+                vlessOut.put("tag", outTag);
+                vlessOut.put("protocol", "vless");
+
+                JSONObject outSettings = new JSONObject();
+                JSONArray vnext = new JSONArray();
+                JSONObject serverConf = new JSONObject();
+                serverConf.put("address", server.host);
+                serverConf.put("port", server.port);
+
+                JSONArray users = new JSONArray();
+                JSONObject user = new JSONObject();
+                user.put("id", server.uuid);
+                user.put("encryption", "none");
+                if (server.flow != null && !server.flow.isEmpty()) {
+                    user.put("flow", server.flow);
+                }
+                users.put(user);
+                serverConf.put("users", users);
+
+                vnext.put(serverConf);
+                outSettings.put("vnext", vnext);
+                vlessOut.put("settings", outSettings);
+
+                // Переиспользуем ваш существующий метод для генерации streamSettings
+                vlessOut.put("streamSettings", buildStreamSettings(server));
+
+                outbounds.put(vlessOut);
+
+                // 3. Создаем правило Routing (Привязываем Inbound к Outbound)
+                JSONObject rule = new JSONObject();
+                rule.put("type", "field");
+
+                JSONArray inTags = new JSONArray();
+                inTags.put(inTag);
+                rule.put("inboundTag", inTags);
+                rule.put("outboundTag", outTag);
+
+                rules.put(rule);
+            }
+
+            // Добавляем обязательные outbounds для блокировки и прямого трафика
+            JSONObject direct = new JSONObject();
+            direct.put("tag", "direct");
+            direct.put("protocol", "freedom");
+            outbounds.put(direct);
+
+            JSONObject block = new JSONObject();
+            block.put("tag", "block");
+            block.put("protocol", "blackhole");
+            outbounds.put(block);
+
+            config.put("inbounds", inbounds);
+            config.put("outbounds", outbounds);
+
+            JSONObject routing = new JSONObject();
+            routing.put("domainStrategy", "AsIs");
+            routing.put("rules", rules);
+            config.put("routing", routing);
+
+            return config.toString();
+
+        } catch (JSONException e) {
+            throw new RuntimeException("Ошибка генерации Multiplex-конфига: " + e.getMessage(), e);
+        }
     }
 
 }

@@ -211,6 +211,10 @@ public class BackgroundMonitorService extends Service {
     // ScanWorker — TCP пинг + VLESS measureDelay для всех серверов
     // ════════════════════════════════════════════════════════════════════════
 
+    // ════════════════════════════════════════════════════════════════════════
+    // ScanWorker — КОНВЕЙЕР (Fast TCP Ping + Multiplex VLESS HTTP Test)
+    // ════════════════════════════════════════════════════════════════════════
+
     public static class ScanWorker extends Worker {
         private static final String W = "ScanWorker";
 
@@ -227,121 +231,186 @@ public class BackgroundMonitorService extends Service {
                 return Result.success();
             }
 
-
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
-            WakeLock wakeLock = pm.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK, "VlessVPN::ScanWorker");
-            wakeLock.acquire(10 * 60 * 1000L);
+            WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VlessVPN::ScanWorker");
+            wakeLock.acquire(5 * 60 * 1000L); // 5 минут с запасом
 
             try {
-                return doScan(ctx, repo);
+                return doPipelineScan(ctx, repo);
             } finally {
                 if (wakeLock.isHeld()) wakeLock.release();
             }
         }
 
-        private Result doScan(Context ctx, ServerRepository repo) {
-            List<VlessServer> toTest = repo.getAllServersSync();
-            if (toTest.isEmpty()) {
+        private Result doPipelineScan(Context ctx, ServerRepository repo) {
+            List<VlessServer> allServers = repo.getAllServersSync();
+            if (allServers.isEmpty()) {
                 StatusBus.done(ctx, "⚠️ Нет серверов в базе");
                 return Result.retry();
             }
 
-            int total = toTest.size();
+            int total = allServers.size();
             StatusBus.post(ctx, "🔍 Тестируем " + total + " серверов...", true);
             StatusBus.setWorking(ctx, true);
 
-            ExecutorService pool = Executors.newFixedThreadPool(10);
-            AtomicInteger portCounter = new AtomicInteger(10900);
-            CountDownLatch latch = new CountDownLatch(total);
-            AtomicInteger done  = new AtomicInteger(0);
-            AtomicInteger ok    = new AtomicInteger(0);
+            AtomicInteger done = new AtomicInteger(0);
+            AtomicInteger ok = new AtomicInteger(0);
 
-            for (VlessServer server : toTest) {
-                if (isStopped()) { latch.countDown(); continue; }
-                pool.submit(() -> {
-                    try {
-                        int curr    = done.incrementAndGet();
-                        int percent = (curr * 100) / total;
+            // Получаем мобильную сеть для "честного" теста через DPI провайдера
+            Network cellularNet = ServerTester.getCellularNetwork(ctx);
+            ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
 
-                        StatusBus.postServer(ctx, server.id, server.host,
-                                "pinging", -1, false, curr + "/" + total);
-
-                        // Шаг 1: TCP пинг (быстрая фильтрация недоступных)
-                        ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server);
-
-                        if (!tcp.trafficOk) {
-                            server.trafficOk    = false;
-                            server.pingMs       = -1;
-                            server.tcpPingMs    = (int) tcp.pingMs;
-                            server.lastTestedAt = System.currentTimeMillis();
-                            repo.updateServerSync(server);
-                            StatusBus.postServer(ctx, server.id, server.host,
-                                    "fail", -1, false, "✗ TCP");
-                        } else {
-                            // Шаг 2: VLESS measureDelay (реальная проверка протокола)
-                            StatusBus.postServer(ctx, server.id, server.host,
-                                    "testing", tcp.pingMs, false,
-                                    "TCP " + tcp.pingMs + "ms → VLESS...");
-
-                            int testPort = (portCounter.getAndIncrement() % 100) + 10900;
-                            String testCfg = V2RayConfigBuilder.buildForTest(server, testPort);
-                            long vlessDelay = V2RayManager.measureDelay(ctx, testCfg);
-
-                            if (vlessDelay > 0) {
-                                server.pingMs       = vlessDelay;
-                                server.tcpPingMs    = (int) tcp.pingMs;
-                                server.trafficOk    = true;
-                                server.lastTestedAt = System.currentTimeMillis();
-                                repo.updateServerSync(server);
-                                ok.incrementAndGet();
-                                StatusBus.postServer(ctx, server.id, server.host,
-                                        "ok", vlessDelay, true,
-                                        "✓ VLESS " + vlessDelay + "ms");
-                            } else {
-                                server.trafficOk    = false;
-                                server.pingMs       = -1;
-                                server.tcpPingMs    = (int) tcp.pingMs;
-                                server.lastTestedAt = System.currentTimeMillis();
-                                repo.updateServerSync(server);
-                                StatusBus.postServer(ctx, server.id, server.host,
-                                        "fail", tcp.pingMs, false,
-                                        "✗ VLESS (TCP " + tcp.pingMs + "ms)");
-                            }
-                        }
-
-                        StatusBus.updateCounts(ctx, total, ok.get(), curr - ok.get());
-                        StatusBus.setProgress(ctx, percent);
-                        StatusBus.post(ctx,
-                                "🔍 " + curr + "/" + total + " (✓ " + ok.get() + " рабочих)", true);
-
-                    } catch (Exception e) {
-                        FileLogger.e(W, "Ошибка теста " + server.host, e);
-                    } finally {
-                        latch.countDown();
-                    }
-                });
+            if (cellularNet != null) {
+                cm.bindProcessToNetwork(cellularNet); // Привязываем ВЕСЬ процесс воркера к LTE
+            } else {
+                FileLogger.w(W, "LTE не найден, тест пойдет через активную сеть (WiFi)");
             }
 
-            try { latch.await(10, TimeUnit.MINUTES); } catch (InterruptedException ignored) {}
-            pool.shutdownNow();
+            try {
+                // ====================================================================
+                // ЭТАП 1: Быстрый параллельный TCP Ping (отсев мертвецов)
+                // ====================================================================
+                List<VlessServer> survivedPing = new java.util.ArrayList<>();
+                ExecutorService pingPool = Executors.newFixedThreadPool(30); // Широкий пул для скорости
+                CountDownLatch pingLatch = new CountDownLatch(total);
+
+                for (VlessServer server : allServers) {
+                    pingPool.submit(() -> {
+                        try {
+                            ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server);
+                            int curr = done.incrementAndGet();
+
+                            if (tcp.trafficOk) {
+                                server.tcpPingMs = (int) tcp.pingMs;
+                                synchronized (survivedPing) { survivedPing.add(server); }
+                                StatusBus.postServer(ctx, server.id, server.host, "pinging", tcp.pingMs, false, "TCP OK");
+                            } else {
+                                server.trafficOk = false;
+                                server.pingMs = -1;
+                                server.tcpPingMs = (int) tcp.pingMs;
+                                server.lastTestedAt = System.currentTimeMillis();
+                                repo.updateServerSync(server);
+                                StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
+                            }
+                            StatusBus.setProgress(ctx, (curr * 50) / total); // Первая половина прогресс-бара
+                        } finally {
+                            pingLatch.countDown();
+                        }
+                    });
+                }
+
+                pingLatch.await(30, TimeUnit.SECONDS); // Жесткий таймаут на пинг
+                pingPool.shutdownNow();
+
+                FileLogger.i(W, "Прошли TCP Ping: " + survivedPing.size() + " из " + total);
+
+                // ====================================================================
+                // ЭТАП 2: Глубокий тест выживших (Мультиплексирование V2Ray)
+                // ====================================================================
+                if (!survivedPing.isEmpty()) {
+                    int basePort = 10800;
+
+                    // 1. Генерируем мега-конфиг
+                    String multiplexConfig = V2RayConfigBuilder.buildMultiplexTestConfig(survivedPing, basePort);
+
+                    // 2. Тихо запускаем одно ядро V2Ray без TUN интерфейса
+                    boolean coreStarted = V2RayManager.startSilentMultiplexInstance(ctx, multiplexConfig);
+
+                    if (coreStarted) {
+                        ExecutorService httpPool = Executors.newFixedThreadPool(20);
+                        CountDownLatch httpLatch = new CountDownLatch(survivedPing.size());
+
+                        // 3. Параллельно стучимся в открытые локальные порты
+                        for (int i = 0; i < survivedPing.size(); i++) {
+                            final VlessServer server = survivedPing.get(i);
+                            final int localProxyPort = basePort + i;
+                            final int currentIndex = i;
+
+                            httpPool.submit(() -> {
+                                try {
+                                    long startTime = System.currentTimeMillis();
+                                    boolean success = testHttpThroughProxy(localProxyPort);
+                                    long vlessDelay = System.currentTimeMillis() - startTime;
+
+                                    server.lastTestedAt = System.currentTimeMillis();
+                                    if (success) {
+                                        server.pingMs = vlessDelay;
+                                        server.trafficOk = true;
+                                        ok.incrementAndGet();
+                                        StatusBus.postServer(ctx, server.id, server.host, "ok", vlessDelay, true, "✓ VLESS " + vlessDelay + "ms");
+                                    } else {
+                                        server.trafficOk = false;
+                                        server.pingMs = -1;
+                                        StatusBus.postServer(ctx, server.id, server.host, "fail", server.tcpPingMs, false, "✗ DPI Блок");
+                                    }
+                                    repo.updateServerSync(server);
+
+                                    int currProgress = 50 + ((currentIndex + 1) * 50) / survivedPing.size();
+                                    StatusBus.setProgress(ctx, currProgress);
+                                    StatusBus.post(ctx, "🔍 Тест трафика (✓ " + ok.get() + " рабочих)", true);
+
+                                } finally {
+                                    httpLatch.countDown();
+                                }
+                            });
+                        }
+
+                        httpLatch.await(60, TimeUnit.SECONDS);
+                        httpPool.shutdownNow();
+
+                        // 4. Убиваем ядро
+                        V2RayManager.stopSilentMultiplexInstance();
+                    } else {
+                        FileLogger.e(W, "Не удалось запустить Мультиплекс V2Ray. Серверы помечены как нерабочие.");
+                    }
+                }
+
+            } catch (Exception e) {
+                FileLogger.e(W, "Критическая ошибка конвейера: " + e.getMessage());
+            } finally {
+                // Возвращаем сеть по умолчанию
+                cm.bindProcessToNetwork(null);
+            }
 
             repo.markScanned();
 
-            int finalOk   = ok.get();
+            int finalOk = ok.get();
             int finalFail = total - finalOk;
             StatusBus.setWorking(ctx, false);
-            StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total
-                    + " (✗ " + finalFail + ")");
+            StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total + " (✗ " + finalFail + ")");
 
-            // Авто-подключение после сканирования (если включено)
             checkAutoConnect(ctx, repo);
-
             FileLogger.i(W, "=== Завершено: " + finalOk + "/" + total + " ===");
             return Result.success();
         }
 
+        /**
+         * Делает HTTP GET запрос к легковесному эндпоинту через локальный HTTP прокси.
+         */
+        private boolean testHttpThroughProxy(int proxyPort) {
+            java.net.HttpURLConnection conn = null;
+            try {
+                java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", proxyPort));
+                // Используем gstatic (Google) - генерирует код 204 без тела. Самый быстрый способ.
+                java.net.URL url = new java.net.URL("http://connectivitycheck.gstatic.com/generate_204");
+                conn = (java.net.HttpURLConnection) url.openConnection(proxy);
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(4000);
+                conn.setRequestMethod("GET");
+                conn.setUseCaches(false);
+
+                int code = conn.getResponseCode();
+                return code == 204 || code == 200; // Успешно прошел!
+
+            } catch (Exception e) {
+                return false;
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }
+
         private static void checkAutoConnect(Context ctx, ServerRepository repo) {
+            // ... оставляете ваш существующий код метода checkAutoConnect без изменений ...
             if (!repo.isAutoConnectAfterScan()) return;
 
             boolean wifiConnected = WifiMonitor.isWifiConnected(ctx);

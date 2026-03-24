@@ -115,7 +115,7 @@ public class SettingsActivity extends AppCompatActivity {
         tvScanIntervalValue = findViewById(R.id.tv_scan_interval_value);
 
         if (seekScanInterval != null && tvScanIntervalValue != null) {
-            seekScanInterval.setMax(143);  // 0..143 → 10..1440 минут (шаг 10 мин)
+            seekScanInterval.setMax(5);  // 0..143 → 10..1440 минут (шаг 10 мин)
             seekScanInterval.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
                 @Override
                 public void onProgressChanged(SeekBar s, int p, boolean u) {

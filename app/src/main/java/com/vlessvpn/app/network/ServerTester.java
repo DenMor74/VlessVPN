@@ -139,17 +139,30 @@ public class ServerTester {
         FileDescriptor fd = null;
         try {
             fd = Os.socket(OsConstants.AF_INET, OsConstants.SOCK_STREAM, 0);
-            VpnTunnelService.protectSocket(getIntFd(fd));
+
+            // 🔴 ИСПРАВЛЕНИЕ: Вызываем protect() ТОЛЬКО если VPN реально включен пользователем.
+            // Если VPN выключен, вызов VpnTunnelService.protect() будит сервис,
+            // создает Foreground-уведомление и зажигает AOD-экран.
+            if (isVpnActive()) {
+                try {
+                    VpnTunnelService.protectSocket(getIntFd(fd));
+                } catch (Exception ignored) {}
+            }
+
+            // Привязка сокета к LTE/WiFi (это само по себе пускает трафик в обход VPN)
             if (bindNet != null) {
                 try { bindNet.bindSocket(fd); } catch (Exception ignored) {}
             }
+
             java.net.InetAddress addr = java.net.InetAddress.getByName(host);
             android.system.StructTimeval tv = android.system.StructTimeval.fromMillis(TIMEOUT_MS);
             Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, tv);
             Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, tv);
+
             long start = System.currentTimeMillis();
             Os.connect(fd, addr, port);
             long ms = System.currentTimeMillis() - start;
+
             Os.close(fd);
             fd = null;
             return ms;

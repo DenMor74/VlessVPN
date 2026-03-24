@@ -202,4 +202,85 @@ public class V2RayManager {
             return 0;
         }
     }
+
+    // ── МЕТОДЫ ДЛЯ ТИХОГО ТЕСТИРОВАНИЯ (БЕЗ VPN И AOD) ─────────────────────────
+
+    private static libv2ray.CoreController silentCoreController;
+
+    /**
+     * Запускает единый инстанс ядра с мультиплекс-конфигом в "тихом" режиме.
+     * Не привязывается к VpnService, не возвращает TunFd, не делает protectSocket.
+     *
+     * @param context Context приложения
+     * @param multiplexConfigJson Конфиг, сгенерированный V2RayConfigBuilder.buildMultiplexTestConfig
+     * @return true если запустилось
+     */
+    public static boolean startSilentMultiplexInstance(Context context, String multiplexConfigJson) {
+        stopSilentMultiplexInstance(); // На всякий случай убиваем старый
+        initEnvOnce(context);
+
+        try {
+            // Создаем заглушку (SilentCallback), которая ни при каких условиях
+            // не будет дергать VpnTunnelService, чтобы не будить экран!
+            silentCoreController = libv2ray.Libv2ray.newCoreController(new libv2ray.CoreCallbackHandler() {
+                @Override
+                public long startup() {
+                    // Возвращаем -1, потому что нам не нужен TUN интерфейс для теста
+                    return -1;
+                }
+
+                @Override
+                public long shutdown() {
+                    return 0;
+                }
+
+                @Override
+                public long onEmitStatus(long level, String message) {
+                    // ИГНОРИРУЕМ запросы "protect:", так как мы привяжем
+                    // весь процесс к LTE сети на уровне Android (bindProcessToNetwork)
+                    return 0;
+                }
+            });
+
+            // Запускаем ядро в фоне
+            // ВАЖНО: 0 (или -1 в зависимости от вашей версии libv2ray) означает отсутствие tunFd
+            silentCoreController.startLoop(multiplexConfigJson, 0);
+
+            // Даем ядру немного времени на инициализацию портов
+            int retries = 0;
+            while (!silentCoreController.getIsRunning() && retries < 5) {
+                Thread.sleep(200);
+                retries++;
+            }
+
+            if (!silentCoreController.getIsRunning()) {
+                FileLogger.e(TAG, "Тихий v2ray не запустился для тестов");
+                return false;
+            }
+
+            FileLogger.i(TAG, "Тихий v2ray (Мультиплекс) успешно запущен");
+            return true;
+
+        } catch (Exception e) {
+            FileLogger.e(TAG, "Ошибка тихого старта v2ray", e);
+            silentCoreController = null;
+            return false;
+        }
+    }
+
+    /**
+     * Останавливает "тихий" инстанс после завершения тестов.
+     */
+    public static void stopSilentMultiplexInstance() {
+        if (silentCoreController != null) {
+            try {
+                silentCoreController.stopLoop();
+                FileLogger.i(TAG, "Тихий v2ray остановлен");
+            } catch (Exception e) {
+                FileLogger.w(TAG, "stopSilentMultiplexLoop: " + e.getMessage());
+            }
+            silentCoreController = null;
+        }
+    }
+
 }

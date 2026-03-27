@@ -374,10 +374,11 @@ public class VpnTunnelService extends VpnService {
     }
 
     public static boolean checkTunnelProxyFastSync() {
+        // HTTP URLs — надёжнее чем HTTPS через SOCKS (нет TLS overhead)
         String[] testUrls = {
-                "https://www.wikipedia.org",
-                "https://github.com",
-                "https://google.com",
+                "http://google.ru",
+                "http://github.com",
+                "https://www.wikipedia.org/",
         };
         CountDownLatch latch = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
@@ -457,7 +458,7 @@ public class VpnTunnelService extends VpnService {
                     AutoConnectManager.reportVerificationResult(false);
                     return;
                 }
-                Thread.sleep(2000);
+                Thread.sleep(500);
                 boolean tunnelOk = checkTunnelProxyFastSync();
 
                 if (tunnelOk) {

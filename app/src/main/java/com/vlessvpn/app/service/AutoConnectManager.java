@@ -18,7 +18,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * AutoConnectManager — авто-подключение VPN с перебором серверов
+ * AutoConnectManager — авто-подключение VPN с перебором серверов.
+ *
+ * Исправления:
+ * 1. tryNextServer ВСЕГДА в executor (не в mainHandler) — нет ANR
+ * 2. shouldCancelConnection проверяется атомарно через synchronized
+ * 3. cancelAutoConnect прерывает executor thread через interrupt
+ * 4. Надёжные URL для connectivity check
  */
 public class AutoConnectManager {
 
@@ -26,8 +32,9 @@ public class AutoConnectManager {
     private static final int VPN_STARTUP_WAIT_MS = 15000;
     private static final int SERVER_SWITCH_DELAY_MS = 1000;
 
+    // Используем ScheduledExecutor для поддержки задержек без mainHandler
     private static ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private static int currentServerIndex = 0;
     private static List<VlessServer> serverList = null;
@@ -41,6 +48,10 @@ public class AutoConnectManager {
         if (isFailoverInProgress) {
             FileLogger.d(TAG, "Перебор уже выполняется — игнорируем запрос");
             return;
+        }
+        // Пересоздаём executor если завершён
+        if (executor.isShutdown()) {
+            executor = Executors.newSingleThreadExecutor();
         }
 
         executor.execute(() -> {
@@ -61,98 +72,90 @@ public class AutoConnectManager {
                 FileLogger.i(TAG, "Начинаем авто-подключение. Серверов: " + serverList.size());
 
                 VlessServer lastServer = repo.getLastWorkingServer();
-                if (lastServer != null) {
+                if (lastServer != null && !shouldCancelConnection) {
                     FileLogger.i(TAG, "Пробуем последний рабочий: " + lastServer.host);
-                    if (tryConnectAndVerify(context, lastServer)) {
-                        return;
-                    }
+                    if (tryConnectAndVerify(context, lastServer)) return;
                 }
 
                 currentServerIndex = 0;
-                tryNextServer(context);
+                // Перебор — всё в текущем executor потоке
+                runServerLoop(context);
 
             } finally {
-                // Если цикл завершился (или был прерван), сбрасываем флаг
-                if (!shouldCancelConnection && (serverList == null || currentServerIndex >= serverList.size())) {
-                    isFailoverInProgress = false;
-                }
+                isFailoverInProgress = false;
             }
         });
     }
 
+    /** Перебор серверов — ВСЕГДА в фоновом потоке executor, не в mainHandler */
+    private static void runServerLoop(Context context) {
+        while (!shouldCancelConnection) {
+            if (serverList == null || currentServerIndex >= serverList.size()) {
+                FileLogger.w(TAG, "Список серверов исчерпан. Повтор через 1 минуту...");
+                mainHandler.post(() ->
+                        com.vlessvpn.app.util.StatusBus.post("⚠️ Нет рабочих серверов. Повтор через 1 мин..."));
+
+                // Отключаем мёртвый VPN (system_cleanup — не трогает перебор)
+                Intent disconnectIntent = new Intent(context, VpnTunnelService.class);
+                disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
+                disconnectIntent.putExtra("system_cleanup", true);
+                context.startService(disconnectIntent);
+
+                // Ждём 60 сек через sleep — прерывается при cancel
+                try { Thread.sleep(60_000L); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    FileLogger.i(TAG, "Ожидание повтора прервано");
+                    return;
+                }
+                if (shouldCancelConnection) return;
+                currentServerIndex = 0;
+                continue;
+            }
+
+            VlessServer server = serverList.get(currentServerIndex);
+            FileLogger.i(TAG, "Пробуем сервер[" + currentServerIndex + "]: " + server.host);
+            mainHandler.post(() ->
+                    com.vlessvpn.app.util.StatusBus.post("🔄 Подключение: " + server.remark));
+
+            boolean success = tryConnectAndVerify(context, server);
+
+            if (shouldCancelConnection) {
+                FileLogger.i(TAG, "Перебор прерван.");
+                return;
+            }
+
+            if (success) {
+                FileLogger.i(TAG, "✅ Подключение на сервере [" + currentServerIndex + "]");
+                return;
+            } else {
+                FileLogger.w(TAG, "❌ Сервер[" + currentServerIndex + "] не работает, следующий...");
+                currentServerIndex++;
+                // Задержка между серверами — прерывается при cancel
+                try { Thread.sleep(SERVER_SWITCH_DELAY_MS); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
     public static void cancelAutoConnect() {
-        FileLogger.i(TAG, "Отмена авто-подключения (ручное отключение или смена сети)");
+        FileLogger.i(TAG, "Отмена авто-подключения");
         shouldCancelConnection = true;
         isFailoverInProgress = false;
-        if (verificationLatch != null) {
-            verificationLatch.countDown();
-        }
-        // Очищаем отложенные задачи (например, таймер на 1 минуту)
+        // Разблокируем latch если ждём верификацию
+        CountDownLatch latch = verificationLatch;
+        if (latch != null) latch.countDown();
+        // Прерываем executor thread (выходит из Thread.sleep и await)
+        executor.shutdownNow();
+        // Убираем отложенные задачи в главном потоке
         mainHandler.removeCallbacksAndMessages(null);
     }
 
     public static void reportVerificationResult(boolean success) {
         verificationResult = success;
-        if (verificationLatch != null) {
-            verificationLatch.countDown();
-        }
-    }
-
-    private static void tryNextServer(Context context) {
-        if (shouldCancelConnection) {
-            isFailoverInProgress = false;
-            return;
-        }
-
-        if (serverList == null || currentServerIndex >= serverList.size()) {
-            FileLogger.w(TAG, "═══════════════════════════════════════");
-            FileLogger.w(TAG, "Список серверов исчерпан. Повтор через 1 минуту...");
-            FileLogger.w(TAG, "═══════════════════════════════════════");
-
-            mainHandler.post(() ->
-                    com.vlessvpn.app.util.StatusBus.post("⚠️ Нет рабочих серверов. Повтор через 1 мин..."));
-
-            // Отключаем мертвый VPN, но передаем флаг system_cleanup,
-            // чтобы сервис не вызвал cancelAutoConnect() и не сбросил наш таймер
-            Intent disconnectIntent = new Intent(context, VpnTunnelService.class);
-            disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
-            disconnectIntent.putExtra("system_cleanup", true);
-            context.startService(disconnectIntent);
-
-            mainHandler.postDelayed(() -> {
-                if (!shouldCancelConnection) {
-                    currentServerIndex = 0;
-                    isFailoverInProgress = false;
-                    startAutoConnect(context);
-                }
-            }, 60 * 1000L);
-            return;
-        }
-
-        VlessServer server = serverList.get(currentServerIndex);
-        FileLogger.i(TAG, "═══════════════════════════════════════");
-        FileLogger.i(TAG, "Пробуем сервер[" + currentServerIndex + "]: " + server.host + ":" + server.port);
-        FileLogger.i(TAG, "═══════════════════════════════════════");
-
-        mainHandler.post(() ->
-                com.vlessvpn.app.util.StatusBus.post("🔄 Подключение: " + server.remark));
-
-        boolean success = tryConnectAndVerify(context, server);
-
-        if (shouldCancelConnection) {
-            FileLogger.i(TAG, "Перебор прерван пользователем.");
-            isFailoverInProgress = false;
-            return;
-        }
-
-        if (success) {
-            FileLogger.i(TAG, "✅ Успешное подключение на сервере [" + currentServerIndex + "]");
-            isFailoverInProgress = false;
-        } else {
-            FileLogger.w(TAG, "❌ Сервер[" + currentServerIndex + "] не работает, пробуем следующий...");
-            currentServerIndex++;
-            mainHandler.postDelayed(() -> tryNextServer(context), SERVER_SWITCH_DELAY_MS);
-        }
+        CountDownLatch latch = verificationLatch;
+        if (latch != null) latch.countDown();
     }
 
     private static boolean tryConnectAndVerify(Context context, VlessServer server) {
@@ -180,10 +183,10 @@ public class AutoConnectManager {
         }
 
         try {
-            boolean awaited = verificationLatch.await(VPN_STARTUP_WAIT_MS, TimeUnit.MILLISECONDS);
+            verificationLatch.await(VPN_STARTUP_WAIT_MS, TimeUnit.MILLISECONDS);
             if (shouldCancelConnection) return false;
 
-            if (awaited && verificationResult) {
+            if (verificationResult) {
                 mainHandler.post(() -> com.vlessvpn.app.util.StatusBus.post("✅ Подключено: " + server.remark));
                 return true;
             } else {

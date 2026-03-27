@@ -12,8 +12,10 @@ import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * AutoConnectManager — авто-подключение VPN с перебором серверов
@@ -21,9 +23,8 @@ import java.util.concurrent.Executors;
 public class AutoConnectManager {
 
     private static final String TAG = "AutoConnectManager";
-    private static final int CONNECT_TIMEOUT_MS = 8000;
     private static final int VPN_STARTUP_WAIT_MS = 15000;
-    private static final int SERVER_SWITCH_DELAY_MS = 3000;
+    private static final int SERVER_SWITCH_DELAY_MS = 1000;
 
     private static ExecutorService executor = Executors.newSingleThreadExecutor();
     private static Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -32,6 +33,10 @@ public class AutoConnectManager {
     private static List<VlessServer> serverList = null;
     private static volatile boolean isFailoverInProgress = false;
     private static volatile boolean shouldCancelConnection = false;
+
+    // Синхронизатор для мгновенного получения ответа от сервиса
+    private static volatile CountDownLatch verificationLatch;
+    private static volatile boolean verificationResult;
 
     public static void startAutoConnect(Context context) {
         if (isFailoverInProgress) {
@@ -54,16 +59,13 @@ public class AutoConnectManager {
                     return;
                 }
 
-                //FileLogger.i(TAG, "═══════════════════════════════════════");
                 FileLogger.i(TAG, "Начинаем авто-подключение. Серверов: " + serverList.size());
-                //FileLogger.i(TAG, "═══════════════════════════════════════");
 
                 // 1. Сначала пробуем последний рабочий сервер
                 VlessServer lastServer = repo.getLastWorkingServer();
                 if (lastServer != null) {
                     FileLogger.i(TAG, "Пробуем последний рабочий: " + lastServer.host);
                     if (tryConnectAndVerify(context, lastServer)) {
-                        repo.saveLastWorkingServer(lastServer);
                         return;
                     }
                 }
@@ -82,6 +84,17 @@ public class AutoConnectManager {
         FileLogger.i(TAG, "Отмена авто-подключения (WiFi восстановлен)");
         shouldCancelConnection = true;
         isFailoverInProgress = false;
+        if (verificationLatch != null) {
+            verificationLatch.countDown();
+        }
+    }
+
+    // Этот метод вызывает VpnTunnelService, как только проверит туннель
+    public static void reportVerificationResult(boolean success) {
+        verificationResult = success;
+        if (verificationLatch != null) {
+            verificationLatch.countDown();
+        }
     }
 
     private static void tryNextServer(Context context) {
@@ -93,7 +106,7 @@ public class AutoConnectManager {
 
         if (serverList == null || currentServerIndex >= serverList.size()) {
             FileLogger.w(TAG, "═══════════════════════════════════════");
-            FileLogger.w(TAG, "Список серверов исчерпан. Повтор через 1 минут...");
+            FileLogger.w(TAG, "Список серверов исчерпан. Повтор через 1 минуту...");
             FileLogger.w(TAG, "═══════════════════════════════════════");
 
             mainHandler.post(() ->
@@ -105,13 +118,13 @@ public class AutoConnectManager {
                     isFailoverInProgress = false;
                     startAutoConnect(context);
                 }
-            }, 1 * 60 * 1000L);
+            }, 60 * 1000L);
             return;
         }
 
         VlessServer server = serverList.get(currentServerIndex);
         FileLogger.i(TAG, "═══════════════════════════════════════");
-        FileLogger.i(TAG, "Пробуем сервер [" + currentServerIndex + "]: " + server.host + ":" + server.port);
+        FileLogger.i(TAG, "Пробуем сервер[" + currentServerIndex + "]: " + server.host + ":" + server.port);
         FileLogger.i(TAG, "═══════════════════════════════════════");
 
         mainHandler.post(() ->
@@ -121,27 +134,27 @@ public class AutoConnectManager {
             FileLogger.i(TAG, "✅ Успешное подключение на сервере [" + currentServerIndex + "]");
             isFailoverInProgress = false;
         } else {
-            FileLogger.w(TAG, "❌ Сервер [" + currentServerIndex + "] не работает, пробуем следующий...");
+            FileLogger.w(TAG, "❌ Сервер[" + currentServerIndex + "] не работает, пробуем следующий...");
             currentServerIndex++;
             mainHandler.postDelayed(() -> tryNextServer(context), SERVER_SWITCH_DELAY_MS);
         }
     }
 
     private static boolean tryConnectAndVerify(Context context, VlessServer server) {
-        if (shouldCancelConnection) {
-            FileLogger.i(TAG, "Подключение отменено во время tryConnectAndVerify");
-            return false;
-        }
+        if (shouldCancelConnection) return false;
 
+        // ЕДИНАЯ ТОЧКА ПРОВЕРКИ: Если VPN уже работает, просим сервис проверить свой туннель
         if (VpnTunnelService.isRunning) {
-            FileLogger.d(TAG, "VPN уже запущен, проверяем текущий сервер...");
-            boolean alreadyWorking = performConnectivityCheck();
-            if (alreadyWorking) {
-                FileLogger.i(TAG, "Текущий VPN работает — не нужно переключаться");
+            FileLogger.d(TAG, "VPN уже запущен, проверяем текущий туннель...");
+            if (VpnTunnelService.checkTunnelProxyFastSync()) {
+                FileLogger.i(TAG, "Текущий VPN работает — переключение не требуется");
                 return true;
             }
             FileLogger.d(TAG, "Текущий VPN не работает — переподключаем");
         }
+
+        verificationLatch = new CountDownLatch(1);
+        verificationResult = false;
 
         Intent intent = new Intent(context, VpnTunnelService.class);
         intent.setAction(VpnTunnelService.ACTION_CONNECT);
@@ -150,116 +163,32 @@ public class AutoConnectManager {
 
         FileLogger.i(TAG, "Запускаем VpnTunnelService...");
 
-        // ════════════════════════════════════════════════════════════════════════
-        // ← ИСПРАВЛЕНО: Используем startForegroundService для Android 8+
-        // ════════════════════════════════════════════════════════════════════════
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);
-            FileLogger.d(TAG, "Запуск через startForegroundService (Android 8+)");
         } else {
             context.startService(intent);
-            FileLogger.d(TAG, "Запуск через startService (Android 7 и ниже)");
         }
 
-        FileLogger.i(TAG, "Ожидаем поднятие VPN (" + (VPN_STARTUP_WAIT_MS / 1000) + " сек)...");
-        long startTime = System.currentTimeMillis();
-        while (System.currentTimeMillis() - startTime < VPN_STARTUP_WAIT_MS) {
-            try {
-                Thread.sleep(500);
+        FileLogger.i(TAG, "Ожидаем поднятие и верификацию VPN (макс " + (VPN_STARTUP_WAIT_MS / 1000) + " сек)...");
 
-                if (shouldCancelConnection) {
-                    FileLogger.i(TAG, "Подключение отменено во время ожидания VPN");
-                    Intent disconnectIntent = new Intent(context, VpnTunnelService.class);
-                    disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
-                    context.startService(disconnectIntent);
-                    return false;
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                FileLogger.e(TAG, "Прервано ожидание VPN");
+        try {
+            boolean awaited = verificationLatch.await(VPN_STARTUP_WAIT_MS, TimeUnit.MILLISECONDS);
+
+            if (shouldCancelConnection) return false;
+
+            if (awaited && verificationResult) {
+                FileLogger.i(TAG, "✅ Сервер работает: " + server.host);
+                mainHandler.post(() -> com.vlessvpn.app.util.StatusBus.post("✅ Подключено: " + server.remark));
+                return true;
+            } else {
+                FileLogger.w(TAG, "❌ Сервер заблокирован или не ответил: " + server.host);
+                mainHandler.post(() -> com.vlessvpn.app.util.StatusBus.post("❌ Не работает: " + server.remark));
                 return false;
             }
-        }
-
-        if (!VpnTunnelService.isRunning) {
-            FileLogger.w(TAG, "Сервис остановился во время ожидания");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return false;
         }
-
-        FileLogger.i(TAG, "Проверяем доступность интернета...");
-        boolean isWorking = performConnectivityCheck();
-
-        if (isWorking) {
-            FileLogger.i(TAG, "✅ Сервер работает: " + server.host);
-            mainHandler.post(() ->
-                    com.vlessvpn.app.util.StatusBus.post("✅ Подключено: " + server.remark));
-
-            ServerRepository repo = new ServerRepository(context);
-            repo.saveLastWorkingServer(server);
-            return true;
-        } else {
-            FileLogger.w(TAG, "❌ Сервер не отвечает: " + server.host);
-            mainHandler.post(() ->
-                    com.vlessvpn.app.util.StatusBus.post("❌ Не работает: " + server.remark));
-
-            FileLogger.i(TAG, "Отключаем VPN перед переключением...");
-            Intent disconnectIntent = new Intent(context, VpnTunnelService.class);
-            disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
-            context.startService(disconnectIntent);
-
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException ignored) {}
-
-            return false;
-        }
-    }
-
-    // Те же URL что и в ServerTester — надёжные, без generate_204
-    private static final String[] CHECK_URLS = {
-        "http://speed.cloudflare.com/__down?bytes=512",
-        "http://ip-api.com/json?fields=query",
-        "http://www.msftconnecttest.com/connecttest.txt"
-    };
-
-    private static boolean performConnectivityCheck() {
-        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                new java.net.InetSocketAddress("127.0.0.1", 10808));
-
-        java.util.concurrent.atomic.AtomicBoolean success =
-                new java.util.concurrent.atomic.AtomicBoolean(false);
-        java.util.concurrent.CountDownLatch latch =
-                new java.util.concurrent.CountDownLatch(CHECK_URLS.length);
-        java.util.concurrent.ExecutorService pool =
-                java.util.concurrent.Executors.newFixedThreadPool(CHECK_URLS.length);
-
-        for (String urlStr : CHECK_URLS) {
-            pool.execute(() -> {
-                try {
-                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
-                            new java.net.URL(urlStr).openConnection(proxy);
-                    conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-                    conn.setReadTimeout(CONNECT_TIMEOUT_MS);
-                    int code = conn.getResponseCode();
-                    conn.disconnect();
-                    if (code >= 200 && code < 400) {
-                        success.set(true);
-                        while (latch.getCount() > 0) latch.countDown();
-                    }
-                } catch (Exception ignored) {
-                } finally {
-                    latch.countDown();
-                }
-            });
-        }
-
-        try { latch.await(CONNECT_TIMEOUT_MS + 1000L,
-                java.util.concurrent.TimeUnit.MILLISECONDS); }
-        catch (InterruptedException ignored) {}
-        pool.shutdownNow();
-
-        FileLogger.d(TAG, "Connectivity check: " + (success.get() ? "OK" : "FAIL"));
-        return success.get();
     }
 
     public static void resetServerIndex() {

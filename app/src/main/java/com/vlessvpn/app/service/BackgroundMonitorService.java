@@ -392,15 +392,15 @@ public class BackgroundMonitorService extends Service {
             try {
                 java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", proxyPort));
                 // Используем gstatic (Google) - генерирует код 204 без тела. Самый быстрый способ.
-                java.net.URL url = new java.net.URL("http://connectivitycheck.gstatic.com/generate_204");
+                java.net.URL url = new java.net.URL("https://google.com");
                 conn = (java.net.HttpURLConnection) url.openConnection(proxy);
                 conn.setConnectTimeout(4000);
                 conn.setReadTimeout(4000);
-                conn.setRequestMethod("GET");
+                conn.setRequestMethod("HEAD");
                 conn.setUseCaches(false);
 
                 int code = conn.getResponseCode();
-                return code == 204 || code == 200; // Успешно прошел!
+                return code >= 200 && code < 400; // Успешно прошел!
 
             } catch (Exception e) {
                 return false;

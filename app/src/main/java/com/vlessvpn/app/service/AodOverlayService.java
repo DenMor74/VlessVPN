@@ -24,6 +24,9 @@ import android.widget.TextView;
  * - Показываем только когда displayState = DOZE или DOZE_SUSPEND
  * - reAddOverlay только при входе в AOD или когда данные реально изменились
  * - НЕ перерисовываем при каждом 3↔4 переключении (мигание)
+ * - ════════════════════════════════════════════════════════════════
+ * - ← НОВОЕ: Проверяем VpnTunnelService.isRunning перед показом
+ * - ════════════════════════════════════════════════════════════════
  */
 public class AodOverlayService extends AccessibilityService {
 
@@ -37,46 +40,40 @@ public class AodOverlayService extends AccessibilityService {
     public static boolean isRunning = false;
 
     // ═══ НАСТРОЙКИ ОТОБРАЖЕНИЯ ═══════════════════════════════════════════════
-    // Положение: CENTER=центр, вертикальный сдвиг (+вниз, -вверх)
-    private static final int  POSITION_Y_DP   = -80;   // выше центра
-    // Размеры текста
+    private static final int  POSITION_Y_DP   = -80;
     private static final int  TEXT_VPN_SP      = 15;
     private static final int  TEXT_IP_SP        = 12;
     private static final int  TEXT_SERVERS_SP   = 11;
     private static final int  TEXT_STATUS_SP    = 11;
-    // Цвета текста
-    private static final int  COLOR_VPN         = 0xFFFFFFFF; // белый
-    private static final int  COLOR_IP          = 0xFF88EE88; // зелёный
-    private static final int  COLOR_SERVERS     = 0xFFAAAAAA; // серый
-    private static final int  COLOR_STATUS      = 0xFF6699BB; // голубой
-    // Фон
-    private static final int  COLOR_BG          = 0xFF000000; // чёрный
-    private static final int  COLOR_BORDER      = 0x55FFFFFF; // рамка
+    private static final int  COLOR_VPN         = 0xFFFFFFFF;
+    private static final int  COLOR_IP          = 0xFF88EE88;
+    private static final int  COLOR_SERVERS     = 0xFFAAAAAA;
+    private static final int  COLOR_STATUS      = 0xFF6699BB;
+    private static final int  COLOR_BG          = 0xFF000000;
+    private static final int  COLOR_BORDER      = 0x55FFFFFF;
     private static final int  PADDING_DP        = 20;
     private static final int  MAX_WIDTH_DP      = 380;
     // ═════════════════════════════════════════════════════════════════════════
 
     private WindowManager wm;
     private LinearLayout  overlay;
-    private TextView      tvVpn;     // 🟢 VPN • сервер
-    private TextView      tvIp;      // IP город, страна
-    private TextView      tvServers; // Серверов: 8/30
-    private TextView      tvStatus;  // Статус
+    private TextView      tvVpn;
+    private TextView      tvIp;
+    private TextView      tvServers;
+    private TextView      tvStatus;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    private boolean inAod      = false;  // сейчас в AOD режиме
+    private boolean inAod      = false;
     private boolean vpnActive  = false;
     private boolean overlayAdded = false;
 
-    // Данные — храним для сравнения чтобы не мигать лишний раз
     private String lastServer = null;
     private String lastIp     = null;
     private String lastStat   = null;
     private String lastStatus = null;
     private String shownServer = "", shownIp = "", shownStat = "", shownStatus = "";
 
-    // Антиожог — раз в 60 сек сдвигаем позицию
     private int burnStep = 0;
     private final int[] burnDx = {0, 6, -6, 4, -4, 8, -8, 3, -3};
     private final int[] burnDy = {0, -4, 4, 6, -6, -2, 2, 5, -5};
@@ -90,10 +87,25 @@ public class AodOverlayService extends AccessibilityService {
         }
     };
 
+    // ════════════════════════════════════════════════════════════════
+    // ← ИСПРАВЛЕНО: vpnReceiver теперь проверяет VpnTunnelService.isRunning
+    // ════════════════════════════════════════════════════════════════
     private final BroadcastReceiver vpnReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context ctx, Intent intent) {
             boolean connected = intent.getBooleanExtra(EXTRA_CONNECTED, false);
-            vpnActive = connected;
+
+            // ════════════════════════════════════════════════════════════════
+            // ← НОВОЕ: Двойная проверка — broadcast + реальное состояние VPN
+            // ════════════════════════════════════════════════════════════════
+            boolean vpnReallyRunning = com.vlessvpn.app.service.VpnTunnelService.isRunning;
+
+            // Если broadcast говорит "connected=true" но VPN не запущен — игнорируем
+            if (connected && !vpnReallyRunning) {
+                android.util.Log.d("AodOverlay", "Игнорируем broadcast (VPN не запущен)");
+                return;
+            }
+
+            vpnActive = connected && vpnReallyRunning;
 
             String statusMsg = intent.getStringExtra(EXTRA_STATUS_MSG);
             String server    = intent.getStringExtra(EXTRA_SERVER);
@@ -101,22 +113,32 @@ public class AodOverlayService extends AccessibilityService {
             String stat      = intent.getStringExtra(EXTRA_SERVERS_STAT);
 
             if (server    != null) lastServer = server;
-            if (ip        != null) lastIp = ip.isEmpty() ? null : ip; // "" = сброс
+            if (ip        != null) lastIp = ip.isEmpty() ? null : ip;
             if (stat      != null) lastStat   = stat;
             if (statusMsg != null) {
                 lastStatus = statusMsg;
-                // Результат IP-проверки — дублируем в поле IP
                 if (statusMsg.startsWith("🔬")) {
-                    // "🔬 ✓ 1.2.3.4 City" или "🔬 IP: ✗ таймаут"
                     lastIp = statusMsg.replace("🔬 ", "").replace("🔬", "");
                 }
             }
 
-            if (!connected) {
-                // Показываем сообщение об отключении, потом убираем через 10 сек
-                showDisconnected();
+            if (!vpnActive) {
+                // ════════════════════════════════════════════════════════════════
+                // ← VPN отключён — скрываем overlay НЕМЕДЛЕННО (без showDisconnected)
+                // ════════════════════════════════════════════════════════════════
+                android.util.Log.i("AodOverlay", "VPN отключён — скрываем overlay");
+                lastServer = null;
+                lastIp     = null;
+                lastStatus = null;
+                lastStat   = null;
+                shownServer = "";
+                shownIp     = "";
+                shownStat   = "";
+                shownStatus = "";
+                removeOverlayNow();
                 return;
             }
+
             if (inAod) updateIfChanged();
         }
     };
@@ -143,9 +165,8 @@ public class AodOverlayService extends AccessibilityService {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         buildViews();
 
-        // DisplayListener — отслеживаем вход/выход из AOD
         android.hardware.display.DisplayManager dm =
-            (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
+                (android.hardware.display.DisplayManager) getSystemService(DISPLAY_SERVICE);
         if (dm != null) {
             dm.registerDisplayListener(new android.hardware.display.DisplayManager.DisplayListener() {
                 private boolean wasInAod = false;
@@ -164,32 +185,29 @@ public class AodOverlayService extends AccessibilityService {
                     if (nowInAod && !wasInAod) {
                         inAod = true;
                         wasInAod = true;
-                        // Синхронизируем vpnActive с реальным состоянием VPN
+                        // ════════════════════════════════════════════════════════════════
+                        // ← Синхронизируем vpnActive с реальным состоянием VPN
+                        // ════════════════════════════════════════════════════════════════
                         vpnActive = com.vlessvpn.app.service.VpnTunnelService.isRunning;
                         android.util.Log.i("AodOverlay", "Вошли в AOD state=" + state
                                 + " vpnActive=" + vpnActive);
                         if (vpnActive) addOverlayFull();
-                        // VPN выключен — ничего не показываем
                     } else if (!nowInAod && wasInAod) {
-                        // Вышли из AOD
                         inAod = false;
                         wasInAod = false;
                         android.util.Log.i("AodOverlay", "Вышли из AOD state=" + state);
                         removeOverlayNow();
                     }
-                    // Переходы 3↔4 внутри AOD — игнорируем (не перерисовываем)
                 }
             }, handler);
         }
 
-        // VPN broadcast
         IntentFilter vpnFilter = new IntentFilter(ACTION_VPN_STATUS);
         if (android.os.Build.VERSION.SDK_INT >= 33)
             registerReceiver(vpnReceiver, vpnFilter, Context.RECEIVER_NOT_EXPORTED);
         else
             registerReceiver(vpnReceiver, vpnFilter);
 
-        // Разблокировка
         IntentFilter screenFilter = new IntentFilter(Intent.ACTION_USER_PRESENT);
         if (android.os.Build.VERSION.SDK_INT >= 33)
             registerReceiver(screenReceiver, screenFilter, Context.RECEIVER_EXPORTED);
@@ -199,7 +217,6 @@ public class AodOverlayService extends AccessibilityService {
         handler.postDelayed(burnRunnable, 60_000L);
     }
 
-    /** Обновляем только если данные реально изменились */
     private void updateIfChanged() {
         String s  = lastServer != null ? lastServer : "";
         String i  = lastIp     != null ? lastIp     : "";
@@ -209,18 +226,16 @@ public class AodOverlayService extends AccessibilityService {
         boolean changed = !s.equals(shownServer) || !i.equals(shownIp)
                 || !st.equals(shownStat) || !sm.equals(shownStatus);
 
-        if (!changed && overlayAdded) return; // ничего нового — не мигаем
+        if (!changed && overlayAdded) return;
 
         shownServer = s;
         shownIp     = i;
         shownStat   = st;
         shownStatus = sm;
 
-        // В AOD Samsung игнорирует setText — нужен remove+add для перерисовки
         addOverlayFull();
     }
 
-    /** Добавляет overlay с нуля (remove+add) */
     private void addOverlayFull() {
         handler.post(() -> {
             if (wm == null) return;
@@ -239,14 +254,12 @@ public class AodOverlayService extends AccessibilityService {
         });
     }
 
-    /** Только сдвиг позиции (антиожог) без пересоздания */
     private void repositionOverlay() {
         handler.post(() -> {
             if (wm == null || !overlayAdded) return;
             try {
                 wm.updateViewLayout(overlay, makeParams());
             } catch (Exception ignored) {
-                // Если updateViewLayout не работает в AOD — пересоздаём
                 addOverlayFull();
             }
         });
@@ -261,12 +274,10 @@ public class AodOverlayService extends AccessibilityService {
         if (!vpnActive) {
             if (tvVpn    != null) tvVpn.setText("🔴 VPN");
             if (tvIp     != null) tvIp.setVisibility(View.GONE);
-            // Серверов — показываем если есть данные
             if (tvServers != null) {
                 tvServers.setText(!stat.isEmpty() ? "Серверов: " + stat : "");
                 tvServers.setVisibility(!stat.isEmpty() ? View.VISIBLE : View.GONE);
             }
-            // Статус — показываем последнее сообщение
             if (tvStatus != null) {
                 tvStatus.setText(!status.isEmpty() ? status : "Отключено");
                 tvStatus.setVisibility(View.VISIBLE);
@@ -277,9 +288,9 @@ public class AodOverlayService extends AccessibilityService {
         if (tvVpn     != null) tvVpn.setText("🟢 VPN" + (!server.isEmpty() ? "  •  " + server : ""));
         if (tvIp      != null) { tvIp.setText(ip);     tvIp.setVisibility(!ip.isEmpty()     ? View.VISIBLE : View.GONE); }
         if (tvServers != null) { tvServers.setText(!stat.isEmpty() ? "Серверов: " + stat : "");
-                                 tvServers.setVisibility(!stat.isEmpty() ? View.VISIBLE : View.GONE); }
+            tvServers.setVisibility(!stat.isEmpty() ? View.VISIBLE : View.GONE); }
         if (tvStatus  != null) { tvStatus.setText(status);
-                                 tvStatus.setVisibility(!status.isEmpty() ? View.VISIBLE : View.GONE); }
+            tvStatus.setVisibility(!status.isEmpty() ? View.VISIBLE : View.GONE); }
     }
 
     private WindowManager.LayoutParams makeParams() {
@@ -302,23 +313,10 @@ public class AodOverlayService extends AccessibilityService {
 
     private final Runnable hideRunnable = this::removeOverlayNow;
 
-    private void showDisconnected() {
-        android.util.Log.i("AodOverlay", "showDisconnected: inAod=" + inAod
-                + " overlayAdded=" + overlayAdded + " vpnActive=" + vpnActive);
-        // Сохраняем stat для отображения, сбрасываем только сервер и IP
-        lastServer = null;
-        lastIp     = null;
-        lastStatus = "Отключено";
-        // Форсируем перерисовку
-        shownServer = "X"; shownIp = "X"; shownStatus = "X";
-
-        // Всегда делаем remove+add — единственный способ обновить в AOD
-        addOverlayFull();
-
-        // Убираем через 10 сек
-        handler.removeCallbacks(hideRunnable);
-        handler.postDelayed(hideRunnable, 10_000L);
-    }
+    // ════════════════════════════════════════════════════════════════
+    // ← УДАЛИТЬ showDisconnected() — больше не используется
+    // ════════════════════════════════════════════════════════════════
+    // ❌ Удалить весь метод showDisconnected()
 
     private void removeOverlayNow() {
         handler.post(() -> {
@@ -361,12 +359,21 @@ public class AodOverlayService extends AccessibilityService {
         ctx.sendBroadcast(i);
     }
 
+    // ════════════════════════════════════════════════════════════════
+    // ← ИСПРАВЛЕНО: sendStatusMsg больше НЕ хардкодит connected=true
+    // ════════════════════════════════════════════════════════════════
     public static void sendStatusMsg(Context ctx, String msg) {
         Intent i = new Intent(ACTION_VPN_STATUS);
-        i.putExtra(EXTRA_CONNECTED, true);
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВОЕ: Проверяем реальное состояние VPN
+        // ════════════════════════════════════════════════════════════════
+        boolean vpnRunning = com.vlessvpn.app.service.VpnTunnelService.isRunning;
+        i.putExtra(EXTRA_CONNECTED, vpnRunning);  // ← Не true, а реальное состояние!
         i.putExtra(EXTRA_STATUS_MSG, msg);
         i.setPackage(ctx.getPackageName());
         ctx.sendBroadcast(i);
+
+        android.util.Log.d("AodOverlay", "sendStatusMsg: vpnRunning=" + vpnRunning + " msg=" + msg);
     }
 
     private TextView makeText(int sp, boolean bold, int color) {

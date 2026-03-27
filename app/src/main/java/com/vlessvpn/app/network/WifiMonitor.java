@@ -19,9 +19,9 @@ import com.vlessvpn.app.util.FileLogger;
  * WifiMonitor — стабильная версия без таймера (Android 13–16)
  *
  * Что делает:
- * ✔ мгновенно ловит LTE
+ * ✔ мгновенно ловит LTE при переходе с Wi-Fi
  * ✔ мгновенно ловит Wi-Fi даже при активном VPN
- * ✔ не запускает VPN повторно после подключения Wi-Fi
+ * ✔ не запускает VPN повторно после ручного отключения на LTE
  * ✔ не использует Handler
  * ✔ чистые логи
  */
@@ -36,6 +36,10 @@ public class WifiMonitor {
 
     // защита от повторного отключения
     private static volatile boolean disconnectInProgress = false;
+
+    // Отслеживаем тип последней физической сети (1 = Wi-Fi, 2 = Cellular)
+    // Это предотвращает автозапуск VPN при ручном отключении (когда сеть просто "падает" на LTE)
+    private static volatile int lastNetworkType = 0;
 
     // ============================================================
     // START
@@ -53,7 +57,9 @@ public class WifiMonitor {
 
         ServerRepository repo = new ServerRepository(appContext);
 
-        //FileLogger.i(TAG, "WifiMonitor старт. Wi-Fi сейчас: " + isWifiConnected(appContext));
+        // Инициализируем текущее состояние при запуске монитора,
+        // чтобы не триггерить ложное подключение, если мы УЖЕ на LTE
+        lastNetworkType = isWifiConnected(appContext) ? 1 : 2;
 
         // ============================================================
         // DEFAULT CALLBACK (идеально ловит LTE)
@@ -66,18 +72,30 @@ public class WifiMonitor {
                 NetworkCapabilities caps = cm.getNetworkCapabilities(network);
                 if (caps == null) return;
 
-                boolean isCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
                 boolean isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
 
+                // Игнорируем сам VPN-туннель как физическую сеть
                 if (isVpn) return;
 
-                if (isCellular) {
-                    //FileLogger.i(TAG, "Default Network → LTE активен");
+                boolean isCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
+                boolean isWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
 
-                    if (repo.isAutoConnectOnWifiDisconnect() && !VpnTunnelService.isRunning) {
-                        FileLogger.i(TAG, "LTE → запускаем VPN");
-                        AutoConnectManager.startAutoConnect(appContext);
+                if (isWifi) {
+                    lastNetworkType = 1; // Запоминаем, что мы на Wi-Fi
+                } else if (isCellular) {
+                    // Если мы перешли НА LTE именно С Wi-Fi
+                    if (lastNetworkType == 1) {
+                        if (repo.isAutoConnectOnWifiDisconnect() && !VpnTunnelService.isRunning) {
+                            FileLogger.i(TAG, "Wi-Fi потерян -> переход на LTE. Запускаем VPN");
+                            AutoConnectManager.startAutoConnect(appContext);
+                        }
+                    } else {
+                        // Мы и так были на LTE (или юзер только что выключил VPN руками).
+                        // Игнорируем, чтобы не создать вечный цикл переподключения.
+                        // FileLogger.d(TAG, "Смена дефолтной сети на LTE (без перехода с Wi-Fi) — игнорируем");
                     }
+
+                    lastNetworkType = 2; // Запоминаем, что теперь мы на LTE
                 }
             }
 

@@ -34,7 +34,6 @@ public class AutoConnectManager {
     private static volatile boolean isFailoverInProgress = false;
     private static volatile boolean shouldCancelConnection = false;
 
-    // Синхронизатор для мгновенного получения ответа от сервиса
     private static volatile CountDownLatch verificationLatch;
     private static volatile boolean verificationResult;
 
@@ -61,7 +60,6 @@ public class AutoConnectManager {
 
                 FileLogger.i(TAG, "Начинаем авто-подключение. Серверов: " + serverList.size());
 
-                // 1. Сначала пробуем последний рабочий сервер
                 VlessServer lastServer = repo.getLastWorkingServer();
                 if (lastServer != null) {
                     FileLogger.i(TAG, "Пробуем последний рабочий: " + lastServer.host);
@@ -70,26 +68,29 @@ public class AutoConnectManager {
                     }
                 }
 
-                // 2. Перебираем по списку
                 currentServerIndex = 0;
                 tryNextServer(context);
 
             } finally {
-                isFailoverInProgress = false;
+                // Если цикл завершился (или был прерван), сбрасываем флаг
+                if (!shouldCancelConnection && (serverList == null || currentServerIndex >= serverList.size())) {
+                    isFailoverInProgress = false;
+                }
             }
         });
     }
 
     public static void cancelAutoConnect() {
-        FileLogger.i(TAG, "Отмена авто-подключения (WiFi восстановлен)");
+        FileLogger.i(TAG, "Отмена авто-подключения (ручное отключение или смена сети)");
         shouldCancelConnection = true;
         isFailoverInProgress = false;
         if (verificationLatch != null) {
             verificationLatch.countDown();
         }
+        // Очищаем отложенные задачи (например, таймер на 1 минуту)
+        mainHandler.removeCallbacksAndMessages(null);
     }
 
-    // Этот метод вызывает VpnTunnelService, как только проверит туннель
     public static void reportVerificationResult(boolean success) {
         verificationResult = success;
         if (verificationLatch != null) {
@@ -99,7 +100,6 @@ public class AutoConnectManager {
 
     private static void tryNextServer(Context context) {
         if (shouldCancelConnection) {
-            FileLogger.i(TAG, "Подключение отменено — WiFi восстановлен");
             isFailoverInProgress = false;
             return;
         }
@@ -111,6 +111,13 @@ public class AutoConnectManager {
 
             mainHandler.post(() ->
                     com.vlessvpn.app.util.StatusBus.post("⚠️ Нет рабочих серверов. Повтор через 1 мин..."));
+
+            // Отключаем мертвый VPN, но передаем флаг system_cleanup,
+            // чтобы сервис не вызвал cancelAutoConnect() и не сбросил наш таймер
+            Intent disconnectIntent = new Intent(context, VpnTunnelService.class);
+            disconnectIntent.setAction(VpnTunnelService.ACTION_DISCONNECT);
+            disconnectIntent.putExtra("system_cleanup", true);
+            context.startService(disconnectIntent);
 
             mainHandler.postDelayed(() -> {
                 if (!shouldCancelConnection) {
@@ -130,7 +137,15 @@ public class AutoConnectManager {
         mainHandler.post(() ->
                 com.vlessvpn.app.util.StatusBus.post("🔄 Подключение: " + server.remark));
 
-        if (tryConnectAndVerify(context, server)) {
+        boolean success = tryConnectAndVerify(context, server);
+
+        if (shouldCancelConnection) {
+            FileLogger.i(TAG, "Перебор прерван пользователем.");
+            isFailoverInProgress = false;
+            return;
+        }
+
+        if (success) {
             FileLogger.i(TAG, "✅ Успешное подключение на сервере [" + currentServerIndex + "]");
             isFailoverInProgress = false;
         } else {
@@ -143,14 +158,11 @@ public class AutoConnectManager {
     private static boolean tryConnectAndVerify(Context context, VlessServer server) {
         if (shouldCancelConnection) return false;
 
-        // ЕДИНАЯ ТОЧКА ПРОВЕРКИ: Если VPN уже работает, просим сервис проверить свой туннель
         if (VpnTunnelService.isRunning) {
-            FileLogger.d(TAG, "VPN уже запущен, проверяем текущий туннель...");
             if (VpnTunnelService.checkTunnelProxyFastSync()) {
                 FileLogger.i(TAG, "Текущий VPN работает — переключение не требуется");
                 return true;
             }
-            FileLogger.d(TAG, "Текущий VPN не работает — переподключаем");
         }
 
         verificationLatch = new CountDownLatch(1);
@@ -161,27 +173,20 @@ public class AutoConnectManager {
         intent.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(server));
         intent.putExtra(VpnTunnelService.EXTRA_AUTO_CONNECT, true);
 
-        FileLogger.i(TAG, "Запускаем VpnTunnelService...");
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);
         } else {
             context.startService(intent);
         }
 
-        FileLogger.i(TAG, "Ожидаем поднятие и верификацию VPN (макс " + (VPN_STARTUP_WAIT_MS / 1000) + " сек)...");
-
         try {
             boolean awaited = verificationLatch.await(VPN_STARTUP_WAIT_MS, TimeUnit.MILLISECONDS);
-
             if (shouldCancelConnection) return false;
 
             if (awaited && verificationResult) {
-                FileLogger.i(TAG, "✅ Сервер работает: " + server.host);
                 mainHandler.post(() -> com.vlessvpn.app.util.StatusBus.post("✅ Подключено: " + server.remark));
                 return true;
             } else {
-                FileLogger.w(TAG, "❌ Сервер заблокирован или не ответил: " + server.host);
                 mainHandler.post(() -> com.vlessvpn.app.util.StatusBus.post("❌ Не работает: " + server.remark));
                 return false;
             }
@@ -193,7 +198,6 @@ public class AutoConnectManager {
 
     public static void resetServerIndex() {
         currentServerIndex = 0;
-        FileLogger.d(TAG, "Сброшен индекс перебора серверов");
     }
 
     public static boolean isFailoverInProgress() {

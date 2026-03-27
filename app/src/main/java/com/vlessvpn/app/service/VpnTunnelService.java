@@ -184,6 +184,13 @@ public class VpnTunnelService extends VpnService {
         }
 
         if (ACTION_DISCONNECT.equals(action)) {
+            // Если это очистка от самого AutoConnectManager, не трогаем перебор (чтобы сработал таймер)
+            boolean isSystemCleanup = intent != null && intent.getBooleanExtra("system_cleanup", false);
+            if (!isSystemCleanup) {
+                // Если юзер нажал "Отключить" ручками — ЖЕСТКО убиваем фоновый перебор!
+                AutoConnectManager.cancelAutoConnect();
+            }
+
             new Thread(this::disconnect, "disconnect-thread").start();
             return START_NOT_STICKY;
         }

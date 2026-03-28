@@ -112,6 +112,13 @@ public class AodOverlayService extends AccessibilityService {
             String ip        = intent.getStringExtra(EXTRA_IP);
             String stat      = intent.getStringExtra(EXTRA_SERVERS_STAT);
 
+            // Если сменился сервер — сбрасываем IP и статус
+            if (server != null && !server.equals(lastServer)) {
+                lastIp     = null;
+                lastStatus = null;
+                shownIp    = "X"; // форсируем перерисовку
+                shownStatus= "X";
+            }
             if (server    != null) lastServer = server;
             if (ip        != null) lastIp = ip.isEmpty() ? null : ip;
             if (stat      != null) lastStat   = stat;

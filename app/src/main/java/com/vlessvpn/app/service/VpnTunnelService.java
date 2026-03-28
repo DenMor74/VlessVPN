@@ -389,7 +389,15 @@ public class VpnTunnelService extends VpnService {
     private void startFastVerification(VlessServer server) {
         FileLogger.i(TAG, "=== startFastVerification === Сервер: " + server.host);
 
-        AodOverlayService.sendStatus(this, true, server.host, "Проверка связи...", null);
+        // Сбрасываем старые данные, передаём кол-во серверов сразу
+        bgExecutor.execute(() -> {
+            ServerRepository r = new ServerRepository(VpnTunnelService.this);
+            java.util.List<com.vlessvpn.app.model.VlessServer> all = r.getAllServersSync();
+            int total = all.size(), working = 0;
+            for (com.vlessvpn.app.model.VlessServer sv : all) if (sv.trafficOk) working++;
+            AodOverlayService.sendStatus(VpnTunnelService.this, true,
+                    server.host, "Определяем IP...", working + "/" + total);
+        });
         mainHandler.post(() -> StatusBus.post(this, "Проверка подключения...", true));
 
         bgExecutor.execute(() -> {
@@ -579,7 +587,11 @@ public class VpnTunnelService extends VpnService {
         }
 
         VlessServer next = servers.get(0);
-        mainHandler.post(() -> StatusBus.post(this, "Переключение на " + next.remark, true));
+        mainHandler.post(() -> {
+            StatusBus.post(this, "Переключение на " + next.remark, true);
+            // Сбрасываем UI панели при переключении
+            StatusBus.post(this, "⚡RESET_PANELS", true);
+        });
 
         long newId = System.currentTimeMillis();
         activeConnectId = newId;
@@ -777,9 +789,16 @@ public class VpnTunnelService extends VpnService {
             final String ipForAod = (ip != null) ? ip + " " + location : "IP получен";
 
             mainHandler.post(() -> StatusBus.post(this, finalResult, true));
-            AodOverlayService.sendStatus(this, true,
-                    currentServer != null ? currentServer.host : null,
-                    ipForAod, null);
+            // Передаём IP + обновлённую статистику серверов
+            bgExecutor.execute(() -> {
+                ServerRepository r2 = new ServerRepository(VpnTunnelService.this);
+                java.util.List<com.vlessvpn.app.model.VlessServer> all2 = r2.getAllServersSync();
+                int total2 = all2.size(), working2 = 0;
+                for (com.vlessvpn.app.model.VlessServer sv2 : all2) if (sv2.trafficOk) working2++;
+                AodOverlayService.sendStatus(VpnTunnelService.this, true,
+                        currentServer != null ? currentServer.host : null,
+                        ipForAod, working2 + "/" + total2);
+            });
 
             return true;
 

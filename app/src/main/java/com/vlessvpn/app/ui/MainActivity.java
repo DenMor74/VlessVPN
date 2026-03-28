@@ -331,6 +331,8 @@ public class MainActivity extends AppCompatActivity {
             if (server != null) {
                 tvConnectedServer.setText(server.remark.isEmpty() ? server.host : server.remark);
                 serverAdapter.setConnectedServerId(server.id);
+                // Сбрасываем панели при каждом новом сервере
+                resetSpeedAndIpPanels();
             } else {
                 tvConnectedServer.setText("");
                 serverAdapter.setConnectedServerId(null);
@@ -533,6 +535,22 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshStatus() {
         viewModel.refreshVpnStatus();
+    }
+
+    /** Сбрасывает панели скорости и IP при смене сервера */
+    private void resetSpeedAndIpPanels() {
+        if (tvSpeedTest != null) {
+            tvSpeedTest.setText("⏱ Тест скорости");
+            tvSpeedTest.setTextColor(0xFFFFFFFF);
+        }
+        if (btnSpeedTest != null) {
+            btnSpeedTest.setImageResource(R.drawable.ic_play);
+            btnSpeedTest.setImageTintList(
+                android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+        }
+        if (panelSpeedTest != null) panelSpeedTest.setBackgroundColor(0xFF111827);
+        // IP — очищаем через ViewModel (отдельная LiveData)
+        viewModel.clearIpResult();
     }
 
     private void renderConnectionState(boolean connected) {

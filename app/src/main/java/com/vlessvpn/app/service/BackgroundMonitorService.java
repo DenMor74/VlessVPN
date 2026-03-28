@@ -379,6 +379,15 @@ public class BackgroundMonitorService extends Service {
             StatusBus.setWorking(ctx, false);
             StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total + " (✗ " + finalFail + ")");
 
+            // Обновляем кол-во серверов в AOD
+            if (com.vlessvpn.app.service.AodOverlayService.isRunning
+                    && com.vlessvpn.app.service.VpnTunnelService.isRunning) {
+                String host = com.vlessvpn.app.service.VpnTunnelService.getCurrentServer() != null
+                        ? com.vlessvpn.app.service.VpnTunnelService.getCurrentServer().host : null;
+                com.vlessvpn.app.service.AodOverlayService.sendStatus(
+                        ctx, true, host, null, finalOk + "/" + total);
+            }
+
             checkAutoConnect(ctx, repo);
             FileLogger.i(W, "=== Завершено: " + finalOk + "/" + total + " ===");
             return Result.success();

@@ -50,13 +50,13 @@ import java.util.function.Consumer;
 
 public class VpnTunnelService extends VpnService {
 
-    private static final String TAG       = "VpnTunnelService";
+    private static final String TAG = "VpnTunnelService";
     private static final String CHANNEL_ID = "vpn_channel";
-    private static final int    NOTIF_ID  = 1001;
+    private static final int NOTIF_ID = 1001;
 
-    public static final String ACTION_CONNECT    = "com.vlessvpn.CONNECT";
+    public static final String ACTION_CONNECT = "com.vlessvpn.CONNECT";
     public static final String ACTION_DISCONNECT = "com.vlessvpn.DISCONNECT";
-    public static final String EXTRA_SERVER      = "server";
+    public static final String EXTRA_SERVER = "server";
     public static final String EXTRA_AUTO_CONNECT = "auto_connect";
 
     private volatile boolean isStopping = false;
@@ -64,55 +64,52 @@ public class VpnTunnelService extends VpnService {
 
     private static final CopyOnWriteArrayList<Consumer<Boolean>> connectionListeners = new CopyOnWriteArrayList<>();
 
-    public static void registerConnectionListener(android.content.Context ctx, Consumer<Boolean> listener) {
+    public static void registerConnectionListener(Context ctx, Consumer<Boolean> listener) {
         connectionListeners.add(listener);
         listener.accept(isRunning);
     }
 
     private static void notifyConnectionChanged(boolean connected) {
         for (Consumer<Boolean> l : connectionListeners) {
-            try { l.accept(connected); } catch (Exception e) {}
+            try { l.accept(connected); } catch (Exception ignored) {}
         }
     }
 
     private static volatile VpnTunnelService instance;
-    public  static volatile boolean    isRunning       = false;
-    public  static volatile VlessServer connectedServer = null;
-    public  static volatile long        totalUp         = 0;
-    public  static volatile long        totalDown       = 0;
+    public static volatile boolean isRunning = false;
+    public static volatile VlessServer connectedServer = null;
+    public static volatile long totalUp = 0;
+    public static volatile long totalDown = 0;
 
-    private final Handler mainHandler  = new Handler(Looper.getMainLooper());
-    private final Handler checkHandler  = new Handler(Looper.getMainLooper());
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Handler checkHandler = new Handler(Looper.getMainLooper());
 
     private ScheduledExecutorService statsExecutor;
     private ScheduledFuture<?> statsFuture;
     private ExecutorService bgExecutor;
 
-    private long prevUp   = 0;
+    private long prevUp = 0;
     private long prevDown = 0;
 
-    // Счётчики проверок
     private int failCount = 0;
     private int deepCheckRetryCount = 0;
     private static final int DEEP_CHECK_MAX_RETRIES = 5;
 
     private final Runnable statsPoller = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             if (!isRunning) return;
-
             long[] tun = readTunStats();
-            totalUp   = tun[0];
+            totalUp = tun[0];
             totalDown = tun[1];
 
-            long speedUp   = Math.max(0, totalUp   - prevUp);
+            long speedUp = Math.max(0, totalUp - prevUp);
             long speedDown = Math.max(0, totalDown - prevDown);
-            prevUp   = totalUp;
+            prevUp = totalUp;
             prevDown = totalDown;
 
             String speedStr = "↑ " + fmtSpeed(speedUp) + "  ↓ " + fmtSpeed(speedDown);
-            VlessServer srv = connectedServer;
-
-            if (srv != null) updateNotification(speedStr, srv.host);
+            if (connectedServer != null) updateNotification(speedStr, connectedServer.host);
             mainHandler.post(() -> StatusBus.post(speedStr, true));
         }
     };
@@ -121,31 +118,42 @@ public class VpnTunnelService extends VpnService {
         @Override
         public void run() {
             if (!isRunning) return;
-            if (bgExecutor == null || bgExecutor.isShutdown()) {
-                bgExecutor = Executors.newSingleThreadExecutor();
-            }
+            if (bgExecutor == null || bgExecutor.isShutdown()) bgExecutor = Executors.newSingleThreadExecutor();
             bgExecutor.execute(() -> {
                 doConnectivityCheck();
-                if (isRunning) {
-                    checkHandler.postDelayed(checkRunnable, 60_000L);
-                }
+                if (isRunning) checkHandler.postDelayed(this, 60_000L);
             });
         }
     };
 
     private ParcelFileDescriptor vpnInterface;
-    private V2RayManager         v2RayManager;
-    private HevTunnel            hevTunnel;
-    private Thread               v2rayThread;
-    private VlessServer          currentServer;
+    private V2RayManager v2RayManager;
+    private HevTunnel hevTunnel;
+    private Thread v2rayThread;
+    private VlessServer currentServer;
 
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
-    private final Object connectLock    = new Object();
+    private final Object connectLock = new Object();
     private volatile long activeConnectId = 0;
 
-    public static int getTunFd() { return 0; }
+    private NotificationCompat.Builder notifBuilder;
+
     public static VpnTunnelService getInstance() { return instance; }
+
+    public static VlessServer getCurrentServer() { return connectedServer; }
+
+    /**
+     * Возвращает file descriptor TUN-интерфейса (используется в V2RayManager)
+     */
+    public static int getTunFd() {
+        VpnTunnelService svc = instance;
+        if (svc != null && svc.vpnInterface != null) {
+            return svc.vpnInterface.getFd();
+        }
+        FileLogger.w(TAG, "getTunFd() — vpnInterface == null");
+        return -1;
+    }
 
     public void runSpeedTest() {
         if (bgExecutor != null && !bgExecutor.isShutdown()) bgExecutor.execute(this::doSpeedTest);
@@ -159,8 +167,6 @@ public class VpnTunnelService extends VpnService {
         VpnTunnelService svc = instance;
         return svc != null && svc.protect(fd);
     }
-
-    public static VlessServer getCurrentServer() { return connectedServer; }
 
     @Override
     public void onCreate() {
@@ -184,27 +190,31 @@ public class VpnTunnelService extends VpnService {
         }
 
         if (ACTION_DISCONNECT.equals(action)) {
-            // Если это очистка от самого AutoConnectManager, не трогаем перебор (чтобы сработал таймер)
             boolean isSystemCleanup = intent != null && intent.getBooleanExtra("system_cleanup", false);
             if (!isSystemCleanup) {
-                // Если юзер нажал "Отключить" ручками — ЖЕСТКО убиваем фоновый перебор!
                 AutoConnectManager.cancelAutoConnect();
             }
-
             new Thread(this::disconnect, "disconnect-thread").start();
             return START_NOT_STICKY;
         }
 
+        // CONNECT
         VlessServer server = null;
         if (intent != null) {
             String json = intent.getStringExtra(EXTRA_SERVER);
             if (json != null) {
-                try { server = new Gson().fromJson(json, VlessServer.class); }
-                catch (Exception e) {}
+                try {
+                    server = new Gson().fromJson(json, VlessServer.class);
+                } catch (Exception e) {
+                    FileLogger.e(TAG, "Ошибка парсинга сервера", e);
+                }
             }
         }
 
-        if (server == null) { stopSelf(); return START_NOT_STICKY; }
+        if (server == null) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
 
         updateNotification("Подключение...", server.host);
 
@@ -215,6 +225,7 @@ public class VpnTunnelService extends VpnService {
         final VlessServer srv = server;
         final long id = System.currentTimeMillis();
         activeConnectId = id;
+
         new Thread(() -> connect(srv, id), "connect-thread").start();
         return START_STICKY;
     }
@@ -230,7 +241,9 @@ public class VpnTunnelService extends VpnService {
     }
 
     @Override
-    public void onRevoke() { disconnect(); }
+    public void onRevoke() {
+        disconnect();
+    }
 
     private void connect(VlessServer server, long connectId) {
         synchronized (connectLock) {
@@ -238,12 +251,9 @@ public class VpnTunnelService extends VpnService {
             if (isRunning || v2RayManager != null || hevTunnel != null) fullStop();
             if (connectId != activeConnectId) return;
         }
+
         isStopping = false;
         currentServer = server;
-
-        if (bgExecutor == null || bgExecutor.isShutdown()) {
-            bgExecutor = Executors.newSingleThreadExecutor();
-        }
 
         v2rayThread = new Thread(() -> {
             try {
@@ -256,6 +266,7 @@ public class VpnTunnelService extends VpnService {
                 registerNetworkCallback();
                 startV2RayAndHev(server);
             } catch (Exception e) {
+                FileLogger.e(TAG, "Ошибка подключения", e);
                 mainHandler.post(() -> { StatusBus.done(e.getMessage()); stopSelf(); });
             }
         }, "v2ray-thread");
@@ -277,6 +288,7 @@ public class VpnTunnelService extends VpnService {
                 try { builder.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
                 applyAppBlacklist(builder);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false);
+
                 ParcelFileDescriptor pfd = builder.establish();
                 if (pfd != null) return pfd;
             } catch (Exception ignored) {}
@@ -295,26 +307,21 @@ public class VpnTunnelService extends VpnService {
 
     private void startV2RayAndHev(VlessServer server) {
         final long myConnectId = activeConnectId;
+
         v2RayManager = new V2RayManager(this, new V2RayManager.StatusCallback() {
             @Override public void onStarted(VlessServer s) {
                 startHev();
-
                 bgExecutor.execute(() -> resetTunBase(VpnTunnelService.this));
 
                 mainHandler.post(() -> {
                     updateNotification("Подключено", s.host);
-                    isRunning      = true;
+                    isRunning = true;
                     connectedServer = s;
-                    currentServer  = s;
-                    totalUp = 0; totalDown = 0;
-                    prevUp = 0; prevDown = 0;
-
-                    // Сбрасываем счетчики проверок
-                    failCount = 0;
-                    deepCheckRetryCount = 0;
+                    currentServer = s;
+                    totalUp = totalDown = prevUp = prevDown = 0;
+                    failCount = deepCheckRetryCount = 0;
 
                     ServerTester.setVpnActive(true);
-
                     startFastVerification(s);
 
                     checkHandler.removeCallbacks(checkRunnable);
@@ -368,153 +375,113 @@ public class VpnTunnelService extends VpnService {
             Intent b = new Intent("com.vlessvpn.VPN_STATUS_CHANGED");
             b.putExtra("connected", connected);
             if (server != null) b.putExtra("server", new Gson().toJson(server));
-            if (error  != null) b.putExtra("error",  error);
+            if (error != null) b.putExtra("error", error);
             sendBroadcast(b);
-        } catch (Exception e) {}
+        } catch (Exception ignored) {}
     }
 
-    public static boolean checkTunnelProxyFastSync() {
-        // HTTP URLs — надёжнее чем HTTPS через SOCKS (нет TLS overhead)
-        String[] testUrls = {
-                "http://google.ru",
-                "http://github.com",
-                "https://www.wikipedia.org/",
-        };
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicBoolean success = new AtomicBoolean(false);
-        ExecutorService pool = Executors.newFixedThreadPool(testUrls.length);
+    // ====================== НЕДОСТАЮЩИЕ МЕТОДЫ ======================
 
-        for (String url : testUrls) {
-            pool.execute(() -> {
-                if (checkSingleUrlProxyStatic(url)) {
-                    success.compareAndSet(false, true);
-                    latch.countDown();
-                }
-            });
-        }
-        try {
-            latch.await(5, TimeUnit.SECONDS);
-        } catch (InterruptedException ignored) {}
-        pool.shutdownNow();
-        return success.get();
-    }
-
-/*    private static boolean checkSingleUrlProxyStatic(String urlStr) {
-        java.net.HttpURLConnection conn = null;
-        try {
-            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS, new java.net.InetSocketAddress("127.0.0.1", 10808));
-            conn = (java.net.HttpURLConnection) new java.net.URL(urlStr).openConnection(proxy);
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
-            conn.setUseCaches(false);
-            conn.setInstanceFollowRedirects(true);
-            int code = conn.getResponseCode();
-            return code >= 200 && code < 400;
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (conn != null) conn.disconnect();
-        }
-    }*/
-    private static boolean checkSingleUrlProxyStatic(String urlStr) {
-        try {
-            Proxy proxy = new Proxy(
-                    Proxy.Type.SOCKS,
-                    new InetSocketAddress("127.0.0.1", 10808)
-            );
-
-            HttpURLConnection conn =
-                    (HttpURLConnection) new URL(urlStr).openConnection(proxy);
-
-            conn.setConnectTimeout(3000);      // было 3000
-            conn.setReadTimeout(3000);         // было 3000
-            conn.setUseCaches(false);
-            conn.setInstanceFollowRedirects(false);
-            conn.setRequestMethod("HEAD");     // САМОЕ ВАЖНОЕ ускорение
-
-            int code = conn.getResponseCode();
-
-            return code >= 200 && code < 400;
-
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
+    /**
+     * Проверка при начальном подключении (или переподключении)
+     * Теперь тоже делает две проверки туннеля при неудаче первой
+     */
     private void startFastVerification(VlessServer server) {
+        FileLogger.i(TAG, "=== startFastVerification === Сервер: " + server.host);
+
         AodOverlayService.sendStatus(this, true, server.host, "Проверка связи...", null);
-        mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Проверка обхода блокировок...", true));
+        mainHandler.post(() -> StatusBus.post(this, "Проверка подключения...", true));
 
         bgExecutor.execute(() -> {
-            if (new ServerRepository(this).isDeepCheckOnConnect()) {
-                Executors.newSingleThreadExecutor().execute(this::doDeepCheckInternal);
+            // Проверка 1: Интернет мимо VPN
+            FileLogger.i(TAG, "Проверка интернета мимо VPN...");
+            boolean hasPhysicalInternet = checkPhysicalInternetBypassingVpn();
+            FileLogger.i(TAG, "Интернет мимо VPN: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
+
+            if (!hasPhysicalInternet) {
+                FileLogger.w(TAG, "Нет интернета вне туннеля!");
+                mainHandler.post(() -> StatusBus.post(this, "Ожидание сети...", true));
+                AutoConnectManager.reportVerificationResult(false);
+                return;
             }
 
+            // Проверка 2: Первая проверка туннеля
+            FileLogger.i(TAG, "Проверка туннеля через SOCKS5 (проверка №1)...");
+            boolean tunnelOk = checkTunnelProxyFastSync();
+
+            if (tunnelOk) {
+                FileLogger.i(TAG, "Первая проверка туннеля успешна → VPN работает");
+                failCount = 0;
+                new ServerRepository(this).saveLastWorkingServer(server);
+                mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
+                AutoConnectManager.reportVerificationResult(true);
+
+                // Запускаем определение IP с небольшой задержкой
+                if (new ServerRepository(this).isDeepCheckOnConnect()) {
+                    mainHandler.postDelayed(this::doDeepCheck, 1500);
+                }
+                return;
+            }
+
+            // Первая проверка неудачна → сразу делаем вторую
+            FileLogger.w(TAG, "Первая проверка туннеля НЕУДАЧНА → запускаем вторую проверку...");
+
             try {
-                if (!checkPhysicalInternetBypassingVpn()) {
-                    FileLogger.w(TAG, "Нет интернета мимо VPN!");
-                    mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Ожидание сети...", true));
-                    failCount = 0;
-                    AutoConnectManager.reportVerificationResult(false);
-                    return;
+                Thread.sleep(1000); // пауза перед повторной проверкой
+            } catch (InterruptedException ignored) {}
+
+            FileLogger.i(TAG, "Проверка туннеля через SOCKS5 (проверка №2)...");
+            boolean tunnelOk2 = checkTunnelProxyFastSync();
+
+            if (tunnelOk2) {
+                FileLogger.i(TAG, "Вторая проверка успешна → VPN работает");
+                failCount = 0;
+                new ServerRepository(this).saveLastWorkingServer(server);
+                mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
+                AutoConnectManager.reportVerificationResult(true);
+
+                if (new ServerRepository(this).isDeepCheckOnConnect()) {
+                    mainHandler.postDelayed(this::doDeepCheck, 1500);
                 }
-                Thread.sleep(500);
-                boolean tunnelOk = checkTunnelProxyFastSync();
-
-                if (tunnelOk) {
-                    failCount = 0;
-                    FileLogger.i(TAG, "=== Трафик OK (fast)");
-                    new ServerRepository(this).saveLastWorkingServer(server);
-                    mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Подключено: " + server.remark, true));
-                    AutoConnectManager.reportVerificationResult(true);
-                } else {
-                    failCount++;
-                    FileLogger.e(TAG, "=== ТРАФИК FAIL! (fast)");
-                    new ServerRepository(this).clearLastWorkingServer();
-                    AutoConnectManager.reportVerificationResult(false);
-
-                    if (!isAutoConnectMode) {
-                        switchToNextServer();
-                    }
-                    else{
-                        FileLogger.e(TAG, "не переключаем сервер - ?");
-                    }
-                }
-
-            } catch (Exception e) {
-                FileLogger.e(TAG, "Ошибка проверки: " + e.getMessage());
+            } else {
+                failCount++;
+                FileLogger.e(TAG, "Обе проверки туннеля при подключении НЕУДАЧНЫ! (failCount = " + failCount + ")");
+                new ServerRepository(this).clearLastWorkingServer();
                 AutoConnectManager.reportVerificationResult(false);
-                if (!isAutoConnectMode) switchToNextServer();
+
+                if (!isAutoConnectMode) {
+                    FileLogger.i(TAG, "Переключаемся на следующий сервер...");
+                    switchToNextServer();
+                }
             }
         });
     }
 
     private boolean checkPhysicalInternetBypassingVpn() {
         if (connectivityManager == null) return false;
-        java.net.HttpURLConnection conn = null;
+        HttpURLConnection conn = null;
         try {
-            Network activeNetwork = null;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                activeNetwork = connectivityManager.getActiveNetwork();
-            }
-            if (activeNetwork == null) {
+            Network active = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ?
+                    connectivityManager.getActiveNetwork() : null;
+
+            if (active == null) {
                 for (Network net : connectivityManager.getAllNetworks()) {
                     NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
                     if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                             && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                        activeNetwork = net;
+                        active = net;
                         break;
                     }
                 }
             }
-            if (activeNetwork == null) return false;
+            if (active == null) return false;
 
-            conn = (java.net.HttpURLConnection) activeNetwork.openConnection(new java.net.URL("https://ya.ru"));
+            conn = (HttpURLConnection) active.openConnection(new URL("https://ya.ru"));
             conn.setConnectTimeout(5000);
             conn.setReadTimeout(5000);
             conn.setRequestMethod("HEAD");
             int code = conn.getResponseCode();
-            return (code >= 200 && code < 400);
+            return code >= 200 && code < 400;
         } catch (Exception e) {
             return false;
         } finally {
@@ -522,29 +489,78 @@ public class VpnTunnelService extends VpnService {
         }
     }
 
+    /**
+     * Ежеминутная фоновая проверка (каждые 60 секунд)
+     * Изменённая логика по твоему требованию:
+     * - Сначала проверяем интернет МИМО туннеля
+     * - Если интернета нет → ничего не делаем (не трогаем сервер)
+     * - Если интернет есть, но туннель не работает → переключаем сервер
+     */
+    /**
+     * Ежеминутная проверка соединения
+     * Новая логика:
+     * - Сначала проверяем интернет МИМО туннеля
+     * - Если интернета нет → ничего не делаем
+     * - Если интернет есть:
+     *     → Проверяем туннель 1 раз
+     *     → Если неудача → сразу делаем вторую проверку
+     *     → Если обе проверки неудачны → переключаем сервер
+     */
     private void doConnectivityCheck() {
         if (!isRunning) return;
 
+        FileLogger.i(TAG, "=== Ежеминутная проверка соединения ===");
+
+        // Шаг 1: Проверяем наличие интернета вне VPN
         boolean hasPhysicalInternet = checkPhysicalInternetBypassingVpn();
+        FileLogger.i(TAG, "Интернет мимо VPN: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ ОТСУТСТВУЕТ"));
+
         if (!hasPhysicalInternet) {
-            failCount = 0;
-            FileLogger.i(TAG, "=== Интернета НЕТ!");
+            FileLogger.i(TAG, "Нет интернета вне туннеля → пропускаем проверку туннеля");
+            failCount = 0; // сбрасываем счётчик, т.к. проблема не в VPN
             return;
         }
-        FileLogger.i(TAG, "=== Интернет ЕСТЬ!");
+
+        // Шаг 2: Интернет есть → проверяем туннель
+        FileLogger.i(TAG, "Проверяем работу туннеля (проверка №1)...");
         boolean tunnelOk = checkTunnelProxyFastSync();
 
         if (tunnelOk) {
-            FileLogger.i(TAG, "=== Трафик OK!");
+            FileLogger.i(TAG, "Туннель работает нормально (проверка №1 успешна)");
+            failCount = 0;
+            if (currentServer != null) {
+                new ServerRepository(this).saveLastWorkingServer(currentServer);
+            }
+            return;
+        }
+
+        // Первая проверка не прошла → сразу делаем вторую
+        FileLogger.w(TAG, "Первая проверка туннеля НЕУДАЧНА → запускаем вторую проверку...");
+
+        try {
+            Thread.sleep(800); // небольшая пауза перед повторной проверкой
+        } catch (InterruptedException ignored) {}
+
+        FileLogger.i(TAG, "Проверяем работу туннеля (проверка №2)...");
+        boolean tunnelOk2 = checkTunnelProxyFastSync();
+
+        if (tunnelOk2) {
+            FileLogger.i(TAG, "Вторая проверка успешна → туннель работает");
             failCount = 0;
             if (currentServer != null) {
                 new ServerRepository(this).saveLastWorkingServer(currentServer);
             }
         } else {
             failCount++;
-            FileLogger.e(TAG, "=== Трафик пропал (фоновая проверка)!");
+            FileLogger.e(TAG, "Обе проверки туннеля НЕУДАЧНЫ! (failCount = " + failCount + ")");
+
             new ServerRepository(this).clearLastWorkingServer();
-            switchToNextServer();
+
+            // Переключаем сервер только после двух неудачных проверок подряд
+            if (failCount >= 1) {   // можно поставить >=2, если хочешь ещё мягче
+                FileLogger.i(TAG, "Переключаемся на следующий сервер...");
+                switchToNextServer();
+            }
         }
     }
 
@@ -552,18 +568,18 @@ public class VpnTunnelService extends VpnService {
         ServerRepository repo = new ServerRepository(this);
         if (currentServer != null) {
             currentServer.trafficOk = false;
-            currentServer.pingMs    = -1;
+            currentServer.pingMs = -1;
             repo.updateServerSync(currentServer);
         }
 
         List<VlessServer> servers = repo.getAllWorkingServersSync();
         if (servers.isEmpty()) {
-            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Нет рабочих серверов!", true));
+            mainHandler.post(() -> StatusBus.post(this, "Нет рабочих серверов!", true));
             return;
         }
 
         VlessServer next = servers.get(0);
-        mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Переключение на " + next.remark, true));
+        mainHandler.post(() -> StatusBus.post(this, "Переключение на " + next.remark, true));
 
         long newId = System.currentTimeMillis();
         activeConnectId = newId;
@@ -577,14 +593,14 @@ public class VpnTunnelService extends VpnService {
             hevTunnel = new HevTunnel(this);
             hevTunnel.start(vpnInterface);
         } catch (Exception e) {
-            FileLogger.e(TAG, "Ошибка запуска hev", e);
+            FileLogger.e(TAG, "Ошибка запуска HevTunnel", e);
         }
     }
 
     private void stopHev() {
-        HevTunnel hev = hevTunnel;
+        HevTunnel h = hevTunnel;
         hevTunnel = null;
-        if (hev != null) try { hev.stop(); } catch (Exception ignored) {}
+        if (h != null) try { h.stop(); } catch (Exception ignored) {}
     }
 
     private void fullStop() {
@@ -593,22 +609,13 @@ public class VpnTunnelService extends VpnService {
 
         isRunning = false;
         connectedServer = null;
-        totalUp   = 0;
-        totalDown = 0;
 
         if (statsFuture != null) {
             statsFuture.cancel(false);
             statsFuture = null;
         }
 
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            checkHandler.removeCallbacks(checkRunnable);
-        } else {
-            mainHandler.post(() -> {
-                checkHandler.removeCallbacks(checkRunnable);
-            });
-        }
-
+        checkHandler.removeCallbacks(checkRunnable);
         unregisterNetworkCallback();
         stopHev();
 
@@ -635,102 +642,178 @@ public class VpnTunnelService extends VpnService {
     private void disconnect() {
         checkHandler.removeCallbacks(checkRunnable);
         fullStop();
+
         mainHandler.post(() -> {
             ServerTester.setVpnActive(false);
-            StatusBus.done(VpnTunnelService.this, "Отключено");
+            StatusBus.done(this, "Отключено");
             sendVpnBroadcast(false, null, null);
             notifyConnectionChanged(false);
         });
+
         stopForeground(true);
         stopSelf();
     }
 
-    private void doDeepCheck() {
-        doDeepCheckInternal();
+    public void doDeepCheck() {
+        if (bgExecutor == null || bgExecutor.isShutdown()) {
+            bgExecutor = Executors.newSingleThreadExecutor();
+        }
+        bgExecutor.execute(this::doDeepCheckInternal);
     }
 
     private void doDeepCheckInternal() {
-        if (!isRunning) return;
+        if (!isRunning) {
+            FileLogger.w(TAG, "doDeepCheckInternal: VPN уже отключён");
+            return;
+        }
 
-        AodOverlayService.sendStatus(this, true, currentServer != null ? currentServer.host : null, "Определяем IP...", null);
-        mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "Проверка IP...", true));
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            FileLogger.e(TAG, "Deep Check запущен на UI-потоке! Перезапускаем в фоне.");
+            bgExecutor.execute(this::doDeepCheckInternal);
+            return;
+        }
 
-        java.net.HttpURLConnection conn = null;
+        FileLogger.i(TAG, "=== Deep Check: Запуск определения внешнего IP ===");
+
+        AodOverlayService.sendStatus(this, true,
+                currentServer != null ? currentServer.host : null,
+                "Определяем IP...", null);
+
+        mainHandler.post(() -> StatusBus.post(this, "🔍 Определяем внешний IP...", true));
+
+        // Попытка 1: ip-api.com
+        boolean success = tryGetIpFromService("http://ip-api.com/json?fields=query,city,countryCode,isp", "ip-api.com");
+
+        // Если первая не удалась — сразу вторая попытка на другой сервис
+        if (!success) {
+            FileLogger.w(TAG, "Первый сервис не сработал → пробуем резервный сервис");
+            success = tryGetIpFromService("https://freeipapi.com/json", "freeipapi.com");
+        }
+
+        if (!success) {
+            deepCheckRetryCount++;
+            String retryMsg = (deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES)
+                    ? "✗ Оба сервиса не ответили, повтор " + deepCheckRetryCount + "/" + DEEP_CHECK_MAX_RETRIES
+                    : "✗ Не удалось определить IP";
+
+            FileLogger.w(TAG, "Deep Check: " + retryMsg);
+            AodOverlayService.sendStatus(this, true, currentServer != null ? currentServer.host : null, retryMsg, null);
+            mainHandler.post(() -> StatusBus.post(this, "🔬 IP: " + retryMsg, true));
+
+            if (isRunning && deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES) {
+                checkHandler.postDelayed(() -> {
+                    if (isRunning && bgExecutor != null && !bgExecutor.isShutdown()) {
+                        bgExecutor.execute(this::doDeepCheckInternal);
+                    }
+                }, 30000);
+            }
+        }
+    }
+
+    /**
+     * Пытается получить IP через указанный сервис
+     * @return true если успешно получил и обработал данные
+     */
+    private boolean tryGetIpFromService(String urlStr, String serviceName) {
+        HttpURLConnection conn = null;
         try {
-            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS, new java.net.InetSocketAddress("127.0.0.1", 10808));
-            conn = (java.net.HttpURLConnection) new java.net.URL("http://ip-api.com/json?fields=query,city,countryCode,isp").openConnection(proxy);
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(8000);
+            Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
+            URL url = new URL(urlStr);
+
+            FileLogger.i(TAG, "Deep Check → Запрос к " + serviceName + ": " + url);
+
+            conn = (HttpURLConnection) url.openConnection(proxy);
+            conn.setConnectTimeout(14000);
+            conn.setReadTimeout(14000);
             conn.setRequestProperty("User-Agent", "VlessVPN/1.0");
             conn.setRequestProperty("Accept", "application/json");
 
-            long t0 = System.currentTimeMillis();
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                String r = "🔬 IP: ✗ HTTP " + code;
-                mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, r, true));
-                return;
+            long startTime = System.currentTimeMillis();
+            int responseCode = conn.getResponseCode();
+            long duration = System.currentTimeMillis() - startTime;
+
+            FileLogger.i(TAG, "Deep Check → " + serviceName + " ответил: HTTP " + responseCode + " (" + duration + "ms)");
+
+            if (responseCode != 200) {
+                FileLogger.w(TAG, serviceName + " вернул код " + responseCode);
+                return false;
             }
 
-            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
+            // Читаем ответ
+            java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"));
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = br.readLine()) != null) sb.append(line);
             br.close();
-            long ms = System.currentTimeMillis() - t0;
 
             String json = sb.toString();
-            String ip      = extractJson(json, "query");
-            String city    = extractJson(json, "city");
-            String country = extractJson(json, "countryCode");
+            FileLogger.i(TAG, serviceName + " JSON: " + json);
+
+            String ip = extractJson(json, "query");
+            if (ip == null || ip.isEmpty()) {
+                ip = extractJson(json, "ip");   // для freeipapi.com поле называется "ip"
+            }
+
+            String city = extractJson(json, "city");
+            String country = extractJson(json, "countryCode") != null
+                    ? extractJson(json, "countryCode")
+                    : extractJson(json, "country");
 
             String location = "";
             if (city != null && country != null) location = city + ", " + country;
-            else if (country != null)            location = country;
+            else if (country != null) location = country;
+            else if (city != null) location = city;
 
-            String result = (ip != null) ? "🔬 ✓ " + ip + " " + location + " (" + ms + "ms)" : "🔬 IP: ✓ ответ получен (" + ms + "ms)";
+            String result = (ip != null && !ip.isEmpty())
+                    ? "🔬 ✓ " + ip + " " + location + " (" + duration + "ms)"
+                    : "🔬 IP: ✓ ответ получен (" + duration + "ms)";
+
+            FileLogger.i(TAG, "Deep Check УСПЕХ через " + serviceName + ": " + ip);
+
             deepCheckRetryCount = 0;
-            FileLogger.i(TAG, result);
 
-            if (ip != null) {
-                final String ipLocation = ip + " " + location;
-                com.vlessvpn.app.storage.ServerRepository repo = new com.vlessvpn.app.storage.ServerRepository(VpnTunnelService.this);
-                java.util.List<com.vlessvpn.app.model.VlessServer> all = repo.getAllServersSync();
-                int total = all.size(), working = 0;
-                for (com.vlessvpn.app.model.VlessServer s : all) if (s.trafficOk) working++;
-                com.vlessvpn.app.service.AodOverlayService.sendStatus(VpnTunnelService.this, true,
-                        currentServer != null ? currentServer.host : null, ipLocation, working + "/" + total);
-            }
-            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, result, true));
+            final String finalResult = result;
+            final String ipForAod = (ip != null) ? ip + " " + location : "IP получен";
+
+            mainHandler.post(() -> StatusBus.post(this, finalResult, true));
+            AodOverlayService.sendStatus(this, true,
+                    currentServer != null ? currentServer.host : null,
+                    ipForAod, null);
+
+            return true;
 
         } catch (Exception e) {
-            deepCheckRetryCount++;
-            String retryMsg = deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES
-                    ? "✗ таймаут, повтор " + deepCheckRetryCount + "/" + DEEP_CHECK_MAX_RETRIES
-                    : "✗ IP не определён";
-            AodOverlayService.sendStatus(this, true, currentServer != null ? currentServer.host : null, retryMsg, null);
-            mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "🔬 IP: " + retryMsg, true));
-            if (isRunning && deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES) {
-                checkHandler.postDelayed(() -> {
-                    if (isRunning && bgExecutor != null && !bgExecutor.isShutdown()) bgExecutor.execute(this::doDeepCheckInternal);
-                }, 30_000L);
-            }
+            FileLogger.e(TAG, "Deep Check ошибка при работе с " + serviceName, e);
+            return false;
         } finally {
-            if (conn != null) conn.disconnect();
+            if (conn != null) {
+                try { conn.disconnect(); } catch (Exception ignored) {}
+            }
         }
     }
 
-    private static String extractJson(String json, String key) {
-        try {
-            String q = String.valueOf('"');
-            String search = q + key + q + ":" + q;
-            int start = json.indexOf(search);
-            if (start < 0) return null;
-            start += search.length();
-            int end = json.indexOf(q, start);
-            if (end < 0) return null;
-            return json.substring(start, end);
-        } catch (Exception e) { return null; }
+    private void handleDeepCheckRetry(String baseMsg) {
+        deepCheckRetryCount++;
+        String retryMsg = (deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES)
+                ? baseMsg + ", повтор " + deepCheckRetryCount + "/" + DEEP_CHECK_MAX_RETRIES
+                : baseMsg + " (IP не определён)";
+
+        FileLogger.w(TAG, "Deep Check: " + retryMsg);
+
+        AodOverlayService.sendStatus(this, true,
+                currentServer != null ? currentServer.host : null, retryMsg, null);
+
+        mainHandler.post(() -> StatusBus.post(this, "🔬 IP: " + retryMsg, true));
+
+        // Повторяем через 25-30 секунд
+        if (isRunning && deepCheckRetryCount <= DEEP_CHECK_MAX_RETRIES) {
+            checkHandler.postDelayed(() -> {
+                if (isRunning && bgExecutor != null && !bgExecutor.isShutdown()) {
+                    bgExecutor.execute(this::doDeepCheckInternal);
+                }
+            }, 28000);
+        }
     }
 
     private void doSpeedTest() {
@@ -770,18 +853,24 @@ public class VpnTunnelService extends VpnService {
         }
     }
 
+    // ====================== МАРШРУТИЗАЦИЯ ======================
+
     private void addRoutesExcluding(Builder builder, String serverHost) {
         try {
             byte[] ip = InetAddress.getByName(serverHost).getAddress();
-            for (String[] r : subtractRoute(0, ip)) builder.addRoute(r[0], Integer.parseInt(r[1]));
-        } catch (Exception e) { builder.addRoute("0.0.0.0", 0); }
+            for (String[] r : subtractRoute(0, ip)) {
+                builder.addRoute(r[0], Integer.parseInt(r[1]));
+            }
+        } catch (Exception e) {
+            builder.addRoute("0.0.0.0", 0);
+        }
     }
 
     private List<String[]> subtractRoute(int prefix, byte[] excludeIp) {
         List<String[]> result = new ArrayList<>();
         long excl = bytesToLong(excludeIp);
         for (int p = prefix; p < 32; p++) {
-            long blockSize  = 1L << (32 - p - 1);
+            long blockSize = 1L << (32 - p - 1);
             long blockStart = (excl >> (32 - p - 1)) * blockSize;
             long otherStart = blockStart ^ blockSize;
             result.add(new String[]{longToIp(otherStart), String.valueOf(p + 1)});
@@ -797,6 +886,39 @@ public class VpnTunnelService extends VpnService {
         return ((ip >> 24) & 0xFF) + "." + ((ip >> 16) & 0xFF) + "." + ((ip >> 8) & 0xFF) + "." + (ip & 0xFF);
     }
 
+    /**
+     * Извлекает значение по ключу из простого JSON (без использования библиотек)
+     */
+    private static String extractJson(String json, String key) {
+        if (json == null || json.isEmpty()) return null;
+
+        try {
+            String q = "\"";
+            String search = q + key + q + ":" + q;
+            int start = json.indexOf(search);
+
+            if (start < 0) {
+                // Попробуем без кавычек после двоеточия (на случай разных форматов)
+                search = q + key + q + ":";
+                start = json.indexOf(search);
+                if (start < 0) return null;
+                start += search.length();
+            } else {
+                start += search.length();
+            }
+
+            int end = json.indexOf(q, start);
+            if (end < 0) return null;
+
+            return json.substring(start, end).trim();
+        } catch (Exception e) {
+            FileLogger.e(TAG, "Ошибка парсинга JSON ключа: " + key, e);
+            return null;
+        }
+    }
+
+    // ====================== СЕТЕВЫЕ CALLBACK ======================
+
     private void registerNetworkCallback() {
         if (connectivityManager == null) return;
         try {
@@ -805,62 +927,78 @@ public class VpnTunnelService extends VpnService {
                     .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
                     .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                     .build();
+
             networkCallback = new ConnectivityManager.NetworkCallback() {
                 @Override public void onAvailable(Network n) { setUnderlyingNetworks(new Network[]{n}); }
                 @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities c) { setUnderlyingNetworks(new Network[]{n}); }
                 @Override public void onLost(Network n) { setUnderlyingNetworks(null); }
             };
             connectivityManager.requestNetwork(req, networkCallback);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            FileLogger.e(TAG, "Ошибка регистрации network callback", e);
+        }
     }
 
     private void unregisterNetworkCallback() {
         if (connectivityManager != null && networkCallback != null) {
-            try { connectivityManager.unregisterNetworkCallback(networkCallback); }
-            catch (Exception ignored) {}
-            finally { networkCallback = null; }
+            try {
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+            } catch (Exception ignored) {}
+            networkCallback = null;
         }
     }
 
-    private static long tunBaseUp   = 0;
-    private static long tunBaseDown = 0;
+    // ====================== ПРОВЕРКА ТУННЕЛЯ ======================
 
-    private static void resetTunBase(Context ctx) {
-        long[] raw = readTunRaw(ctx);
-        tunBaseUp   = raw[0];
-        tunBaseDown = raw[1];
+    public static boolean checkTunnelProxyFastSync() {
+        String[] testUrls = {"http://google.ru", "http://github.com", "https://www.wikipedia.org/"};
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+        ExecutorService pool = Executors.newFixedThreadPool(testUrls.length);
+
+        for (String url : testUrls) {
+            pool.execute(() -> {
+                if (checkSingleUrlProxyStatic(url)) {
+                    success.set(true);
+                    latch.countDown();
+                }
+            });
+        }
+        try { latch.await(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        pool.shutdownNow();
+        return success.get();
     }
 
-    private static long[] readTunRaw(Context ctx) {
+    private static boolean checkSingleUrlProxyStatic(String urlStr) {
+        HttpURLConnection conn = null;
         try {
-            int uid = ctx.getApplicationInfo().uid;
-            long tx = android.net.TrafficStats.getUidTxBytes(uid);
-            long rx = android.net.TrafficStats.getUidRxBytes(uid);
-            if (tx != android.net.TrafficStats.UNSUPPORTED && rx != android.net.TrafficStats.UNSUPPORTED) {
-                return new long[]{tx, rx};
-            }
-        } catch (Exception ignored) {}
-        return new long[]{0, 0};
+            Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
+            conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            conn.setUseCaches(false);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("HEAD");
+
+            int code = conn.getResponseCode();
+            return code >= 200 && code < 400;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
-    private long[] readTunStats() {
-        long[] raw = readTunRaw(this);
-        return new long[]{ Math.max(0, raw[0] - tunBaseUp), Math.max(0, raw[1] - tunBaseDown) };
-    }
-
-    private static String fmtSpeed(long bytesPerSec) {
-        if (bytesPerSec < 10 * 1024 * 1024) return String.format("%6.1f KB/s", bytesPerSec / 1024.0);
-        return String.format("%6.1f MB/s", bytesPerSec / (1024.0 * 1024));
-    }
+    // ====================== УВЕДОМЛЕНИЯ ======================
 
     private void createNotificationChannel() {
-        NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "VPN", NotificationManager.IMPORTANCE_LOW);
-        ch.setDescription("VPN статус");
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm != null) nm.createNotificationChannel(ch);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "VPN", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("VPN статус");
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.createNotificationChannel(ch);
+        }
     }
-
-    private NotificationCompat.Builder notifBuilder;
 
     private Notification getCachedNotification(String title, String text) {
         if (notifBuilder == null) {
@@ -890,4 +1028,42 @@ public class VpnTunnelService extends VpnService {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(NOTIF_ID, getCachedNotification(title, text));
     }
+
+    // ====================== СТАТИСТИКА ======================
+
+    private static long tunBaseUp = 0;
+    private static long tunBaseDown = 0;
+
+    private static void resetTunBase(Context ctx) {
+        long[] raw = readTunRaw(ctx);
+        tunBaseUp = raw[0];
+        tunBaseDown = raw[1];
+    }
+
+    private static long[] readTunRaw(Context ctx) {
+        try {
+            int uid = ctx.getApplicationInfo().uid;
+            long tx = android.net.TrafficStats.getUidTxBytes(uid);
+            long rx = android.net.TrafficStats.getUidRxBytes(uid);
+            if (tx != android.net.TrafficStats.UNSUPPORTED && rx != android.net.TrafficStats.UNSUPPORTED) {
+                return new long[]{tx, rx};
+            }
+        } catch (Exception ignored) {}
+        return new long[]{0, 0};
+    }
+
+    private long[] readTunStats() {
+        long[] raw = readTunRaw(this);
+        return new long[]{Math.max(0, raw[0] - tunBaseUp), Math.max(0, raw[1] - tunBaseDown)};
+    }
+
+    private static String fmtSpeed(long bytesPerSec) {
+        if (bytesPerSec < 10 * 1024 * 1024)
+            return String.format("%6.1f KB/s", bytesPerSec / 1024.0);
+        return String.format("%6.1f MB/s", bytesPerSec / (1024.0 * 1024));
+    }
+
+    // ====================== DO DEEP CHECK & SPEED TEST (заглушки) ======================
+    // Вставь сюда свои оригинальные реализации doDeepCheckInternal() и doSpeedTest()
+    // если они отличаются от того, что я оставил выше.
 }

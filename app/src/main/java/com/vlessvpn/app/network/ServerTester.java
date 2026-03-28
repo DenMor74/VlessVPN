@@ -36,9 +36,9 @@ public class ServerTester {
     private static final int TIMEOUT_MS  = 10_000;
     private static final int REPEAT      = 2;
     private static final String[] CHECK_URLS = {
-        "http://speed.cloudflare.com/__down?bytes=512",
-        "http://ip-api.com/json?fields=query",
-        "http://www.msftconnecttest.com/connecttest.txt"
+            "http://speed.cloudflare.com/__down?bytes=512",
+            "http://ip-api.com/json?fields=query",
+            "http://www.msftconnecttest.com/connecttest.txt"
     };
 
     private static final AtomicBoolean vpnActive = new AtomicBoolean(false);
@@ -192,7 +192,7 @@ public class ServerTester {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))       continue;
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) continue;
             if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-             || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
+                    || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
         }
         return null;
     }
@@ -208,7 +208,7 @@ public class ServerTester {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))  continue;
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue;
             if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-             || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
+                    || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
         }
         return null;
     }

@@ -25,6 +25,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.WebView;
 import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
@@ -660,14 +661,83 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
+// ════════════════════════════════════════════════════════════════
+// В showAboutDialog() — исправить тип
+// ════════════════════════════════════════════════════════════════
+
     private void showAboutDialog() {
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("О приложении")
-                .setMessage("DenMor-VPN\n\n" +
-                        "Авто-подключение VPN с проверкой серверов")
-                .setPositiveButton("OK", null)
-                .show();
+        String versionName = "1.0.0";
+        try {
+            PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+            versionName = pInfo.versionName;
+        } catch (Exception e) {
+            FileLogger.w(TAG, "Не удалось получить версию: " + e.getMessage());
+        }
+
+        String aboutText =
+                        "═════════════════════════\n" +
+                        "              DenMor VPN v" + versionName + "\n" +
+                        "═════════════════════════\n\n" +
+
+                        "📡 ОПИСАНИЕ:\n" +
+                        "Авто-подключение VPN с умным переключением серверов. Обход блокировок по белым спискам через Vless Reality" +
+                        " протокол с проверкой доступности.\n\n" +
+
+                        "⚙️ ФУНКЦИИ:\n" +
+                        "• Авто-подключение при LTE\n" +
+                        "• Авто-отключение при WiFi\n" +
+                        "• Регулярное скачивание конфигов и их проверка\n" +
+                        "• Проверка серверов (Ping + Google IP)\n" +
+                        "• Переключение на другой сервер при потере связи\n" +
+                        "• Ежеминутный контроль связи при подключении VPN \n" +
+                        "• AOD Overlay (статус на экране)\n" +
+                        "• Чёрный список приложений мимо VPN\n" +
+                        "• Возможность скачать списки конфигов через белый интернет\n\n" +
+
+                        "🔘 КНОПКИ:\n" +
+                        "• Проверить текущий список серверов\n" +
+                        "• Скачать новый список и проверить\n" +
+                        "• Настройки\n" +
+                        "🔘 В МЕНЮ:\n" +
+                        "• Логи, обновление программы\n" +
+                        "• Скачать список через LTE\n" +
+
+                        "📊 ИНДИКАТОРЫ:\n" +
+                        "• ↑↓ — скорость трафика\n" +
+                        "• 🟢/🔴 — статус сервера\n" +
+                        "• 🔬 — проверка IP\n" +
+                        "• ⏱ — тест скорости";
+
+        androidx.appcompat.app.AlertDialog.Builder builder =
+                new androidx.appcompat.app.AlertDialog.Builder(this);
+
+        builder.setTitle("ℹ️ О приложении");
+
+        // ScrollView для длинного текста
+        ScrollView scrollView = new ScrollView(this);
+        TextView textView = new TextView(this);
+        textView.setText(aboutText);
+        textView.setPadding(50, 50, 50, 50);
+        textView.setTextSize(14);
+        textView.setLineSpacing(0, 1.3f);
+        textView.setTextColor(0xFFFFFFFF);
+        scrollView.addView(textView);
+
+        builder.setView(scrollView);
+        builder.setPositiveButton("OK", (dialog, which) -> dialog.dismiss());
+
+        // ════════════════════════════════════════════════════════════════
+        // ← ИСПРАВЛЕНО: androidx.appcompat.app.AlertDialog
+        // ════════════════════════════════════════════════════════════════
+        androidx.appcompat.app.AlertDialog dialog = builder.create();
+        dialog.show();
+
+        // Делаем текст копируемым
+        textView.setTextIsSelectable(true);
     }
+
+
+
 
 
     private void showDownloadWhitelistDialog() {

@@ -402,23 +402,23 @@ public class VpnTunnelService extends VpnService {
 
         bgExecutor.execute(() -> {
             // Проверка 1: Интернет мимо VPN
-            FileLogger.i(TAG, "Проверка интернета мимо VPN...");
+            //FileLogger.i(TAG, "Проверка интернета мимо VPN...");
             boolean hasPhysicalInternet = checkPhysicalInternetBypassingVpn();
-            FileLogger.i(TAG, "Интернет мимо VPN: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
+            FileLogger.i(TAG, "Интернет: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
 
             if (!hasPhysicalInternet) {
-                FileLogger.w(TAG, "Нет интернета вне туннеля!");
+                //FileLogger.w(TAG, "Нет интернета вне туннеля!");
                 mainHandler.post(() -> StatusBus.post(this, "Ожидание сети...", true));
                 AutoConnectManager.reportVerificationResult(false);
                 return;
             }
 
             // Проверка 2: Первая проверка туннеля
-            FileLogger.i(TAG, "Проверка туннеля через SOCKS5 (проверка №1)...");
+            //FileLogger.i(TAG, "Проверка туннеля через SOCKS5 (проверка №1)...");
             boolean tunnelOk = checkTunnelProxyFastSync();
 
             if (tunnelOk) {
-                FileLogger.i(TAG, "Первая проверка туннеля успешна → VPN работает");
+                FileLogger.i(TAG, "1 проверка: OK");
                 failCount = 0;
                 new ServerRepository(this).saveLastWorkingServer(server);
                 mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
@@ -432,17 +432,17 @@ public class VpnTunnelService extends VpnService {
             }
 
             // Первая проверка неудачна → сразу делаем вторую
-            FileLogger.w(TAG, "Первая проверка туннеля НЕУДАЧНА → запускаем вторую проверку...");
+            FileLogger.w(TAG, "1 проверка: FAIL...");
 
             try {
-                Thread.sleep(1000); // пауза перед повторной проверкой
+                Thread.sleep(100); // пауза перед повторной проверкой
             } catch (InterruptedException ignored) {}
 
-            FileLogger.i(TAG, "Проверка туннеля через SOCKS5 (проверка №2)...");
+            //FileLogger.i(TAG, "Проверка туннеля через SOCKS5 (проверка №2)...");
             boolean tunnelOk2 = checkTunnelProxyFastSync();
 
             if (tunnelOk2) {
-                FileLogger.i(TAG, "Вторая проверка успешна → VPN работает");
+                FileLogger.i(TAG, "2 проверка: OK");
                 failCount = 0;
                 new ServerRepository(this).saveLastWorkingServer(server);
                 mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
@@ -453,12 +453,12 @@ public class VpnTunnelService extends VpnService {
                 }
             } else {
                 failCount++;
-                FileLogger.e(TAG, "Обе проверки туннеля при подключении НЕУДАЧНЫ! (failCount = " + failCount + ")");
+                FileLogger.e(TAG, "Обе проверки: FAIL! (failCount = " + failCount + ")");
                 new ServerRepository(this).clearLastWorkingServer();
                 AutoConnectManager.reportVerificationResult(false);
 
                 if (!isAutoConnectMode) {
-                    FileLogger.i(TAG, "Переключаемся на следующий сервер...");
+                    FileLogger.i(TAG, "Переключаемся...");
                     switchToNextServer();
                 }
             }
@@ -517,24 +517,24 @@ public class VpnTunnelService extends VpnService {
     private void doConnectivityCheck() {
         if (!isRunning) return;
 
-        FileLogger.i(TAG, "=== Ежеминутная проверка соединения ===");
+        //FileLogger.i(TAG, "=== Ежеминутная проверка соединения ===");
 
         // Шаг 1: Проверяем наличие интернета вне VPN
         boolean hasPhysicalInternet = checkPhysicalInternetBypassingVpn();
-        FileLogger.i(TAG, "Интернет мимо VPN: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ ОТСУТСТВУЕТ"));
+        FileLogger.i(TAG, "Интернет: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
 
         if (!hasPhysicalInternet) {
-            FileLogger.i(TAG, "Нет интернета вне туннеля → пропускаем проверку туннеля");
+            //FileLogger.i(TAG, "Нет интернета вне туннеля → пропускаем проверку туннеля");
             failCount = 0; // сбрасываем счётчик, т.к. проблема не в VPN
             return;
         }
 
         // Шаг 2: Интернет есть → проверяем туннель
-        FileLogger.i(TAG, "Проверяем работу туннеля (проверка №1)...");
+        //FileLogger.i(TAG, "Проверяем работу туннеля (проверка №1)...");
         boolean tunnelOk = checkTunnelProxyFastSync();
 
         if (tunnelOk) {
-            FileLogger.i(TAG, "Туннель работает нормально (проверка №1 успешна)");
+            FileLogger.i(TAG, "1 проверка: OK");
             failCount = 0;
             if (currentServer != null) {
                 new ServerRepository(this).saveLastWorkingServer(currentServer);
@@ -543,30 +543,30 @@ public class VpnTunnelService extends VpnService {
         }
 
         // Первая проверка не прошла → сразу делаем вторую
-        FileLogger.w(TAG, "Первая проверка туннеля НЕУДАЧНА → запускаем вторую проверку...");
+        FileLogger.w(TAG, "1 проверка: FAIL");
 
         try {
-            Thread.sleep(800); // небольшая пауза перед повторной проверкой
+            Thread.sleep(100); // небольшая пауза перед повторной проверкой
         } catch (InterruptedException ignored) {}
 
-        FileLogger.i(TAG, "Проверяем работу туннеля (проверка №2)...");
+        //FileLogger.i(TAG, "Проверяем работу туннеля (проверка №2)...");
         boolean tunnelOk2 = checkTunnelProxyFastSync();
 
         if (tunnelOk2) {
-            FileLogger.i(TAG, "Вторая проверка успешна → туннель работает");
+            FileLogger.i(TAG, "2 проверка: OK");
             failCount = 0;
             if (currentServer != null) {
                 new ServerRepository(this).saveLastWorkingServer(currentServer);
             }
         } else {
             failCount++;
-            FileLogger.e(TAG, "Обе проверки туннеля НЕУДАЧНЫ! (failCount = " + failCount + ")");
+            FileLogger.e(TAG, "Обе проверки: FAIL (failCount = " + failCount + ")");
 
             new ServerRepository(this).clearLastWorkingServer();
 
             // Переключаем сервер только после двух неудачных проверок подряд
             if (failCount >= 1) {   // можно поставить >=2, если хочешь ещё мягче
-                FileLogger.i(TAG, "Переключаемся на следующий сервер...");
+                FileLogger.i(TAG, "Переключаемся...");
                 switchToNextServer();
             }
         }
@@ -685,7 +685,7 @@ public class VpnTunnelService extends VpnService {
             return;
         }
 
-        FileLogger.i(TAG, "=== Deep Check: Запуск определения внешнего IP ===");
+        //FileLogger.i(TAG, "=== Deep Check: Запуск определения внешнего IP ===");
 
         AodOverlayService.sendStatus(this, true,
                 currentServer != null ? currentServer.host : null,
@@ -698,7 +698,7 @@ public class VpnTunnelService extends VpnService {
 
         // Если первая не удалась — сразу вторая попытка на другой сервис
         if (!success) {
-            FileLogger.w(TAG, "Первый сервис не сработал → пробуем резервный сервис");
+            //FileLogger.w(TAG, "Первый сервис не сработал → пробуем резервный сервис");
             success = tryGetIpFromService("https://freeipapi.com/json", "freeipapi.com");
         }
 
@@ -717,7 +717,7 @@ public class VpnTunnelService extends VpnService {
                     if (isRunning && bgExecutor != null && !bgExecutor.isShutdown()) {
                         bgExecutor.execute(this::doDeepCheckInternal);
                     }
-                }, 30000);
+                }, 10000);
             }
         }
     }
@@ -735,8 +735,8 @@ public class VpnTunnelService extends VpnService {
             FileLogger.i(TAG, "Deep Check → Запрос к " + serviceName + ": " + url);
 
             conn = (HttpURLConnection) url.openConnection(proxy);
-            conn.setConnectTimeout(14000);
-            conn.setReadTimeout(14000);
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
             conn.setRequestProperty("User-Agent", "VlessVPN/1.0");
             conn.setRequestProperty("Accept", "application/json");
 
@@ -983,7 +983,7 @@ public class VpnTunnelService extends VpnService {
                 }
             });
         }
-        try { latch.await(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        try { latch.await(10, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
         pool.shutdownNow();
         return success.get();
     }
@@ -993,8 +993,8 @@ public class VpnTunnelService extends VpnService {
         try {
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
             conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
             conn.setUseCaches(false);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("HEAD");

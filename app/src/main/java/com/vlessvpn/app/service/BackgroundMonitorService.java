@@ -92,6 +92,16 @@ public class BackgroundMonitorService extends Service {
         return START_NOT_STICKY;
     }
 
+    /** Запустить скачивание белого списка немедленно */
+    public static void runWhitelistDownloadNow(Context ctx) {
+        WorkManager.getInstance(ctx).enqueueUniqueWork(
+                WORK_DOWNLOAD + "_whitelist",
+                ExistingWorkPolicy.REPLACE,
+                new OneTimeWorkRequest.Builder(WhitelistDownloadWorker.class).build()
+        );
+    }
+
+
     @Override public IBinder onBind(Intent intent) { return null; }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -315,6 +325,7 @@ public class BackgroundMonitorService extends Service {
 
                     // 2. Тихо запускаем одно ядро V2Ray без TUN интерфейса
                     boolean coreStarted = V2RayManager.startSilentMultiplexInstance(ctx, multiplexConfig);
+                    Thread.sleep(1500);
 
                     if (coreStarted) {
                         ExecutorService httpPool = Executors.newFixedThreadPool(20);
@@ -379,6 +390,10 @@ public class BackgroundMonitorService extends Service {
             StatusBus.setWorking(ctx, false);
             StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total + " (✗ " + finalFail + ")");
 
+            if (finalOk == 0) {
+                FileLogger.w(W, "⚠️ 0 рабочих серверов — включаем fallback (30 серверов)");
+                enableFallbackServers(ctx, repo, allServers);
+            }
             // Обновляем кол-во серверов в AOD
             if (com.vlessvpn.app.service.AodOverlayService.isRunning
                     && com.vlessvpn.app.service.VpnTunnelService.isRunning) {
@@ -393,6 +408,38 @@ public class BackgroundMonitorService extends Service {
             return Result.success();
         }
 
+        private void enableFallbackServers(Context ctx, ServerRepository repo, List<VlessServer> allServers) {
+            // Берём первые 30 серверов с рабочим TCP ping (или любые если TCP тоже failed)
+            List<VlessServer> fallbackCandidates = new java.util.ArrayList<>();
+
+            for (VlessServer server : allServers) {
+                if (server.tcpPingMs > 0 && server.tcpPingMs < 5000) {
+                    fallbackCandidates.add(server);
+                }
+                if (fallbackCandidates.size() >= 30) break;
+            }
+
+            // Если TCP ping тоже все failed — берём просто первые 30
+            if (fallbackCandidates.isEmpty()) {
+                for (int i = 0; i < Math.min(30, allServers.size()); i++) {
+                    fallbackCandidates.add(allServers.get(i));
+                }
+            }
+
+            // Помечаем как потенциально рабочие (сбрасываем статус теста)
+            int enabled = 0;
+            for (VlessServer server : fallbackCandidates) {
+                server.trafficOk = true;  // ← Помечаем как рабочий
+                server.pingMs = server.tcpPingMs > 0 ? server.tcpPingMs : 9999;  // ← Используем TCP ping
+                server.lastTestedAt = System.currentTimeMillis();
+                repo.updateServerSync(server);
+                enabled++;
+            }
+
+            FileLogger.i(W, "✅ Fallback: включено " + enabled + " серверов из " + allServers.size());
+            StatusBus.post(ctx, "⚠️ 0 рабочих — включено " + enabled + " серверов из базы", true);
+        }
+
         /**
          * Делает HTTP GET запрос к легковесному эндпоинту через локальный HTTP прокси.
          */
@@ -403,8 +450,8 @@ public class BackgroundMonitorService extends Service {
                 // Используем gstatic (Google) - генерирует код 204 без тела. Самый быстрый способ.
                 java.net.URL url = new java.net.URL("https://google.com");
                 conn = (java.net.HttpURLConnection) url.openConnection(proxy);
-                conn.setConnectTimeout(4000);
-                conn.setReadTimeout(4000);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
                 conn.setRequestMethod("HEAD");
                 conn.setUseCaches(false);
 
@@ -448,6 +495,85 @@ public class BackgroundMonitorService extends Service {
                 i.setAction(VpnTunnelService.ACTION_DISCONNECT);
                 ctx.startService(i);
             }
+        }
+    }
+
+
+// ════════════════════════════════════════════════════════════════
+// WhitelistDownloadWorker — скачивает резервный список + сканирование
+// ════════════════════════════════════════════════════════════════
+
+    public static class WhitelistDownloadWorker extends Worker {
+        private static final String W = "WhitelistDownloadWorker";
+
+        public WhitelistDownloadWorker(Context ctx, WorkerParameters p) {
+            super(ctx, p);
+        }
+
+        @Override
+        public Result doWork() {
+            Context ctx = getApplicationContext();
+            ServerRepository repo = new ServerRepository(ctx);
+
+            if (!hasRealInternet()) {
+                StatusBus.post(ctx, "⚠️ Нет интернета — скачивание пропущено", false);
+                return Result.retry();
+            }
+
+            StatusBus.post(ctx, "📥 Скачиваем белый список...", true);
+
+            int totalDownloaded = 0;
+            for (int i = 0; i < ConfigDownloader.BACKUP_WHITELIST_URLS.length; i++) {
+                String url = ConfigDownloader.BACKUP_WHITELIST_URLS[i];
+                if (url == null || url.trim().isEmpty()) continue;
+
+                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + ConfigDownloader.BACKUP_WHITELIST_URLS.length, true);
+
+                try {
+                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
+                    if (!fresh.isEmpty()) {
+                        repo.deleteBySourceUrlSync(url.trim());
+                        repo.insertAll(fresh);
+                        totalDownloaded += fresh.size();
+                        FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
+                    }
+                } catch (Exception e) {
+                    FileLogger.w(W, "Ошибка загрузки " + url + ": " + e.getMessage());
+                }
+            }
+
+            repo.markUpdated();
+            StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Всегда запускаем сканирование после скачивания
+            // ════════════════════════════════════════════════════════════════
+            if (totalDownloaded > 0) {
+                FileLogger.i(W, "Скачано " + totalDownloaded + " серверов → запускаем сканирование");
+                StatusBus.post(ctx, "🔍 Запускаем проверку серверов...", true);
+                repo.resetAllTestTimesSync();
+                runScanNow(ctx);  // ← Используем существующий метод!
+            }
+
+            return Result.success();
+        }
+
+        private boolean hasRealInternet() {
+            ConnectivityManager cm = (ConnectivityManager)
+                    getApplicationContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            for (Network net : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+                if (caps == null) continue;
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                    try (Socket s = new Socket()) {
+                        s.connect(new InetSocketAddress("8.8.8.8", 53), 2000);
+                        return true;
+                    } catch (Exception e) { return false; }
+                }
+            }
+            return false;
         }
     }
 }

@@ -48,5 +48,17 @@
         android:title="Проверить обновление"
         android:icon="@drawable/update"
         app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_download_whitelist"
+        android:title="Скачать белый список"
+        android:icon="@drawable/white_download"
+        app:showAsAction="never" />
+
+    <!-- Существующие пункты -->
+    <item
+        android:id="@+id/action_about"
+        android:title="О приложении"
+        android:icon="@drawable/about"
+        app:showAsAction="never" />
 
 </menu>

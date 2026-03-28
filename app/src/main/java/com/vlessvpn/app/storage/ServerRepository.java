@@ -29,6 +29,7 @@ public class ServerRepository {
     private final ServerDao dao;
     private final SharedPreferences prefs;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    private static final String TAG = "ServerRepository";
 
     // Ключи SharedPreferences
     public static final String PREF_CONFIG_URLS         = "config_urls";
@@ -53,8 +54,12 @@ public class ServerRepository {
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
 
     public static final String DEFAULT_CONFIG_URL =
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt\n" +
+        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt\r\n" +
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt";
+
+    //public static final String DEFAULT_CONFIG_URL =
+    // "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt&lang=de-de\r\n" +
+    //  "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt&lang=de-de";
 
     public ServerRepository(Context context) {
         dao   = AppDatabase.getInstance(context).serverDao();

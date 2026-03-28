@@ -45,6 +45,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import com.google.gson.Gson;
 import com.vlessvpn.app.R;
 import com.vlessvpn.app.model.VlessServer;
+import com.vlessvpn.app.network.ConfigDownloader;
 import com.vlessvpn.app.network.WifiMonitor;
 import com.vlessvpn.app.service.BackgroundMonitorService;
 import com.vlessvpn.app.service.UpdateDownloadService;
@@ -610,6 +611,12 @@ public class MainActivity extends AppCompatActivity {
             checkUpdateManual();
             return true;
         }
+
+        if (id == R.id.action_download_whitelist) {
+            showDownloadWhitelistDialog();
+            return true;
+        }
+
         if (id == R.id.action_scan) {
             if (VpnTunnelService.isRunning) {
                 Toast.makeText(this, "⚠️ Отключите VPN для сканирования", Toast.LENGTH_SHORT).show();
@@ -644,7 +651,46 @@ public class MainActivity extends AppCompatActivity {
                     .show();
             return true;
         }
+
+        if (id == R.id.action_about) {
+            showAboutDialog();
+            return true;
+        }
+
         return super.onOptionsItemSelected(item);
+    }
+
+    private void showAboutDialog() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("О приложении")
+                .setMessage("DenMor-VPN\n\n" +
+                        "Авто-подключение VPN с проверкой серверов")
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+
+    private void showDownloadWhitelistDialog() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("📥 Скачать белый список")
+                .setMessage("Загрузить резервный список серверов для доступа без VPN?\n\n" +
+                        "Используйте эту функцию если основные списки не работают.\n\n" +
+                        "⚠️ Текущие серверы будут заменены!")
+                .setPositiveButton("Скачать", (dialog, which) -> {
+                    downloadBackupWhitelist();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void downloadBackupWhitelist() {
+        // if (tvStatus != null) {
+        //    tvStatus.setText("📥 Скачивание белого списка...");
+        //}
+
+        BackgroundMonitorService.runWhitelistDownloadNow(this);
+        Toast.makeText(this, "✅ Загрузка началась", Toast.LENGTH_SHORT).show();
+
     }
 
     private void showLogDialog() {

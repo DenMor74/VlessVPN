@@ -40,7 +40,7 @@ public class AodOverlayService extends AccessibilityService {
     public static boolean isRunning = false;
 
     // ═══ НАСТРОЙКИ ОТОБРАЖЕНИЯ ═══════════════════════════════════════════════
-    private static final int  POSITION_Y_DP   = -80;
+    private static final int  POSITION_Y_DP   = -60;
     private static final int  TEXT_VPN_SP      = 15;
     private static final int  TEXT_IP_SP        = 12;
     private static final int  TEXT_SERVERS_SP   = 11;

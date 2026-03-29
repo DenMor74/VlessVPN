@@ -322,6 +322,7 @@ public class VpnTunnelService extends VpnService {
                     failCount = deepCheckRetryCount = 0;
 
                     ServerTester.setVpnActive(true);
+                    RemoteLogger.getInstance(VpnTunnelService.this).start();
                     startFastVerification(s);
 
                     checkHandler.removeCallbacks(checkRunnable);
@@ -340,6 +341,7 @@ public class VpnTunnelService extends VpnService {
             @Override public void onStopped() {
                 mainHandler.post(() -> {
                     ServerTester.setVpnActive(false);
+                    RemoteLogger.getInstance(VpnTunnelService.this).stop();
                     StatusBus.done(VpnTunnelService.this, "Отключено");
                     sendVpnBroadcast(false, null, null);
                     notifyConnectionChanged(false);
@@ -524,7 +526,7 @@ public class VpnTunnelService extends VpnService {
         FileLogger.i(TAG, "Интернет: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
 
         if (!hasPhysicalInternet) {
-            FileLogger.i(TAG, "Нет интернета → пропуск проверки");
+            //FileLogger.i(TAG, "Нет интернета вне туннеля → пропускаем проверку туннеля");
             failCount = 0; // сбрасываем счётчик, т.к. проблема не в VPN
             return;
         }
@@ -570,7 +572,6 @@ public class VpnTunnelService extends VpnService {
                 switchToNextServer();
             }
         }
-        FileLogger.checkAndRotateLog();
     }
 
     private void switchToNextServer() {
@@ -970,11 +971,10 @@ public class VpnTunnelService extends VpnService {
 
     // ====================== ПРОВЕРКА ТУННЕЛЯ ======================
 
-/*    public static boolean checkTunnelProxyFastSync() {
+    public static boolean checkTunnelProxyFastSync() {
         String[] testUrls = {"http://google.ru", "http://github.com", "https://www.wikipedia.org/"};
         CountDownLatch latch = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
-        long start = System.currentTimeMillis();
         ExecutorService pool = Executors.newFixedThreadPool(testUrls.length);
 
         for (String url : testUrls) {
@@ -985,55 +985,9 @@ public class VpnTunnelService extends VpnService {
                 }
             });
         }
-        try { latch.await(12, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        try { latch.await(10, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
         pool.shutdownNow();
         return success.get();
-    }*/
-
-    public static boolean checkTunnelProxyFastSync() {
-
-        String[] testUrls = {
-                "http://google.ru",
-                "http://github.com",
-                "https://www.wikipedia.org/"
-        };
-
-        ExecutorService pool = Executors.newFixedThreadPool(testUrls.length);
-
-        AtomicBoolean first = new AtomicBoolean(false);
-        long start = System.currentTimeMillis();
-
-        for (String url : testUrls) {
-
-            pool.execute(() -> {
-
-                long timeStart = System.currentTimeMillis();
-
-                if (checkSingleUrlProxyStatic(url)) {
-
-                    long time = System.currentTimeMillis() - timeStart;
-
-                    // лог времени ответа каждого сервера
-                    // FileLogger.i(TAG, "response: " + url + " time=" + time + " ms");
-
-                    // лог только первого ответившего
-                    if (first.compareAndSet(false, true)) {
-
-                        long total = System.currentTimeMillis() - start;
-
-                        FileLogger.i(TAG, url + " -" + total + " ms");
-                    }
-                }
-            });
-        }
-
-        pool.shutdown();
-
-        try {
-            pool.awaitTermination(10, TimeUnit.SECONDS);
-        } catch (InterruptedException ignored) {}
-
-        return first.get();
     }
 
     private static boolean checkSingleUrlProxyStatic(String urlStr) {
@@ -1041,12 +995,11 @@ public class VpnTunnelService extends VpnService {
         try {
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
             conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
             conn.setUseCaches(false);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("HEAD");
-            conn.setDoInput(false);
 
             int code = conn.getResponseCode();
             return code >= 200 && code < 400;

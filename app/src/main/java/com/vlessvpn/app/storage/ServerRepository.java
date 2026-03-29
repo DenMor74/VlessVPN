@@ -49,6 +49,8 @@ public class ServerRepository {
     // Единая константа для времени обновления (устранён дубль PREF_LAST_UPDATE vs PREF_LAST_UPDATE_TIMESTAMP)
     private static final String PREF_LAST_UPDATE_TS     = "last_update_timestamp";
     private static final String PREF_LAST_SCAN_TS       = "last_scan_timestamp";
+    public  static final String PREF_REMOTE_LOG_ENABLED = "remote_log_enabled";
+    public  static final String PREF_REMOTE_LOG_URL     = "remote_log_url";
 
     public static final int DEFAULT_TOP_COUNT    = 10;
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
@@ -240,6 +242,19 @@ public class ServerRepository {
     }
 
     // ── Настройки: принудительные мобильные тесты ─────────────────────────
+
+    public boolean isRemoteLogEnabled() {
+        return prefs.getBoolean(PREF_REMOTE_LOG_ENABLED, false);
+    }
+    public void saveRemoteLogEnabled(boolean v) {
+        prefs.edit().putBoolean(PREF_REMOTE_LOG_ENABLED, v).apply();
+    }
+    public String getRemoteLogUrl() {
+        return prefs.getString(PREF_REMOTE_LOG_URL, "");
+    }
+    public void saveRemoteLogUrl(String url) {
+        prefs.edit().putString(PREF_REMOTE_LOG_URL, url.trim()).apply();
+    }
 
     public boolean isDeepCheckOnConnect() {
         return prefs.getBoolean(PREF_DEEP_CHECK_ON_CONNECT, false);

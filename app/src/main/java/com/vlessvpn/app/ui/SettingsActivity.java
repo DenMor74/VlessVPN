@@ -34,6 +34,8 @@ public class SettingsActivity extends AppCompatActivity {
 
     private Switch switchAutoConnectAfterScan;
     private Switch switchDeepCheck;
+    private Switch switchRemoteLog;
+    private android.widget.EditText etRemoteLogUrl;
 
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ: Для интервала сканирования
@@ -209,6 +211,8 @@ public class SettingsActivity extends AppCompatActivity {
         tvNightCheckInfo.setVisibility(repository.isDisableNightCheck() ? View.VISIBLE : View.GONE);
         switchAutoConnectAfterScan.setChecked(repository.isAutoConnectAfterScan());
         switchDeepCheck.setChecked(repository.isDeepCheckOnConnect());
+        if (switchRemoteLog != null) switchRemoteLog.setChecked(repository.isRemoteLogEnabled());
+        if (etRemoteLogUrl  != null) etRemoteLogUrl.setText(repository.getRemoteLogUrl());
     }
 
     private void saveSettings() {
@@ -260,6 +264,8 @@ public class SettingsActivity extends AppCompatActivity {
         repository.saveAutoConnectOnWifiDisconnect(switchAutoConnectWifi.isChecked());
         repository.saveAutoConnectAfterScan(switchAutoConnectAfterScan.isChecked());
         repository.saveDeepCheckOnConnect(switchDeepCheck.isChecked());
+        if (switchRemoteLog != null) repository.saveRemoteLogEnabled(switchRemoteLog.isChecked());
+        if (etRemoteLogUrl  != null) repository.saveRemoteLogUrl(etRemoteLogUrl.getText().toString());
         finish();
     }
 

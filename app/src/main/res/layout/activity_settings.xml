@@ -382,6 +382,44 @@
 
         </LinearLayout>
 
+
+        <!-- ===== Удалённый лог ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
+            android:background="@color/bg_card"
+            android:layout_marginTop="8dp">
+
+            <Switch
+                android:id="@+id/switch_remote_log"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📡 Удалённый лог"
+                android:textSize="14sp"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="URL для отправки JSON каждые 10 сек пока VPN активен"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:layout_marginTop="2dp"/>
+
+            <EditText
+                android:id="@+id/et_remote_log_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="https://your-server.com/vpn-log"
+                android:inputType="textUri"
+                android:textSize="12sp"
+                android:layout_marginTop="6dp"
+                android:singleLine="true"/>
+
+        </LinearLayout>
+
         <!-- ===== Кнопки ===== -->
 
         <Button

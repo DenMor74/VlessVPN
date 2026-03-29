@@ -11,7 +11,9 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -36,11 +38,16 @@ public class FileLogger {
 
     private static final String TAG = "FileLogger";
     private static final String FILE_NAME = "app_log.txt";
-    private static final long MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2 МБ
+
+    // ════════════════════════════════════════════════════════════════
+    // ← ИЗМЕНЕНО: 100 KB вместо 2 MB
+    // ════════════════════════════════════════════════════════════════
+    private static final long MAX_SIZE_BYTES = 50 * 1024; // 50 KB
+    private static final long MIN_SIZE_BYTES = 10 * 1024;  // 10 KB (остаётся после очистки)
 
     private static File logFile = null;
     private static final SimpleDateFormat sdf =
-        new SimpleDateFormat("HH:mm:ss", Locale.getDefault()); // "dd.MM HH:mm:ss"
+            new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
 
     /**
      * Инициализация. Вызывать в VpnApplication.onCreate() первой строкой.
@@ -48,24 +55,17 @@ public class FileLogger {
      */
     public static void init(Context context) {
         try {
-            // getFilesDir() = /data/data/com.vlessvpn.app/files/
-            // Доступно всегда, не требует никаких разрешений
             File dir = context.getFilesDir();
             if (!dir.exists()) dir.mkdirs();
 
             logFile = new File(dir, FILE_NAME);
 
-            // Всегда очищаем лог при запуске приложения
-            //if (logFile.exists()) {
-            //    logFile.delete();
-            //}
-
             write("════════════════════════════════════════");
             write("  VlessVPN запущен: " + sdf.format(new Date()));
             write("  Android: " + android.os.Build.VERSION.RELEASE
-                + " (API " + android.os.Build.VERSION.SDK_INT + ")");
+                    + " (API " + android.os.Build.VERSION.SDK_INT + ")");
             write("  Устройство: " + android.os.Build.MANUFACTURER
-                + " " + android.os.Build.MODEL);
+                    + " " + android.os.Build.MODEL);
             write("  Лог: " + logFile.getAbsolutePath());
             write("════════════════════════════════════════");
 
@@ -121,32 +121,30 @@ public class FileLogger {
     public static void shareLog(android.app.Activity activity) {
         if (logFile == null || !logFile.exists()) {
             android.widget.Toast.makeText(activity,
-                "Лог файл не найден", android.widget.Toast.LENGTH_SHORT).show();
+                    "Лог файл не найден", android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
         try {
-            // FileProvider нужен для Android 7+ чтобы передать файл другому приложению
             android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
-                activity,
-                activity.getPackageName() + ".provider",
-                logFile
+                    activity,
+                    activity.getPackageName() + ".provider",
+                    logFile
             );
             android.content.Intent intent = new android.content.Intent(
-                android.content.Intent.ACTION_SEND);
+                    android.content.Intent.ACTION_SEND);
             intent.setType("text/plain");
             intent.putExtra(android.content.Intent.EXTRA_STREAM, uri);
             intent.putExtra(android.content.Intent.EXTRA_SUBJECT, "VlessVPN Log");
             intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
             activity.startActivity(android.content.Intent.createChooser(
-                intent, "Отправить лог"));
+                    intent, "Отправить лог"));
         } catch (Exception e) {
             Log.e(TAG, "shareLog error: " + e.getMessage(), e);
             android.widget.Toast.makeText(activity,
-                "Ошибка: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                    "Ошибка: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
         }
     }
 
-    // ДОБАВИТЬ В FileLogger
     public static String getRecentLogs(int hours) {
         if (logFile == null || !logFile.exists()) return "Лог пуст";
 
@@ -156,18 +154,11 @@ public class FileLogger {
         try (BufferedReader br = new BufferedReader(new FileReader(logFile))) {
             String line;
             while ((line = br.readLine()) != null) {
-                // Пример строки: "03-14 20:15:22.123 I/VpnTunnelService: ..."
                 if (line.length() < 20) {
                     sb.append(line).append("\n");
                     continue;
                 }
-                // Простой парсинг времени (MM-dd HH:mm:ss)
-                String timeStr = line.substring(0, 15);
-                try {
-                    // Можно использовать более точный парсинг, но для скорости оставляем все строки
-                    // (файл маленький, а при старте приложения лог очищается)
-                    sb.append(line).append("\n");
-                } catch (Exception ignored) {}
+                sb.append(line).append("\n");
             }
         } catch (Exception e) {
             return "Ошибка чтения лога";
@@ -182,11 +173,112 @@ public class FileLogger {
         if (logFile != null && logFile.exists()) {
             if (logFile.delete()) {
                 try {
-                    // создаём пустой файл заново, чтобы логгер продолжал работать
                     logFile.createNewFile();
                 } catch (IOException ignored) {}
                 Log.i(TAG, "=== ЛОГ ПОЛНОСТЬЮ ОЧИЩЕН ===");
             }
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВЫЙ МЕТОД: Проверка и ротация лог файла
+    // ════════════════════════════════════════════════════════════════
+    /**
+     * Проверяет размер лог файла и очищает если превышает 100 KB.
+     * Вызывать во время периодической проверки (каждую минуту).
+     */
+    public static void checkAndRotateLog() {
+        if (logFile == null || !logFile.exists()) {
+            return;
+        }
+
+        long fileSize = logFile.length();
+
+        // ════════════════════════════════════════════════════════════════
+        // ← Если размер превышает 100 KB — очищаем
+        // ════════════════════════════════════════════════════════════════
+        if (fileSize > MAX_SIZE_BYTES) {
+            i(TAG, "═════════════════════");
+            i(TAG, "Очистка лог файла");
+            i(TAG, "Было: " + fmtBytes(fileSize));
+
+            rotateLogFile(MIN_SIZE_BYTES);
+
+            i(TAG, "Стало: " + fmtBytes(MIN_SIZE_BYTES));
+            i(TAG, "═════════════════════");
+        }
+    }
+
+    /**
+     * Ротация лог файла — оставляет последние N байт.
+     */
+    private static void rotateLogFile(long targetSize) {
+        try {
+            // Читаем весь файл
+            BufferedReader reader = new BufferedReader(new FileReader(logFile));
+            List<String> lines = new ArrayList<>();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                lines.add(line);
+            }
+            reader.close();
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Идём с конца и собираем строки пока не наберём targetSize
+            // ════════════════════════════════════════════════════════════════
+            List<String> lastLines = new ArrayList<>();
+            long currentSize = 0;
+
+            for (int i = lines.size() - 1; i >= 0; i--) {
+                String l = lines.get(i);
+                currentSize += l.length() + 1; // +1 для \n
+
+                if (currentSize > targetSize && lastLines.size() > 50) {
+                    break; // Останавливаемся когда набрали достаточно
+                }
+
+                lastLines.add(0, l); // Добавляем в начало чтобы сохранить порядок
+            }
+
+            // ════════════════════════════════════════════════════════════════
+            // ← Записываем обратно
+            // ════════════════════════════════════════════════════════════════
+            FileWriter writer = new FileWriter(logFile);
+            for (String l : lastLines) {
+                writer.write(l);
+                writer.write("\n");
+            }
+            writer.close();
+
+            i(TAG, "Очищено строк: " + (lines.size() - lastLines.size()) +
+                    " → осталось: " + lastLines.size());
+
+        } catch (Exception e) {
+            e(TAG, "Ошибка rotateLogFile: " + e.getMessage());
+            // ════════════════════════════════════════════════════════════════
+            // ← Fallback: просто удаляем файл если ошибка
+            // ════════════════════════════════════════════════════════════════
+            logFile.delete();
+            try {
+                logFile.createNewFile();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Форматирование размера файла
+     */
+    private static String fmtBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        return String.format("%.2f MB", bytes / (1024.0 * 1024));
+    }
+
+    /**
+     * Получить текущий размер лог файла (для отладки)
+     */
+    public static long getLogFileSize() {
+        if (logFile == null || !logFile.exists()) return 0;
+        return logFile.length();
     }
 }

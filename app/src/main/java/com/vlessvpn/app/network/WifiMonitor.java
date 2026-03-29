@@ -128,13 +128,13 @@ public class WifiMonitor {
         wifiSpecificCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(@NonNull Network network) {
-                FileLogger.i(TAG, "Wi-Fi Specific Callback: onAvailable → Wi-Fi появился");
+                //FileLogger.i(TAG, "Wi-Fi появился");
                 wifiLostPending = false;
                 handler.removeCallbacks(onWifiLostRunnable);
 
                 ServerRepository repo = new ServerRepository(appContext);
                 if (repo.isAutoConnectOnWifiDisconnect() && VpnTunnelService.isRunning) {
-                    FileLogger.i(TAG, "Wi-Fi появился (specific callback) → отключаем VPN");
+                    FileLogger.i(TAG, "Wi-Fi → отключаем VPN");
                     VpnController.getInstance(appContext).disconnect(false);
                 }
 
@@ -144,7 +144,7 @@ public class WifiMonitor {
 
             @Override
             public void onLost(@NonNull Network network) {
-                FileLogger.w(TAG, "Wi-Fi Specific Callback: onLost");
+                //FileLogger.w(TAG, "Wi-Fi Specific Callback: onLost");
                 // Здесь ничего не запускаем — отключение Wi-Fi обрабатывает default callback
             }
         };

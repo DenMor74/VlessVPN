@@ -259,7 +259,7 @@ public class V2RayManager {
                 return false;
             }
 
-            FileLogger.i(TAG, "Тихий v2ray (Мультиплекс) успешно запущен");
+            // FileLogger.i(TAG, "Тихий v2ray (Мультиплекс) успешно запущен");
             return true;
 
         } catch (Exception e) {
@@ -276,7 +276,7 @@ public class V2RayManager {
         if (silentCoreController != null) {
             try {
                 silentCoreController.stopLoop();
-                FileLogger.i(TAG, "Тихий v2ray остановлен");
+               // FileLogger.i(TAG, "Тихий v2ray остановлен");
             } catch (Exception e) {
                 FileLogger.w(TAG, "stopSilentMultiplexLoop: " + e.getMessage());
             }

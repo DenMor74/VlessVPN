@@ -139,6 +139,7 @@ public class BackgroundMonitorService extends Service {
 
             if (!hasRealInternet()) {
                 StatusBus.post(ctx, "⚠️ Нет интернета — скачивание пропущено", false);
+                FileLogger.i(W, "⚠️ Нет интернета — скачивание пропущено");
                 return Result.retry();
             }
 
@@ -169,7 +170,7 @@ public class BackgroundMonitorService extends Service {
                             if (!foundInFresh) {
                                 connectedServer.sourceUrl = url.trim();
                                 repo.insertAll(java.util.Collections.singletonList(connectedServer));
-                                FileLogger.i(W, "Текущий сервер сохранён: " + connectedServer.host);
+                               // FileLogger.i(W, "Текущий сервер сохранён: " + connectedServer.host);
                             }
                         }
 

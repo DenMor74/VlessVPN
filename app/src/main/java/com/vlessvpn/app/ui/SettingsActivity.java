@@ -171,7 +171,9 @@ public class SettingsActivity extends AppCompatActivity {
 
         switchAutoConnectWifi = findViewById(R.id.switch_auto_connect_wifi);
         switchAutoConnectAfterScan = findViewById(R.id.switch_auto_connect_after_scan);
-        switchDeepCheck = findViewById(R.id.switch_deep_check);
+        switchDeepCheck  = findViewById(R.id.switch_deep_check);
+        switchRemoteLog  = findViewById(R.id.switch_remote_log);
+        etRemoteLogUrl   = findViewById(R.id.et_remote_log_url);
     }
 
     private void loadCurrentSettings() {

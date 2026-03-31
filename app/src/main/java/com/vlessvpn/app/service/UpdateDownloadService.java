@@ -82,7 +82,7 @@ public class UpdateDownloadService extends Service {
             // ════════════════════════════════════════════════════════════════
             request.setDestinationInExternalPublicDir(
                     Environment.DIRECTORY_DOWNLOADS,
-                    "vlessvpn_update.apk"
+                    "DenMor_VPN.apk"
             );
 
             // ════════════════════════════════════════════════════════════════
@@ -108,7 +108,7 @@ public class UpdateDownloadService extends Service {
                 FileLogger.i(TAG, "Загрузка начата!");
                 FileLogger.i(TAG, "Download ID: " + downloadId);
                 FileLogger.i(TAG, "URL: " + url);
-                FileLogger.i(TAG, "Путь: /sdcard/Download/vlessvpn_update.apk");
+                FileLogger.i(TAG, "Путь: /sdcard/Download/DenMor_VPN.apk");
                 FileLogger.i(TAG, "═══════════════════════════════════════");
 
                 // Сохранить ID для отладки

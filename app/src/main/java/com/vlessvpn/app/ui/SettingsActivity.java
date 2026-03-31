@@ -35,9 +35,9 @@ public class SettingsActivity extends AppCompatActivity {
     private Switch switchAutoConnectAfterScan;
     private Switch switchDeepCheck;
     private Switch switchRemoteLog;
+    private Switch switchRemoteyandexLog;
     private android.widget.EditText etRemoteLogUrl;
-    private android.widget.EditText etRemoteLogApiKey;
-    private android.widget.EditText etRemoteLogGroupId;
+
 
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ: Для интервала сканирования
@@ -175,9 +175,9 @@ public class SettingsActivity extends AppCompatActivity {
         switchAutoConnectAfterScan = findViewById(R.id.switch_auto_connect_after_scan);
         switchDeepCheck  = findViewById(R.id.switch_deep_check);
         switchRemoteLog    = findViewById(R.id.switch_remote_log);
+        switchRemoteyandexLog    = findViewById(R.id.switch_remote_yandex_log);
         etRemoteLogUrl     = findViewById(R.id.et_remote_log_url);
-        etRemoteLogApiKey  = findViewById(R.id.et_remote_log_apikey);
-        etRemoteLogGroupId = findViewById(R.id.et_remote_log_group);
+
     }
 
     private void loadCurrentSettings() {
@@ -218,9 +218,9 @@ public class SettingsActivity extends AppCompatActivity {
         switchAutoConnectAfterScan.setChecked(repository.isAutoConnectAfterScan());
         switchDeepCheck.setChecked(repository.isDeepCheckOnConnect());
         if (switchRemoteLog    != null) switchRemoteLog.setChecked(repository.isRemoteLogEnabled());
+        if (switchRemoteyandexLog    != null) switchRemoteyandexLog.setChecked(repository.isRemoteLogYandexEnabled());
         if (etRemoteLogUrl     != null) etRemoteLogUrl.setText(repository.getRemoteLogUrl());
-        if (etRemoteLogApiKey  != null) etRemoteLogApiKey.setText(repository.getRemoteLogApiKey());
-        if (etRemoteLogGroupId != null) etRemoteLogGroupId.setText(repository.getRemoteLogGroupId());
+
     }
 
     private void saveSettings() {
@@ -272,10 +272,11 @@ public class SettingsActivity extends AppCompatActivity {
         repository.saveAutoConnectOnWifiDisconnect(switchAutoConnectWifi.isChecked());
         repository.saveAutoConnectAfterScan(switchAutoConnectAfterScan.isChecked());
         repository.saveDeepCheckOnConnect(switchDeepCheck.isChecked());
+
+        // Удаленное логирование
         if (switchRemoteLog    != null) repository.saveRemoteLogEnabled(switchRemoteLog.isChecked());
+        if (switchRemoteyandexLog    != null) repository.saveRemoteLogYandexEnabled(switchRemoteyandexLog.isChecked());
         if (etRemoteLogUrl     != null) repository.saveRemoteLogUrl(etRemoteLogUrl.getText().toString());
-        if (etRemoteLogApiKey  != null) repository.saveRemoteLogApiKey(etRemoteLogApiKey.getText().toString());
-        if (etRemoteLogGroupId != null) repository.saveRemoteLogGroupId(etRemoteLogGroupId.getText().toString());
         finish();
     }
 

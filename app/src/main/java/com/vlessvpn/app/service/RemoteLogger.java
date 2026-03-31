@@ -98,10 +98,11 @@ public class RemoteLogger {
             if (url.isEmpty()) {
                 url = remoteLogUrl;
             }
-            sendToYandexCloud(repo, device, total, working, server, lastUpd);
 
             sendToCustomUrl(url, device, total, working, server, lastUpd);
-
+           if( repo.isRemoteLogYandexEnabled()){
+               sendToYandexCloud(repo, device, total, working, server, lastUpd);
+           }
 
         } catch (Exception e) {
             FileLogger.w(TAG, "tick error: " + e.getMessage());

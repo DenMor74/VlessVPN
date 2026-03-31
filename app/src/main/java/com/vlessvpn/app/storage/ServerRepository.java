@@ -50,9 +50,8 @@ public class ServerRepository {
     private static final String PREF_LAST_UPDATE_TS     = "last_update_timestamp";
     private static final String PREF_LAST_SCAN_TS       = "last_scan_timestamp";
     public  static final String PREF_REMOTE_LOG_ENABLED = "remote_log_enabled";
+    public  static final String PREF_REMOTE_YANDEX_LOG_ENABLED = "remote_yandex_log_enabled";
     public  static final String PREF_REMOTE_LOG_URL     = "remote_log_url";
-    public  static final String PREF_REMOTE_LOG_APIKEY  = "remote_log_apikey";
-    public  static final String PREF_REMOTE_LOG_GROUP   = "remote_log_group";
 
     public static final int DEFAULT_TOP_COUNT    = 10;
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
@@ -300,6 +299,15 @@ public class ServerRepository {
     public boolean isRemoteLogEnabled() {
         return prefs.getBoolean(PREF_REMOTE_LOG_ENABLED, false);
     }
+
+    public boolean isRemoteLogYandexEnabled() {
+        return prefs.getBoolean(PREF_REMOTE_YANDEX_LOG_ENABLED, false);
+    }
+
+    public void saveRemoteLogYandexEnabled(boolean v) {
+        prefs.edit().putBoolean(PREF_REMOTE_YANDEX_LOG_ENABLED, v).apply();
+    }
+
     public void saveRemoteLogEnabled(boolean v) {
         prefs.edit().putBoolean(PREF_REMOTE_LOG_ENABLED, v).apply();
     }
@@ -309,19 +317,7 @@ public class ServerRepository {
     public void saveRemoteLogUrl(String url) {
         prefs.edit().putString(PREF_REMOTE_LOG_URL, url.trim()).apply();
     }
-    public String getRemoteLogApiKey() {
-        return prefs.getString(PREF_REMOTE_LOG_APIKEY, "");
-    }
-    public void saveRemoteLogApiKey(String key) {
-        prefs.edit().putString(PREF_REMOTE_LOG_APIKEY, key.trim()).apply();
-    }
-    // public String getRemoteLogGroupId() {
-    //    return prefs.getString(PREF_REMOTE_LOG_GROUP, "");
-   // }
 
-    public void saveRemoteLogGroupId(String id) {
-        prefs.edit().putString(PREF_REMOTE_LOG_GROUP, id.trim()).apply();
-    }
 
     public boolean isDeepCheckOnConnect() {
         return prefs.getBoolean(PREF_DEEP_CHECK_ON_CONNECT, false);

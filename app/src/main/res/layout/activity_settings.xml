@@ -408,41 +408,6 @@
                 android:textColor="#888888"
                 android:layout_marginTop="2dp"/>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Yandex Cloud: API Key и Log Group ID (или кастомный URL ниже)"
-                android:textSize="11sp"
-                android:textColor="#888888"
-                android:layout_marginTop="6dp"/>
-
-            <EditText
-                android:id="@+id/et_remote_log_apikey"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="API Key: AQVN..."
-                android:inputType="textVisiblePassword"
-                android:textSize="12sp"
-                android:layout_marginTop="4dp"
-                android:singleLine="true"/>
-
-            <EditText
-                android:id="@+id/et_remote_log_group"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Log Group ID: e23u2vn449av..."
-                android:textSize="12sp"
-                android:layout_marginTop="4dp"
-                android:singleLine="true"/>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="— или кастомный HTTP endpoint —"
-                android:textSize="11sp"
-                android:textColor="#888888"
-                android:gravity="center"
-                android:layout_marginTop="8dp"/>
 
             <EditText
                 android:id="@+id/et_remote_log_url"
@@ -453,6 +418,13 @@
                 android:textSize="12sp"
                 android:layout_marginTop="4dp"
                 android:singleLine="true"/>
+
+            <Switch
+                android:id="@+id/switch_remote_yandex_log"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Отправлять в Yandex Cloud"
+                android:textSize="14sp"/>
 
         </LinearLayout>
 
@@ -466,6 +438,7 @@
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:layout_marginHorizontal="10dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/bg_circle_button"/>
     </LinearLayout>
 </ScrollView>

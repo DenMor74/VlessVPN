@@ -51,6 +51,8 @@ public class ServerRepository {
     private static final String PREF_LAST_SCAN_TS       = "last_scan_timestamp";
     public  static final String PREF_REMOTE_LOG_ENABLED = "remote_log_enabled";
     public  static final String PREF_REMOTE_LOG_URL     = "remote_log_url";
+    public  static final String PREF_REMOTE_LOG_APIKEY  = "remote_log_apikey";
+    public  static final String PREF_REMOTE_LOG_GROUP   = "remote_log_group";
 
     public static final int DEFAULT_TOP_COUNT    = 10;
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
@@ -66,6 +68,58 @@ public class ServerRepository {
     public ServerRepository(Context context) {
         dao   = AppDatabase.getInstance(context).serverDao();
         prefs = PreferenceManager.getDefaultSharedPreferences(context);
+    }
+
+
+    // ---------------- YC LOG GROUP ----------------
+
+    public String getRemoteLogGroupId() {
+        return "e23jflosv9phmehl5fcs";   // <-- вставь свой logGroupId
+    }
+
+    // ---------------- SERVICE ACCOUNT ----------------
+
+    public String getYcServiceAccountId() {
+        return "ajepbp52cgkrmcg6tfh4";     // <-- service_account_id из JSON
+    }
+
+    // ---------------- KEY ID ----------------
+
+    public String getYcKeyId() {
+        return "ajefuqpvvdrm39bu6euj";      // <-- key_id из JSON
+    }
+
+    // ---------------- PRIVATE KEY ----------------
+
+    public String getYcPrivateKey() {
+        return "-----BEGIN PRIVATE KEY-----\n" +
+                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDmHMVqa3fw5mlG\n" +
+                "duEdG8ruSRvIgVvPHB5CLDGBlOU3E7bHLqahZwZtICDX9wHM4QjEEGrLyi75mmq4\n" +
+                "hy3czk+gyJFGk6yo1+L5BscvuiYu5hmTVJeo8qLBY3NECynokrrRlwjl4VdM/S7M\n" +
+                "N/7yyea+oUDWTfYEFyQMX40Fyp5qiRR8kFbSBfa+7DrC0pJC8joTTxwIXnpE3qBp\n" +
+                "ddcW+3s45QYEmtH87fNSTd4CbWp3c3Pfe+4uICSme8a3mkUQ+L5CftvUI4NWAGdV\n" +
+                "VXEzEZj5HquLuUD66eEXXxs3vw1zA7SlycC+FC+FIOdP7KcPxEi3iHLOBky6QXL+\n" +
+                "wQ9hjaCjAgMBAAECggEAbY83QyLl2VGqv/zr03MfHHK8gqtsbeCCW5k0/PBKbf25\n" +
+                "4X3JokEuIxjP6mNVfRmLleYHIv4hfX/S3gamhGHKMdAsswCujTk0fMKIZaXodh3i\n" +
+                "AW6eQrc7XH4gLD5wdqYdwpp5hxHSAfrtpBfpD+mnLg4Sk7ZMssfdxvJbb214HVo9\n" +
+                "wuqFY1cnrzZ9jTfR6FMYxJ402hd8jUkEFqQCEm9Ec66fKgi4SV3i/bb2/QeCWZiJ\n" +
+                "2dhK2vznFvnRYL25yGdFcrKNjj2bZdx4PJPJ8eulFB+JZ45HLrtgs48do9+JnAYj\n" +
+                "eEUJCtwoE2YusiwR608tqawRNZlGjr7oW/0V/5F00QKBgQDx6pKEz8CP57w3PbUQ\n" +
+                "IOgb3mj9LDFJYTcnE8ZwJSZPvj8fqMJ8SyCRtjoxXiHlScyP+67bRu8dkze9c+Ea\n" +
+                "93cGRRwDOGOJ+vVsh2TSQVLvEIhQ7SLgt5v6SPxYMgrX7PKSjjXo9B/Ac6sqS86R\n" +
+                "YRb2P0BXb1wMMD/cgkHEg+1lWQKBgQDzgkchv3u7DAFypnAwzVqzQ/Ik7ce/Szq0\n" +
+                "uo6FgI+QrhaxwV/s29kcTXzjpuRGEdcSE779THv5QH8+dxCxN0FVD+c+5MJMgLXI\n" +
+                "+I2U/q2dducneQ4e2YE3VyuHT6ojbbO9N2XjSs9/moT9S075PjP0oT1tA49hsVFM\n" +
+                "4tOI4poqWwKBgQCAKWW2NtotYvezzF1ATi6plQrKFb+GwJoXecKHZycE2CVZAG8I\n" +
+                "qkR27bOms9gBQTe+j/fy84F6iaPeGqYHQ1MrXzGYAye40dtzw8cGHNVzEa8mMHtp\n" +
+                "0dwwnLoTf29/NWjNe8nTwIGR07W6kq69FlKz4o6Tw8tgKa+rgtaU5c+/AQKBgALv\n" +
+                "cRgRDNbGYEYXh4avEwbSLNsRGrVNnNmM3ibx08k0sAVYhWV/iPB0Zqr/2gSWNnd7\n" +
+                "UXQQNfZdNqt0F/lq5xi1Zl41t7ngW1Ce3mYLY+BgDI1HQkpQ6OPX4yhwZ2ah7ea8\n" +
+                "AjhpMHMjU7MR81PB0jKCtxDXWCUfVBGPMmmWAbG9AoGASIef9QmYtQlSE7+zBZ67\n" +
+                "UKqIYzzy2xf1tbbWsHBhDx1mDgMpkCCXEskVdt3FAww34EscVSQKwvJWsE0yNLdP\n" +
+                "RdtgLaZju5XpWkJFpZtoeEEylYNjpO/kL8tEG3AUXaIBWUn8R3TB7y8xKMGbAnqr\n" +
+                "9CZcb5seVW6d/2zWZa+yyfM=" +
+                "-----END PRIVATE KEY-----";
     }
 
     // ── Чтение серверов ────────────────────────────────────────────────────
@@ -254,6 +308,19 @@ public class ServerRepository {
     }
     public void saveRemoteLogUrl(String url) {
         prefs.edit().putString(PREF_REMOTE_LOG_URL, url.trim()).apply();
+    }
+    public String getRemoteLogApiKey() {
+        return prefs.getString(PREF_REMOTE_LOG_APIKEY, "");
+    }
+    public void saveRemoteLogApiKey(String key) {
+        prefs.edit().putString(PREF_REMOTE_LOG_APIKEY, key.trim()).apply();
+    }
+    // public String getRemoteLogGroupId() {
+    //    return prefs.getString(PREF_REMOTE_LOG_GROUP, "");
+   // }
+
+    public void saveRemoteLogGroupId(String id) {
+        prefs.edit().putString(PREF_REMOTE_LOG_GROUP, id.trim()).apply();
     }
 
     public boolean isDeepCheckOnConnect() {

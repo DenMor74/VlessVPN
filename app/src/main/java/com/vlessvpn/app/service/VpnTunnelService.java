@@ -311,7 +311,14 @@ public class VpnTunnelService extends VpnService {
         v2RayManager = new V2RayManager(this, new V2RayManager.StatusCallback() {
             @Override public void onStarted(VlessServer s) {
                 startHev();
-                bgExecutor.execute(() -> resetTunBase(VpnTunnelService.this));
+                // Пересоздаём bgExecutor если был shutdown (гонка при переключении)
+                synchronized (VpnTunnelService.this) {
+                    if (bgExecutor == null || bgExecutor.isShutdown()) {
+                        bgExecutor = Executors.newSingleThreadExecutor();
+                        FileLogger.w(TAG, "bgExecutor пересоздан в onStarted");
+                    }
+                    bgExecutor.execute(() -> resetTunBase(VpnTunnelService.this));
+                }
 
                 mainHandler.post(() -> {
                     updateNotification("Подключено", s.host);
@@ -390,6 +397,12 @@ public class VpnTunnelService extends VpnService {
      */
     private void startFastVerification(VlessServer server) {
         FileLogger.i(TAG, "=== startFastVerification === Сервер: " + server.host);
+
+        // Пересоздаём bgExecutor если был shutdown
+        synchronized (this) {
+            if (bgExecutor == null || bgExecutor.isShutdown())
+                bgExecutor = Executors.newSingleThreadExecutor();
+        }
 
         // Сбрасываем старые данные, передаём кол-во серверов сразу
         bgExecutor.execute(() -> {
@@ -995,8 +1008,8 @@ public class VpnTunnelService extends VpnService {
         try {
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
             conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
             conn.setUseCaches(false);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("HEAD");

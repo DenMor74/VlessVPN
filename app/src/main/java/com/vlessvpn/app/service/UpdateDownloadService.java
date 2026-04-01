@@ -132,7 +132,7 @@ public class UpdateDownloadService extends Service {
                 PendingIntent.FLAG_IMMUTABLE);
 
         android.app.Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_vpn_notify)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setContentIntent(pi)

@@ -48,7 +48,7 @@ public class BackgroundMonitorService extends Service {
     private static final String TAG            = "BackgroundMonitor";
     private static final String WORK_DOWNLOAD  = "server_download";
     private static final String WORK_SCAN      = "server_scan";
-
+    private static long lastFinalLogTime = 0;   // защита от двойного финального лога
     // ── Планировщики ────────────────────────────────────────────────────────
 
     public static void scheduleDownload(Context ctx, int intervalHours) {
@@ -212,6 +212,10 @@ public class BackgroundMonitorService extends Service {
                 FileLogger.w(W, "Ничего не скачано — сканирование пропущено");
                 StatusBus.done(ctx, "⚠️ Нет новых серверов");
             }
+            // ← НОВОЕ: показываем реальное количество после дедупликации
+            int realInDB = repo.getAllServersSync().size();
+            FileLogger.i(W, "✅ Серверов после дедупликации: " + realInDB
+                    + " (из " + totalDownloaded + " скачанных — дубли: " + (totalDownloaded - realInDB) + ")");
 
             return Result.success();
         }
@@ -403,26 +407,45 @@ public class BackgroundMonitorService extends Service {
 
             repo.markScanned();
 
-            int finalOk = ok.get();
-            int finalFail = total - finalOk;
-            StatusBus.setWorking(ctx, false);
-            StatusBus.done(ctx, "✅ " + finalOk + " рабочих из " + total + " (✗ " + finalFail + ")");
+            // ================================================
+            // ← ИСПРАВЛЕННЫЙ ФИНАЛЬНЫЙ ИТОГ (работает при батчах и двойном запуске)
+            // ================================================
+            int realTotal   = repo.getAllServersSync().size();   // реальное количество ВСЕХ серверов в БД
+            int realWorking = repo.getWorkingCount();            // реальное количество рабочих
 
-            if (finalOk == 0) {
-                FileLogger.w(W, "⚠️ 0 рабочих серверов — включаем fallback (30 серверов)");
+            // Защита от двойного логирования (если ScanWorker запустился дважды подряд)
+            long now = System.currentTimeMillis();
+            if (now - lastFinalLogTime > 8000) {   // печатаем только один раз за 8 секунд
+                lastFinalLogTime = now;
+
+                StatusBus.setWorking(ctx, false);
+                StatusBus.done(ctx, realWorking + " рабочих из " + realTotal + " (FAIL " + (realTotal - realWorking) + ")");
+
+                FileLogger.i(W, "╔══════════════════════════════════════════════╗");
+                FileLogger.i(W, "║          ИТОГОВАЯ СТАТИСТИКА СКАНИРОВАНИЯ          ║");
+                FileLogger.i(W, "╟──────────────────────────────────────────────╢");
+                FileLogger.i(W, "║ Всего серверов в базе данных   : " + String.format("%4d", realTotal)   + "                ║");
+                FileLogger.i(W, "║ Рабочих серверов               : " + String.format("%4d", realWorking) + "                ║");
+                FileLogger.i(W, "║ Не прошло тест                 : " + String.format("%4d", realTotal - realWorking) + "                ║");
+                FileLogger.i(W, "╚══════════════════════════════════════════════╝");
+            }
+
+            if (realWorking == 0) {
+                FileLogger.w(W, "0 рабочих серверов — включаем fallback (30 серверов)");
                 enableFallbackServers(ctx, repo, allServers);
             }
-            // Обновляем кол-во серверов в AOD
+
+            // Обновляем AOD
             if (com.vlessvpn.app.service.AodOverlayService.isRunning
                     && com.vlessvpn.app.service.VpnTunnelService.isRunning) {
                 String host = com.vlessvpn.app.service.VpnTunnelService.getCurrentServer() != null
                         ? com.vlessvpn.app.service.VpnTunnelService.getCurrentServer().host : null;
                 com.vlessvpn.app.service.AodOverlayService.sendStatus(
-                        ctx, true, host, null, finalOk + "/" + total);
+                        ctx, true, host, null, realWorking + "/" + realTotal);
             }
 
             checkAutoConnect(ctx, repo);
-            FileLogger.i(W, "=== Завершено: " + finalOk + "/" + total + " ===");
+
             return Result.success();
         }
 

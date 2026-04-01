@@ -15,6 +15,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import java.nio.charset.StandardCharsets;
+
 
 /**
  * ConfigDownloader — загружает и парсит списки VLESS серверов.
@@ -25,22 +29,6 @@ public class ConfigDownloader {
     private static final int TIMEOUT_MS = 8_000;
 
     // ════════════════════════════════════════════════════════════════
-    // ← ОСНОВНЫЕ СПИСКИ (существующие)
-    // ════════════════════════════════════════════════════════════════
-    public static final String[] MAIN_CONFIG_URLS = {
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
-            "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
-    };
-
-    // ════════════════════════════════════════════════════════════════
-    // ← РЕЗЕРВНЫЙ БЕЛЫЙ СПИСОК (для критических ситуаций)
-    // ════════════════════════════════════════════════════════════════
-    public static final String[] BACKUP_WHITELIST_URLS = {
-            "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt&lang=de-de",
-            "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt&lang=de-de"
-    };
-
-    // ════════════════════════════════════════════════════════════════
     // ← Интерфейс для callbacks (для UI прогресса)
     // ════════════════════════════════════════════════════════════════
     public interface DownloadCallback {
@@ -49,23 +37,6 @@ public class ConfigDownloader {
         void onProgress(int progress, int total);
     }
 
-    /**
-     * Скачать основные списки (существующий метод)
-     */
-    //public static void downloadMainConfigs(Context context, DownloadCallback callback) {
-    //    downloadAllAsync(context, MAIN_CONFIG_URLS, callback);
-    //}
-
-    // ════════════════════════════════════════════════════════════════
-    // ← НОВЫЙ МЕТОД: Скачать резервный белый список
-    // ════════════════════════════════════════════════════════════════
-/*    public static void downloadBackupWhitelist(Context context, DownloadCallback callback) {
-        FileLogger.i(TAG, "═══════════════════════════════════════");
-        FileLogger.i(TAG, "Скачивание резервного белого списка...");
-        FileLogger.i(TAG, "═══════════════════════════════════════");
-
-        downloadAllAsync(context, BACKUP_WHITELIST_URLS, callback);
-    }*/
 
     /**
      * Асинхронная загрузка всех URL с прогрессом
@@ -193,5 +164,74 @@ public class ConfigDownloader {
         }
         FileLogger.i(TAG, "Итого загружено серверов: " + allServers.size());
         return allServers;
+    }
+
+    // ===================================================================
+    // ← ДОПОЛНЕНИЕ: sevcator vl.txt + фильтр только sni=*.ru
+    // ===================================================================
+
+    /**
+     * Скачивает https://raw.githubusercontent.com/sevcator/.../vl.txt
+     * и оставляет ТОЛЬКО строки, где sni содержит ".ru"
+     * Возвращает уже распарсенные VlessServer (готовые к вставке в БД)
+     */
+    public List<VlessServer> downloadSevcatorRuFiltered(Context context, String sourceUrlForDB) {
+        String urlString = "https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vl.txt";
+        List<VlessServer> servers = new ArrayList<>();
+
+        try {
+            URL url = new URL(urlString);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(TIMEOUT_MS);
+            connection.setReadTimeout(TIMEOUT_MS);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                FileLogger.w(TAG, "Sevcator RU: HTTP " + connection.getResponseCode());
+                return servers;
+            }
+
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
+
+            // Регулярка для поиска sni=...
+            Pattern pattern = Pattern.compile("sni=([^&#]+)");
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || !line.startsWith("vless://")) continue;
+
+                // Проверяем наличие sni=*.ru
+                Matcher matcher = pattern.matcher(line);
+                boolean hasRuSNI = false;
+                while (matcher.find()) {
+                    String sniValue = matcher.group(1).toLowerCase();
+                    if (sniValue.contains(".ru")) {
+                        hasRuSNI = true;
+                        break;
+                    }
+                }
+
+                if (hasRuSNI) {
+                    VlessServer server = VlessServer.parse(line);
+                    if (server != null) {
+                        server.sourceUrl = sourceUrlForDB;   // чтобы можно было удалять по этому URL
+                        servers.add(server);
+                    }
+                }
+            }
+
+            reader.close();
+            connection.disconnect();
+
+            FileLogger.i(TAG, "Sevcator RU: отфильтровано " + servers.size() + " серверов с .ru SNI");
+
+        } catch (Exception e) {
+            FileLogger.e(TAG, "Ошибка скачивания/фильтра sevcator RU", e);
+        }
+
+        return servers;
     }
 }

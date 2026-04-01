@@ -175,13 +175,30 @@ public class BackgroundMonitorService extends Service {
                         }
 
                         totalDownloaded += fresh.size();
+
                         FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
                     }
                 } catch (Exception e) {
                     FileLogger.w(W, "Ошибка загрузки " + url + ": " + e.getMessage());
                 }
             }
+            // ════════════════════════════════════════════════════════════════
+            // ← ДОПОЛНЕНИЕ К ТВОИМ ЛИСТАМ: sevcator vl.txt (только .ru SNI)
+            // ════════════════════════════════════════════════════════════════
+            try {
+                String sevcatorSourceUrl = "https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vl.txt";
+                List<VlessServer> ruFiltered = new ConfigDownloader().downloadSevcatorRuFiltered(ctx, sevcatorSourceUrl);
 
+                if (!ruFiltered.isEmpty()) {
+                    repo.deleteBySourceUrlSync(sevcatorSourceUrl);   // обновляем старые
+                    repo.insertAll(ruFiltered);
+
+                    totalDownloaded += ruFiltered.size();
+                    FileLogger.i(W, "✅ Добавлено " + ruFiltered.size() + " серверов .ru SNI из sevcator");
+                }
+            } catch (Exception e) {
+                FileLogger.w(W, "Ошибка sevcator RU фильтра: " + e.getMessage());
+            }
             repo.markUpdated();
             StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
 
@@ -521,17 +538,32 @@ public class BackgroundMonitorService extends Service {
                 return Result.retry();
             }
 
-            StatusBus.post(ctx, "📥 Скачиваем белый список...", true);
+            StatusBus.post(ctx, "📥 Скачиваем список через белый сервер...", true);
+
+            // ════════════════════════════════════════════════════════════════
+            // ← НОВОЕ: Берём URL из настроек (как основные списки)
+            // ════════════════════════════════════════════════════════════════
+            String[] configUrls = repo.getConfigUrls();
 
             int totalDownloaded = 0;
-            for (int i = 0; i < ConfigDownloader.BACKUP_WHITELIST_URLS.length; i++) {
-                String url = ConfigDownloader.BACKUP_WHITELIST_URLS[i];
+            for (int i = 0; i < configUrls.length; i++) {
+                String url = configUrls[i];
                 if (url == null || url.trim().isEmpty()) continue;
 
-                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + ConfigDownloader.BACKUP_WHITELIST_URLS.length, true);
+                // ════════════════════════════════════════════════════════════════
+                // ← НОВОЕ: Оборачиваем URL в Yandex translate proxy
+                // ════════════════════════════════════════════════════════════════
+                String wrappedUrl = wrapWithYandexTranslate(url);
+                // FileLogger.i(W, "Оригинал: " + url);
+                //FileLogger.i(W, "Через Yandex: " + wrappedUrl);
+
+                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + configUrls.length, true);
 
                 try {
-                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
+                    // ════════════════════════════════════════════════════════════════
+                    // ← Скачиваем через обёрнутый URL
+                    // ════════════════════════════════════════════════════════════════
+                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, wrappedUrl, url.trim());
                     if (!fresh.isEmpty()) {
                         repo.deleteBySourceUrlSync(url.trim());
                         repo.insertAll(fresh);
@@ -553,10 +585,28 @@ public class BackgroundMonitorService extends Service {
                 FileLogger.i(W, "Скачано " + totalDownloaded + " серверов → запускаем сканирование");
                 StatusBus.post(ctx, "🔍 Запускаем проверку серверов...", true);
                 repo.resetAllTestTimesSync();
-                runScanNow(ctx);  // ← Используем существующий метод!
+                runScanNow(ctx);
             }
 
             return Result.success();
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // ← НОВЫЙ МЕТОД: Оборачивает URL в Yandex translate proxy
+        // ════════════════════════════════════════════════════════════════
+        private String wrapWithYandexTranslate(String originalUrl) {
+            try {
+                // ════════════════════════════════════════════════════════════════
+                // ← Очищаем URL от всех лишних символов перед кодированием
+                // ════════════════════════════════════════════════════════════════
+                String cleanUrl = originalUrl.trim().replaceAll("\\r?\\n", "").replaceAll("\\s+", "");
+
+                String encodedUrl = java.net.URLEncoder.encode(cleanUrl, "UTF-8");
+                return "https://translate.yandex.ru/translate?url=" + encodedUrl + "&lang=de-de";
+            } catch (Exception e) {
+                FileLogger.e(W, "Ошибка кодирования URL: " + e.getMessage());
+                return originalUrl;
+            }
         }
 
         private boolean hasRealInternet() {

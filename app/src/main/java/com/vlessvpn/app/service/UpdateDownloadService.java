@@ -67,7 +67,7 @@ public class UpdateDownloadService extends Service {
             FileLogger.i(TAG, "downloadApk: " + url);
 
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setTitle("VlessVPN Update");
+            request.setTitle("DenMor_VPN Update");
             request.setDescription("Загрузка новой версии...");
 
             // ════════════════════════════════════════════════════════════════

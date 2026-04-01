@@ -118,6 +118,15 @@ public class VlessServer {
             int atIdx = body.indexOf('@');
             if (atIdx < 0) return null;
             s.uuid = body.substring(0, atIdx);
+
+            // ════════════════════════════════════════════════════════════════
+            // ← НОВОЕ: Проверка корректности UUID
+            // ════════════════════════════════════════════════════════════════
+            if (!isValidUuid(s.uuid)) {
+                FileLogger.w("VlessServer", "Неверный UUID: " + s.uuid + " в " + uri.substring(0, Math.min(50, uri.length())));
+                return null;
+            }
+
             body = body.substring(atIdx + 1);
 
             // HOST:PORT
@@ -127,11 +136,15 @@ public class VlessServer {
             if (hostPort.startsWith("[")) {
                 int bracketEnd = hostPort.indexOf(']');
                 s.host = hostPort.substring(1, bracketEnd);
-                s.port = Integer.parseInt(hostPort.substring(bracketEnd + 2));
+                String portStr = hostPort.substring(bracketEnd + 2);
+                portStr = portStr.replaceAll("[^0-9]", "").trim();
+                s.port = Integer.parseInt(portStr);
             } else {
                 int colonIdx = hostPort.lastIndexOf(':');
                 s.host = hostPort.substring(0, colonIdx);
-                s.port = Integer.parseInt(hostPort.substring(colonIdx + 1));
+                String portStr = hostPort.substring(colonIdx + 1);
+                portStr = portStr.replaceAll("[^0-9]", "").trim();
+                s.port = Integer.parseInt(portStr);
             }
 
             // QUERY PARAMS
@@ -159,15 +172,6 @@ public class VlessServer {
 
             s.id = s.uuid + "@" + s.host + ":" + s.port;
 
-            // ════════════════════════════════════════════════════════════════
-            // ← ИСПРАВЛЕНО: НЕ фильтруем xhttp! Xray v26 поддерживает
-            // ════════════════════════════════════════════════════════════════
-            // xhttp теперь поддерживается в Xray-core 1.8.0+ (v26.x)
-            // Оставляем сервера, но логируем для отладки
-            if ("xhttp".equals(s.networkType)) {
-                //FileLogger.d("VlessServer", "xhttp сервер добавлен: " + s.host + ":" + s.port);
-            }
-
             if (s.remark.isEmpty()) {
                 s.remark = s.host + ":" + s.port;
             }
@@ -178,6 +182,34 @@ public class VlessServer {
         }
 
         return s;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВЫЙ МЕТОД: Проверка корректности UUID
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Проверяет что UUID имеет правильный формат (8-4-4-4-12)
+     * Пример: 4b07f679-1fc8-4184-92c9-b87a23d2e700
+     */
+    private static boolean isValidUuid(String uuid) {
+        if (uuid == null || uuid.isEmpty()) return false;
+
+        // UUID формат: 8-4-4-4-12 (36 символов с дефисами)
+        if (uuid.length() != 36) return false;
+
+        // Проверяем что нет @ или : (значит парсинг прошёл правильно)
+        if (uuid.contains("@") || uuid.contains(":") || uuid.contains("/")) {
+            return false;
+        }
+
+        // Проверяем позиции дефисов
+        if (uuid.charAt(8) != '-' || uuid.charAt(13) != '-' ||
+                uuid.charAt(18) != '-' || uuid.charAt(23) != '-') {
+            return false;
+        }
+
+        return true;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -208,7 +240,6 @@ public class VlessServer {
             s.id = s.uuid + "@" + s.host + ":" + s.port;
             s.rawUri = uri;
 
-            //FileLogger.d("VlessServer", "VMess распарсен: " + s.remark);
             return s;
 
         } catch (Exception e) {
@@ -220,10 +251,6 @@ public class VlessServer {
     // ════════════════════════════════════════════════════════════════
     // ← НОВОЕ: Парсер Trojan
     // ════════════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════════════
-// ← НОВОЕ: Парсер Trojan
-// ════════════════════════════════════════════════════════════════
 
     private static VlessServer parseTrojan(String uri) {
         try {
@@ -251,7 +278,9 @@ public class VlessServer {
 
             int colonIdx = hostPort.lastIndexOf(':');
             s.host = hostPort.substring(0, colonIdx);
-            s.port = Integer.parseInt(hostPort.substring(colonIdx + 1));
+            String portStr = hostPort.substring(colonIdx + 1);
+            portStr = portStr.replaceAll("[^0-9]", "").trim();
+            s.port = Integer.parseInt(portStr);
 
             // ════════════════════════════════════════════════════════════════
             // ← ИСПРАВЛЕНО: Объявляем params перед if
@@ -263,10 +292,10 @@ public class VlessServer {
                 s.sni = params.getOrDefault("sni", s.host);
                 s.alpn = params.getOrDefault("alpn", "");
                 s.fp = params.getOrDefault("fp", "chrome");
+                s.networkType = params.getOrDefault("type", "tcp");
             }
 
             s.security = "tls";  // Trojan всегда использует TLS
-            s.networkType = params.getOrDefault("type", "tcp");  // ← Теперь работает!
 
             s.id = s.uuid + "@" + s.host + ":" + s.port;
             s.rawUri = uri;
@@ -275,7 +304,6 @@ public class VlessServer {
                 s.remark = s.host + ":" + s.port;
             }
 
-            //FileLogger.d("VlessServer", "Trojan распарсен: " + s.remark);
             return s;
 
         } catch (Exception e) {

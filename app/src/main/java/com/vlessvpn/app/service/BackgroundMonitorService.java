@@ -381,7 +381,9 @@ public class BackgroundMonitorService extends Service {
                     });
                 }
 
-                pingLatch.await(30, TimeUnit.SECONDS); // Жесткий таймаут на пинг
+                // Таймаут пропорционален размеру — минимум 30с, +1с на каждые 10 серверов
+                long pingTimeout = Math.max(30, total / 10 + 10);
+                pingLatch.await(pingTimeout, TimeUnit.SECONDS);
                 pingPool.shutdownNow();
 
                 FileLogger.i(W, "Прошли TCP Ping: " + survivedPing.size() + " из " + total);
@@ -438,7 +440,9 @@ public class BackgroundMonitorService extends Service {
                             });
                         }
 
-                        httpLatch.await(60, TimeUnit.SECONDS);
+                        // Таймаут этапа 2: минимум 60с, +1с на каждый сервер
+                        long httpTimeout = Math.max(60, survivedPing.size());
+                        httpLatch.await(httpTimeout, TimeUnit.SECONDS);
                         httpPool.shutdownNow();
 
                         // 4. Убиваем ядро
@@ -537,17 +541,34 @@ public class BackgroundMonitorService extends Service {
         private boolean testHttpThroughProxy(int proxyPort) {
             java.net.HttpURLConnection conn = null;
             try {
-                java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", proxyPort));
-                // Используем gstatic (Google) - генерирует код 204 без тела. Самый быстрый способ.
-                java.net.URL url = new java.net.URL("https://google.com");
-                conn = (java.net.HttpURLConnection) url.openConnection(proxy);
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-                conn.setRequestMethod("HEAD");
-                conn.setUseCaches(false);
+                // HTTP proxy поддерживает только HTTP URLs напрямую (не HTTPS без CONNECT)
+                // Используем несколько лёгких HTTP endpoint — первый успешный = сервер рабочий
+                String[] testUrls = {
+                    "http://cp.cloudflare.com/generate_204",     // 204 без тела — мгновенно
+                    "http://connectivitycheck.gstatic.com/generate_204",
+                    "http://www.msftconnecttest.com/connecttest.txt"
+                };
+                java.net.Proxy proxy = new java.net.Proxy(
+                        java.net.Proxy.Type.HTTP,
+                        new java.net.InetSocketAddress("127.0.0.1", proxyPort));
 
-                int code = conn.getResponseCode();
-                return code >= 200 && code < 400; // Успешно прошел!
+                for (String urlStr : testUrls) {
+                    try {
+                        conn = (java.net.HttpURLConnection)
+                                new java.net.URL(urlStr).openConnection(proxy);
+                        conn.setConnectTimeout(4000);
+                        conn.setReadTimeout(4000);
+                        conn.setRequestMethod("GET");
+                        conn.setUseCaches(false);
+                        conn.setInstanceFollowRedirects(false);
+                        int code = conn.getResponseCode();
+                        conn.disconnect(); conn = null;
+                        if (code >= 200 && code < 400) return true;
+                    } catch (Exception e) {
+                        if (conn != null) { conn.disconnect(); conn = null; }
+                    }
+                }
+                return false;
 
             } catch (Exception e) {
                 return false;

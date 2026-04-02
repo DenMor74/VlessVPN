@@ -143,6 +143,7 @@ public class V2RayConfigBuilder {
                 realitySettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "chrome");
                 realitySettings.put("publicKey", server.pbk != null ? server.pbk : "");
                 realitySettings.put("shortId", server.sid != null ? server.sid : "");
+                realitySettings.put("spiderX", "");  // требуется v2ray-core ≥ v5
                 stream.put("realitySettings", realitySettings);
                 break;
 

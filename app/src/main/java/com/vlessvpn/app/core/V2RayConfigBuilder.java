@@ -208,6 +208,10 @@ public class V2RayConfigBuilder {
     /**
      * Генерирует "Мультиплекс-конфиг" для параллельного тестирования списка серверов.
      */
+    /**
+     * Генерирует "Мультиплекс-конфиг" для параллельного тестирования списка серверов.
+     * Версия 2.0: с фильтрацией битых серверов
+     */
     public static String buildMultiplexTestConfig(List<VlessServer> servers, int basePort) {
         try {
             JSONObject config = new JSONObject();
@@ -220,23 +224,77 @@ public class V2RayConfigBuilder {
             JSONArray outbounds = new JSONArray();
             JSONArray rules = new JSONArray();
 
+            // Счётчики для статистики фильтрации
+            int skippedInvalidShortId = 0;
+            int skippedNoPublicKey = 0;
+            int skippedNoSni = 0;
+            int skippedHttpTransport = 0;
+            int skippedOther = 0;
+            int validCount = 0;
+
             for (int i = 0; i < servers.size(); i++) {
                 VlessServer server = servers.get(i);
                 int localPort = basePort + i;
                 String inTag = "in-" + i;
                 String outTag = "proxy-" + i;
 
-                // Пропускаем серверы без обязательных полей для REALITY
+                // ════════════════════════════════════════════════════════════════
+                // ← Фильтр 1: Проверка shortId (не должен содержать #, emoji, текст)
+                // ════════════════════════════════════════════════════════════════
+                if (server.sid != null && !server.sid.isEmpty()) {
+                    // shortId должен быть только hex (0-9, a-f) и длина 0-16 символов
+                    if (!server.sid.matches("^[0-9a-fA-F]{0,16}$")) {
+                        FileLogger.w(TAG, "Пропуск сервера " + server.host + " — invalid shortId: " + server.sid);
+                        skippedInvalidShortId++;
+                        continue;
+                    }
+                }
+
+                // ════════════════════════════════════════════════════════════════
+                // ← Фильтр 2: Проверка publicKey для REALITY
+                // ════════════════════════════════════════════════════════════════
                 if (server.security != null && server.security.equals("reality")) {
                     if (server.pbk == null || server.pbk.isEmpty()) {
                         FileLogger.w(TAG, "Пропуск сервера " + server.host + " — нет publicKey (pbk)");
+                        skippedNoPublicKey++;
                         continue;
                     }
                     if (server.sni == null || server.sni.isEmpty()) {
                         FileLogger.w(TAG, "Пропуск сервера " + server.host + " — нет serverName (sni)");
+                        skippedNoSni++;
                         continue;
                     }
                 }
+
+                // ════════════════════════════════════════════════════════════════
+                // ← Фильтр 3: HTTP transport (устарел в v26+, требует xhttp)
+                // ════════════════════════════════════════════════════════════════
+                if ("http".equalsIgnoreCase(server.networkType)) {
+                    FileLogger.w(TAG, "Пропуск сервера " + server.host + " — HTTP transport устарел (требуется xhttp)");
+                    skippedHttpTransport++;
+                    continue;
+                }
+
+                // ════════════════════════════════════════════════════════════════
+                // ← Фильтр 4: Другие критические проблемы
+                // ════════════════════════════════════════════════════════════════
+                if (server.host == null || server.host.trim().isEmpty()) {
+                    skippedOther++;
+                    continue;
+                }
+
+                if (server.port <= 0 || server.port > 65535) {
+                    skippedOther++;
+                    continue;
+                }
+
+                if (server.uuid == null || server.uuid.trim().isEmpty()) {
+                    skippedOther++;
+                    continue;
+                }
+
+                // ✅ Сервер прошёл все проверки
+                validCount++;
 
                 // 1. Inbound (Локальный HTTP прокси)
                 JSONObject inbound = new JSONObject();
@@ -264,10 +322,7 @@ public class V2RayConfigBuilder {
                 JSONArray users = new JSONArray();
                 JSONObject user = new JSONObject();
 
-                // ════════════════════════════════════════════════════════════════
-                // ← ИСПРАВЛЕНО: используем server.uuid (НЕ server.id!)
-                // ════════════════════════════════════════════════════════════════
-                user.put("id", server.uuid);  // ← ВАЖНО: uuid, не id!
+                user.put("id", server.uuid);
                 user.put("encryption", "none");
 
                 if (server.flow != null && !server.flow.isEmpty()) {
@@ -294,6 +349,20 @@ public class V2RayConfigBuilder {
                 rules.put(rule);
             }
 
+            // Статистика фильтрации
+            FileLogger.i(TAG, "Фильтрация: " + servers.size() + " → " + validCount +
+                    " (отклонено: shortId=" + skippedInvalidShortId +
+                    ", noPbk=" + skippedNoPublicKey +
+                    ", noSni=" + skippedNoSni +
+                    ", http=" + skippedHttpTransport +
+                    ", other=" + skippedOther + ")");
+
+            // Если все серверы отфильтрованы — возвращаем fallback конфиг
+            if (validCount == 0) {
+                FileLogger.w(TAG, "Все серверы отфильтрованы — возвращаем fallback конфиг");
+                return buildFallbackConfig();
+            }
+
             // Обязательные outbounds
             JSONObject direct = new JSONObject();
             direct.put("tag", "direct");
@@ -314,13 +383,59 @@ public class V2RayConfigBuilder {
             config.put("routing", routing);
 
             String configStr = config.toString();
-            FileLogger.d(TAG, "Мультиплекс конфиг: " + servers.size() + " серверов → " +
+            FileLogger.d(TAG, "Мультиплекс конфиг: " + validCount + " серверов → " +
                     outbounds.length() + " outbounds, " + configStr.length() + " байт");
             return configStr;
 
         } catch (JSONException e) {
             FileLogger.e(TAG, "Ошибка генерации Multiplex-конфига: " + e.getMessage(), e);
-            return null;
+            return buildFallbackConfig();
+        }
+    }
+
+    /**
+     * Минимальный fallback конфиг (если все серверы отфильтрованы)
+     */
+    private static String buildFallbackConfig() {
+        try {
+            JSONObject config = new JSONObject();
+
+            JSONObject log = new JSONObject();
+            log.put("loglevel", "warning");
+            config.put("log", log);
+
+            JSONArray inbounds = new JSONArray();
+            JSONObject inbound = new JSONObject();
+            inbound.put("port", 10808);
+            inbound.put("listen", "127.0.0.1");
+            inbound.put("protocol", "socks");
+            JSONObject settings = new JSONObject();
+            settings.put("auth", "noauth");
+            settings.put("udp", true);
+            inbound.put("settings", settings);
+            inbounds.put(inbound);
+            config.put("inbounds", inbounds);
+
+            JSONArray outbounds = new JSONArray();
+            JSONObject direct = new JSONObject();
+            direct.put("tag", "direct");
+            direct.put("protocol", "freedom");
+            outbounds.put(direct);
+            config.put("outbounds", outbounds);
+
+            JSONObject routing = new JSONObject();
+            routing.put("domainStrategy", "AsIs");
+            JSONArray rules = new JSONArray();
+            JSONObject rule = new JSONObject();
+            rule.put("type", "field");
+            rule.put("outboundTag", "direct");
+            rules.put(rule);
+            routing.put("rules", rules);
+            config.put("routing", routing);
+
+            return config.toString();
+        } catch (Exception e) {
+            return "{\"log\":{\"loglevel\":\"warning\"},\"inbounds\":[],\"outbounds\":[{\"protocol\":\"freedom\",\"tag\":\"direct\"}]}";
         }
     }
 }

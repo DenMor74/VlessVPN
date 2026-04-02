@@ -1,5 +1,6 @@
 package com.vlessvpn.app.ui;
 
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
@@ -11,11 +12,16 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.vlessvpn.app.R;
+import com.vlessvpn.app.model.ConfigUrlItem;
 import com.vlessvpn.app.service.BackgroundMonitorService;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.AppBlacklistManager;
+
+import java.util.List;
 
 public class SettingsActivity extends AppCompatActivity {
 
@@ -38,6 +44,11 @@ public class SettingsActivity extends AppCompatActivity {
     private Switch switchRemoteyandexLog;
     private android.widget.EditText etRemoteLogUrl;
 
+    private RecyclerView rvConfigUrls;
+    private ConfigUrlAdapter urlAdapter;
+    private List<ConfigUrlItem> configUrlItems;
+    private Button btnAddUrl;
+    private Button btnResetUrls;
 
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ: Для интервала сканирования
@@ -103,7 +114,46 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        etUrls              = findViewById(R.id.et_config_urls);
+        rvConfigUrls = findViewById(R.id.rv_config_urls);
+        btnAddUrl = findViewById(R.id.btn_add_url);
+        btnResetUrls = findViewById(R.id.btn_reset_urls);
+
+        // Настройка RecyclerView
+        rvConfigUrls.setLayoutManager(new LinearLayoutManager(this));
+
+        // Загрузка URL
+        configUrlItems = repository.getConfigUrlItems();
+        urlAdapter = new ConfigUrlAdapter(configUrlItems, () -> {
+            // Можно добавить индикатор изменений
+        });
+        rvConfigUrls.setAdapter(urlAdapter);
+
+        // Кнопка добавления
+        btnAddUrl.setOnClickListener(v -> {
+            urlAdapter.addUrl("https://");
+            rvConfigUrls.scrollToPosition(urlAdapter.getItemCount() - 1);
+        });
+
+        // Кнопка сброса
+        btnResetUrls.setOnClickListener(v -> {
+            new AlertDialog.Builder(this)
+                    .setTitle("Сбросить URL?")
+                    .setMessage("Вернуть список URL к значениям по умолчанию?")
+                    .setPositiveButton("Да", (d, w) -> {
+                        configUrlItems.clear();
+                        String[] defaultUrls = ServerRepository.DEFAULT_CONFIG_URL.split("\n");
+                        for (String url : defaultUrls) {
+                            url = url.trim();
+                            if (!url.isEmpty()) {
+                                configUrlItems.add(new ConfigUrlItem(url, true));
+                            }
+                        }
+                        urlAdapter.notifyDataSetChanged();
+                    })
+                    .setNegativeButton("Отмена", null)
+                    .show();
+        });
+        //etUrls              = findViewById(R.id.et_config_urls);
         seekInterval        = findViewById(R.id.seek_interval);
         tvIntervalValue     = findViewById(R.id.tv_interval_value);
         seekTopCount        = findViewById(R.id.seek_top_count);
@@ -182,8 +232,13 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void loadCurrentSettings() {
         // URL-ы
-        String[] urls = repository.getConfigUrls();
-        etUrls.setText(String.join("\n", urls));
+        //String[] urls = repository.getConfigUrls();
+        // etUrls.setText(String.join("\n", urls));
+
+        if (rvConfigUrls != null && urlAdapter != null) {
+            // Принудительное обновление если нужно
+            urlAdapter.notifyDataSetChanged();
+        }
 
         // Интервал обновления
         int hours = repository.getUpdateIntervalHours();
@@ -224,10 +279,13 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void saveSettings() {
+        // Сохраняем список URL с состоянием
+        repository.saveConfigUrlItems(configUrlItems);
+
         // URL-ы
-        String urlsText = etUrls.getText().toString().trim();
-        if (urlsText.isEmpty()) urlsText = ServerRepository.DEFAULT_CONFIG_URL;
-        repository.saveConfigUrls(urlsText);
+        //String urlsText = etUrls.getText().toString().trim();
+        //if (urlsText.isEmpty()) urlsText = ServerRepository.DEFAULT_CONFIG_URL;
+        //repository.saveConfigUrls(urlsText);
 
         // Интервал обновления
         int newInterval = seekInterval.getProgress() + 1;

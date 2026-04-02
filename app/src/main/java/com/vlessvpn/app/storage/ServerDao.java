@@ -61,6 +61,9 @@ public interface ServerDao {
     @Query("SELECT COUNT(*) FROM servers")
     int getCount();
 
+    @Query("DELETE FROM servers")
+    void deleteAllServers();
+
     /**
      * Сбросить флаги теста → все серверы будут протестированы заново.
      * НЕ удаляем серверы — только сбрасываем результаты теста.

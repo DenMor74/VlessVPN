@@ -2,6 +2,7 @@ package com.vlessvpn.app.storage;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.sqlite.SQLiteDatabase;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -11,11 +12,13 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Transformations;
 
 import com.google.gson.Gson;
+import com.vlessvpn.app.model.ConfigUrlItem;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.util.FileLogger;
 
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
@@ -56,11 +59,17 @@ public class ServerRepository {
     public static final int DEFAULT_TOP_COUNT    = 10;
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
 
+    // Добавьте новые ключи SharedPreferences
+    public static final String PREF_CONFIG_URLS_JSON = "config_urls_json";
+    public static final String PREF_CONFIG_URLS_ENABLED = "config_urls_enabled";
+
     public static final String DEFAULT_CONFIG_URL =
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt\r\n" +
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt\r\n" +
         "https://raw.githubusercontent.com/kort0881/vpn-checker-backend/main/checked/RU_Best/ru_white_part1.txt\r\n" +
-        "https://gbr.mydan.online/configs";
+        "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt\r\n" +
+        "https://gbr.mydan.online/configs\r\n" +
+        "https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vl.txt?filter=.ru";
 
     //public static final String DEFAULT_CONFIG_URL =
     // "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt&lang=de-de\r\n" +
@@ -69,6 +78,65 @@ public class ServerRepository {
     public ServerRepository(Context context) {
         dao   = AppDatabase.getInstance(context).serverDao();
         prefs = PreferenceManager.getDefaultSharedPreferences(context);
+    }
+
+
+    // Метод для получения списка URL с состоянием
+    public List<ConfigUrlItem> getConfigUrlItems() {
+        List<ConfigUrlItem> items = new ArrayList<>();
+
+        // Пробуем загрузить из нового формата (JSON)
+        String json = prefs.getString(PREF_CONFIG_URLS_JSON, null);
+        if (json != null && !json.isEmpty()) {
+            try {
+                Type listType = new com.google.gson.reflect.TypeToken<List<ConfigUrlItem>>(){}.getType();
+                items = new Gson().fromJson(json, listType);
+            } catch (Exception e) {
+                // Fallback к старому формату
+            }
+        }
+
+        // Если пусто или ошибка - конвертируем старый формат
+        if (items.isEmpty()) {
+            String[] urls = prefs.getString(PREF_CONFIG_URLS, DEFAULT_CONFIG_URL).split("\n");
+            for (String url : urls) {
+                url = url.trim();
+                if (!url.isEmpty()) {
+                    items.add(new ConfigUrlItem(url, true));
+                }
+            }
+            // Сохраняем в новом формате
+            saveConfigUrlItems(items);
+        }
+
+        return items;
+    }
+
+    // Метод для сохранения списка URL с состоянием
+    public void saveConfigUrlItems(List<ConfigUrlItem> items) {
+        String json = new Gson().toJson(items);
+        prefs.edit().putString(PREF_CONFIG_URLS_JSON, json).apply();
+    }
+
+    // Получить только активные URL (для скачивания)
+    public String[] getActiveConfigUrls() {
+        List<ConfigUrlItem> items = getConfigUrlItems();
+        List<String> active = new ArrayList<>();
+        for (ConfigUrlItem item : items) {
+            if (item.isEnabled()) {
+                active.add(item.getUrl());
+            }
+        }
+        return active.toArray(new String[0]);
+    }
+
+    /**
+     * Удалить ВСЕ серверы из базы (перед полной загрузкой)
+     */
+
+    public void deleteAllServersSync() {
+        dao.deleteAllServers();  // ← Используем DAO вместо прямого SQLite
+        FileLogger.i(TAG, "База данных очищена — удалено всех серверов");
     }
 
 

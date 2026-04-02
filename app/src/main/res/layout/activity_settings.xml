@@ -17,35 +17,55 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:background="@drawable/bg_card_rounded"
-            android:paddingHorizontal="12dp"
-            android:layout_marginBottom="5dp"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
             android:elevation="2dp">
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="URL с конфигами (с новой строки):"
-                android:textSize="14sp"
+                android:text="📡 Источники конфигов:"
+                android:textSize="16sp"
                 android:textStyle="bold"
                 android:textColor="#FFFFFF"
-                android:layout_marginBottom="4dp"/>
+                android:layout_marginBottom="8dp"/>
 
-            <EditText
-                android:id="@+id/et_config_urls"
+            <TextView
                 android:layout_width="match_parent"
-                android:layout_height="190dp"
-                android:background="#2C2F3A"
-                android:gravity="top|start"
-                android:hint="Ссылки на листы подписки (по одной на строку)"
-                android:inputType="textMultiLine|textNoSuggestions"
-                android:lines="10"
-                android:maxLines="16"
-                android:minLines="6"
-                android:scrollbars="vertical"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#888888"
-                android:textSize="14sp"/>
+                android:layout_height="wrap_content"
+                android:text="Отметьте галочкой активные источники. Можно добавлять и удалять ссылки."
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:layout_marginBottom="12dp"/>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_config_urls"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
+                android:overScrollMode="never"/>
+
+            <Button
+                android:id="@+id/btn_add_url"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:text="➕ Добавить URL"
+                android:background="@drawable/bg_circle_button"
+                android:layout_marginTop="12dp"
+                android:textSize="13sp"/>
+
+            <Button
+                android:id="@+id/btn_reset_urls"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:text="🔄 Сбросить к умолчанию"
+                android:background="@drawable/bg_circle_button"
+                android:layout_marginTop="8dp"
+                android:textSize="13sp"
+                android:backgroundTint="#FF9800"/>
         </LinearLayout>
+
+
 
         <!-- ===== Интервал сканирования ===== -->
         <LinearLayout

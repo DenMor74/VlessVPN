@@ -144,21 +144,72 @@ public class BackgroundMonitorService extends Service {
             }
 
             StatusBus.post(ctx, "📥 Скачиваем новые списки...", true);
-            String[] urls = repo.getConfigUrls();
+
+            // ════════════════════════════════════════════════════════════════
+            // ← ИСПРАВЛЕНО: Получаем URL с состоянием (галочками)
+            // ════════════════════════════════════════════════════════════════
+            List<com.vlessvpn.app.model.ConfigUrlItem> urlItems = repo.getConfigUrlItems();
+
+            // Логи для отладки
+            int activeCount = 0;
+            for (com.vlessvpn.app.model.ConfigUrlItem item : urlItems) {
+                if (item.isEnabled()) activeCount++;
+            }
+            FileLogger.i(W, "Всего URL: " + urlItems.size() + ", Активных (с галочкой): " + activeCount);
+
+            // ════════════════════════════════════════════════════════════════
+            // ← ИСПРАВЛЕНО: Очищаем ВСЮ базу перед загрузкой
+            // ════════════════════════════════════════════════════════════════
+            if (activeCount > 0) {
+                FileLogger.i(W, "Очищаем базу данных перед загрузкой...");
+                repo.deleteAllServersSync();  // ← Удаляем ВСЕ серверы
+                StatusBus.post(ctx, "🗑️ Очистка базы...", true);
+            }
+
             int totalDownloaded = 0;
 
-            for (int i = 0; i < urls.length; i++) {
-                String url = urls[i];
-                if (url == null || url.trim().isEmpty()) continue;
-                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + urls.length, true);
+            // ════════════════════════════════════════════════════════════════
+            // ← Загрузка по списку URL с проверкой галочек
+            // ════════════════════════════════════════════════════════════════
+            for (int i = 0; i < urlItems.size(); i++) {
+                com.vlessvpn.app.model.ConfigUrlItem item = urlItems.get(i);
+
+                // ← ПРОВЕРКА ГАЛКИ (главное исправление!)
+                if (!item.isEnabled()) {
+                    FileLogger.i(W, "  [✗] Пропущен (выключен): " + item.getUrl());
+                    continue;
+                }
+
+                String url = item.getUrl();
+                if (url == null || url.trim().isEmpty()) {
+                    FileLogger.w(W, "  [✗] Пропущен (пустой URL)");
+                    continue;
+                }
+
+                url = url.trim();
+                FileLogger.i(W, "  [✓] Загрузка " + (i + 1) + "/" + urlItems.size() + ": " + url);
+                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + activeCount, true);
+
                 try {
-                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, url.trim(), url.trim());
+                    // Проверяем есть ли фильтр в URL (параметр ?filter=)
+                    String filterSNI = null;
+                    String cleanUrl = url;
+                    if (url.contains("?filter=")) {
+                        String[] parts = url.split("\\?filter=");
+                        if (parts.length > 1) {
+                            filterSNI = parts[1].split("&")[0].trim();
+                            cleanUrl = parts[0];
+                        }
+                    }
+
+                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, cleanUrl, url, filterSNI);
+
                     if (!fresh.isEmpty()) {
                         // Сохраняем текущий подключённый сервер чтобы не потерять его
                         VlessServer connectedServer = VpnTunnelService.connectedServer;
 
                         // Удаляем старые и вставляем новые (бесшовная замена)
-                        repo.deleteBySourceUrlSync(url.trim());
+                        repo.deleteBySourceUrlSync(url);
                         repo.insertAll(fresh);
 
                         // Если VPN активен и текущего сервера нет в новом списке —
@@ -168,37 +219,35 @@ public class BackgroundMonitorService extends Service {
                             for (VlessServer s : fresh)
                                 if (s.id.equals(connectedServer.id)) { foundInFresh = true; break; }
                             if (!foundInFresh) {
-                                connectedServer.sourceUrl = url.trim();
+                                connectedServer.sourceUrl = url;
                                 repo.insertAll(java.util.Collections.singletonList(connectedServer));
-                               // FileLogger.i(W, "Текущий сервер сохранён: " + connectedServer.host);
+                                // FileLogger.i(W, "Текущий сервер сохранён: " + connectedServer.host);
                             }
                         }
 
                         totalDownloaded += fresh.size();
 
-                        FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
+                        String logMsg = "Загружено " + fresh.size() + " серверов с " + url;
+                        if (filterSNI != null) {
+                            logMsg = "✅ Добавлено " + fresh.size() + " серверов " + filterSNI + " SNI из " + url;
+                        }
+                        FileLogger.i(W, logMsg);
                     }
                 } catch (Exception e) {
                     FileLogger.w(W, "Ошибка загрузки " + url + ": " + e.getMessage());
                 }
             }
-            // ════════════════════════════════════════════════════════════════
-            // ← ДОПОЛНЕНИЕ К ТВОИМ ЛИСТАМ: sevcator vl.txt (только .ru SNI)
-            // ════════════════════════════════════════════════════════════════
-            try {
-                String sevcatorSourceUrl = "https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vl.txt";
-                List<VlessServer> ruFiltered = new ConfigDownloader().downloadSevcatorRuFiltered(ctx, sevcatorSourceUrl);
 
-                if (!ruFiltered.isEmpty()) {
-                    repo.deleteBySourceUrlSync(sevcatorSourceUrl);   // обновляем старые
-                    repo.insertAll(ruFiltered);
+            // ════════════════════════════════════════════════════════════════
+            // ← sevcator vl.txt (только .ru SNI) — теперь через общий список
+            // ← Если хотите отключить — снимите галочку в настройках
+            // ════════════════════════════════════════════════════════════════
+            // Примечание: sevcator теперь должен быть в общем списке urlItems с ?filter=.ru
+            // Этот блок можно удалить если sevcator добавлен в настройки как обычный URL
 
-                    totalDownloaded += ruFiltered.size();
-                    FileLogger.i(W, "✅ Добавлено " + ruFiltered.size() + " серверов .ru SNI из sevcator");
-                }
-            } catch (Exception e) {
-                FileLogger.w(W, "Ошибка sevcator RU фильтра: " + e.getMessage());
-            }
+            // ← Если хотите оставить хардкод — добавьте проверку отдельной галки в настройках
+            // Например: if (repo.isSevcatorEnabled()) { ... }
+
             repo.markUpdated();
             StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
 
@@ -212,6 +261,7 @@ public class BackgroundMonitorService extends Service {
                 FileLogger.w(W, "Ничего не скачано — сканирование пропущено");
                 StatusBus.done(ctx, "⚠️ Нет новых серверов");
             }
+
             // ← НОВОЕ: показываем реальное количество после дедупликации
             int realInDB = repo.getAllServersSync().size();
             FileLogger.i(W, "✅ Серверов после дедупликации: " + realInDB

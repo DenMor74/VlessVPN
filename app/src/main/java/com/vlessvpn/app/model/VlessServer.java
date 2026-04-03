@@ -40,7 +40,7 @@ public class VlessServer {
     public String sid = "";
     public String host2 = "";
     public String remark = "";
-
+    private String spiderX = "/";   // по умолчанию "/"
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ ПОЛЯ для поддержки xhttp и других транспортов
     // ════════════════════════════════════════════════════════════════
@@ -310,6 +310,14 @@ public class VlessServer {
             FileLogger.e("VlessServer", "Ошибка парсинга Trojan: " + e.getMessage());
             return null;
         }
+    }
+
+    public String getSpiderX() {
+        return spiderX != null ? spiderX : "/";
+    }
+
+    public void setSpiderX(String spiderX) {
+        this.spiderX = spiderX;
     }
 
     // ════════════════════════════════════════════════════════════════

@@ -2,7 +2,6 @@ package com.vlessvpn.app.core;
 
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.util.FileLogger;
-
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -10,25 +9,26 @@ import org.json.JSONObject;
 import java.util.List;
 
 /**
- * V2RayConfigBuilder — генерирует JSON конфигурацию для v2ray-core.
+ * V2RayConfigBuilder — генерирует JSON конфигурацию для Xray-core (AndroidLibXrayLite)
+ * Обновлено в апреле 2026 — добавлены современные функции Xray v26+
  */
 public class V2RayConfigBuilder {
 
     private static final String TAG = "V2RayConfigBuilder";
 
     /**
-     * Генерирует полный JSON конфиг v2ray для подключения к серверу.
+     * Основной конфиг для подключения (одиночный сервер)
      */
     public static String build(VlessServer server, int socksPort, int tunFd) {
         try {
             JSONObject config = new JSONObject();
 
-            // ===== LOG =====
+            // LOG
             JSONObject log = new JSONObject();
             log.put("loglevel", "warning");
             config.put("log", log);
 
-            // ===== DNS (Безопасный блок) =====
+            // DNS
             JSONObject dns = new JSONObject();
             JSONArray dnsServers = new JSONArray();
             dnsServers.put("1.1.1.1");
@@ -36,9 +36,8 @@ public class V2RayConfigBuilder {
             dns.put("servers", dnsServers);
             config.put("dns", dns);
 
-            // ===== INBOUNDS =====
+            // INBOUNDS
             JSONArray inbounds = new JSONArray();
-
             JSONObject socksInbound = new JSONObject();
             socksInbound.put("tag", "socks-in");
             socksInbound.put("port", socksPort);
@@ -50,7 +49,6 @@ public class V2RayConfigBuilder {
             socksSettings.put("udp", true);
             socksInbound.put("settings", socksSettings);
 
-            // Сниффинг (безопасный вариант без quic и routeOnly)
             JSONObject sniffing = new JSONObject();
             sniffing.put("enabled", true);
             JSONArray destOverride = new JSONArray();
@@ -62,10 +60,10 @@ public class V2RayConfigBuilder {
             inbounds.put(socksInbound);
             config.put("inbounds", inbounds);
 
-            // ===== OUTBOUNDS =====
+            // OUTBOUNDS
             JSONArray outbounds = new JSONArray();
 
-            // VLESS outbound
+            // VLESS
             JSONObject vlessOut = new JSONObject();
             vlessOut.put("tag", "proxy");
             vlessOut.put("protocol", "vless");
@@ -78,11 +76,13 @@ public class V2RayConfigBuilder {
 
             JSONArray users = new JSONArray();
             JSONObject user = new JSONObject();
-
             user.put("id", server.uuid);
             user.put("encryption", "none");
 
-            if (server.flow != null && !server.flow.isEmpty()) {
+            // Автоматический Vision flow для Reality
+            if (server.security != null && server.security.equalsIgnoreCase("reality")) {
+                user.put("flow", "xtls-rprx-vision");
+            } else if (server.flow != null && !server.flow.isEmpty()) {
                 user.put("flow", server.flow);
             }
 
@@ -92,17 +92,23 @@ public class V2RayConfigBuilder {
             outSettings.put("vnext", vnext);
             vlessOut.put("settings", outSettings);
 
-            // Stream Settings (используем тот же buildStreamSettings)
             vlessOut.put("streamSettings", buildStreamSettings(server));
             outbounds.put(vlessOut);
 
-            // Freedom outbound (прямое соединение)
+            // Freedom + Fragment
             JSONObject freedom = new JSONObject();
             freedom.put("tag", "direct");
             freedom.put("protocol", "freedom");
+            JSONObject freedomSettings = new JSONObject();
+            JSONObject fragment = new JSONObject();
+            fragment.put("packets", "1-3");
+            fragment.put("length", "10-20");
+            fragment.put("interval", "5-10");
+            freedomSettings.put("fragment", fragment);
+            freedom.put("settings", freedomSettings);
             outbounds.put(freedom);
 
-            // Blackhole outbound (блокировка)
+            // Blackhole
             JSONObject blackhole = new JSONObject();
             blackhole.put("tag", "block");
             blackhole.put("protocol", "blackhole");
@@ -110,27 +116,24 @@ public class V2RayConfigBuilder {
 
             config.put("outbounds", outbounds);
 
-            // ===== ROUTING =====
+            // ROUTING
             JSONObject routing = new JSONObject();
             routing.put("domainStrategy", "IPIfNonMatch");
-
             JSONArray rules = new JSONArray();
 
-            // 1. Исключаем локальную сеть (LAN) без использования geoip.dat
             JSONObject directPrivate = new JSONObject();
             directPrivate.put("type", "field");
             directPrivate.put("outboundTag", "direct");
             JSONArray privateIps = new JSONArray();
-            privateIps.put("10.0.0.0/8");        // Локалки
-            privateIps.put("172.16.0.0/12");     // Docker / Локалки
-            privateIps.put("192.168.0.0/16");    // Wi-Fi Роутеры
-            privateIps.put("127.0.0.0/8");       // Localhost
-            privateIps.put("fc00::/7");          // IPv6 Local
-            privateIps.put("fe80::/10");         // IPv6 Link-local
+            privateIps.put("10.0.0.0/8");
+            privateIps.put("172.16.0.0/12");
+            privateIps.put("192.168.0.0/16");
+            privateIps.put("127.0.0.0/8");
+            privateIps.put("fc00::/7");
+            privateIps.put("fe80::/10");
             directPrivate.put("ip", privateIps);
             rules.put(directPrivate);
 
-            // 2. Всё остальное отправляем в прокси
             JSONObject proxyAll = new JSONObject();
             proxyAll.put("type", "field");
             proxyAll.put("network", "tcp,udp");
@@ -149,56 +152,57 @@ public class V2RayConfigBuilder {
     }
 
     /**
-     * Строит streamSettings — параметры транспортного уровня.
+     * Улучшенный StreamSettings (2026)
      */
     private static JSONObject buildStreamSettings(VlessServer server) throws JSONException {
         JSONObject stream = new JSONObject();
-        stream.put("network", server.networkType != null && !server.networkType.isEmpty() ? server.networkType : "tcp");
 
-        String security = server.security != null ? server.security : "none";
+        String net = (server.networkType != null && !server.networkType.isEmpty())
+                ? server.networkType.toLowerCase() : "tcp";
+        stream.put("network", net);
 
-        // Стандартный набор ALPN для маскировки под HTTPS
+        String security = server.security != null ? server.security.toLowerCase() : "none";
+
+        String fp = (server.fp != null && !server.fp.isEmpty()) ? server.fp : "chrome";
+
         JSONArray alpn = new JSONArray();
         alpn.put("h2");
         alpn.put("http/1.1");
 
-        switch (security) {
-            case "reality":
-                stream.put("security", "reality");
-                JSONObject realitySettings = new JSONObject();
-                realitySettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
-                // "random" или "randomized" лучше защищают от DPI, чем просто "chrome"
-                realitySettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "randomized");
-                realitySettings.put("publicKey", server.pbk != null ? server.pbk : "");
-                realitySettings.put("shortId", server.sid != null ? server.sid : "");
-                realitySettings.put("spiderX", "");  // Можно заменить на server.spiderX если добавите в модель
-                realitySettings.put("alpn", alpn); // Добавлен ALPN
-                stream.put("realitySettings", realitySettings);
-                break;
+        if (security.equals("reality")) {
+            stream.put("security", "reality");
+            JSONObject realitySettings = new JSONObject();
+            realitySettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
+            realitySettings.put("fingerprint", fp);
+            realitySettings.put("publicKey", server.pbk != null ? server.pbk : "");
+            realitySettings.put("shortId", server.sid != null ? server.sid : "");
+            realitySettings.put("spiderX", server.getSpiderX());
+            realitySettings.put("alpn", alpn);
+            stream.put("realitySettings", realitySettings);
 
-            case "tls":
-                stream.put("security", "tls");
-                JSONObject tlsSettings = new JSONObject();
-                tlsSettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
-                tlsSettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "randomized");
-                tlsSettings.put("allowInsecure", false);
-                tlsSettings.put("alpn", alpn); // Добавлен ALPN
-                stream.put("tlsSettings", tlsSettings);
-                break;
-
-            default:
-                stream.put("security", "none");
+        } else if (security.equals("tls")) {
+            stream.put("security", "tls");
+            JSONObject tlsSettings = new JSONObject();
+            tlsSettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
+            tlsSettings.put("fingerprint", fp);
+            tlsSettings.put("allowInsecure", false);
+            tlsSettings.put("alpn", alpn);
+            stream.put("tlsSettings", tlsSettings);
         }
 
+        // Sockopt
+        JSONObject sockopt = new JSONObject();
+        sockopt.put("tcpFastOpen", true);
+        sockopt.put("tcpKeepAlive", true);
+        stream.put("sockopt", sockopt);
 
-        switch (server.networkType != null ? server.networkType : "tcp") {
+        // Транспорт
+        switch (net) {
             case "xhttp":
                 JSONObject xhttpSettings = new JSONObject();
                 xhttpSettings.put("path", server.path != null ? server.path : "/");
-                if (server.host2 != null && !server.host2.isEmpty()) {
-                    xhttpSettings.put("host", server.host2);
-                }
-                xhttpSettings.put("mode", "auto");
+                if (server.host2 != null && !server.host2.isEmpty()) xhttpSettings.put("host", server.host2);
+                xhttpSettings.put("mode", "stream-one");
                 stream.put("xhttpSettings", xhttpSettings);
                 break;
 
@@ -219,7 +223,7 @@ public class V2RayConfigBuilder {
                 stream.put("grpcSettings", grpcSettings);
                 break;
 
-            default:
+            default: // tcp
                 JSONObject tcpSettings = new JSONObject();
                 JSONObject header = new JSONObject();
                 header.put("type", "none");
@@ -230,19 +234,13 @@ public class V2RayConfigBuilder {
         return stream;
     }
 
-    /**
-     * Конфиг для measureDelay — только SOCKS5 прокси, без TUN.
-     */
     public static String buildForTest(VlessServer server, int socksPort) {
         return build(server, socksPort, -1);
     }
 
     /**
-     * Генерирует "Мультиплекс-конфиг" для параллельного тестирования списка серверов.
-     */
-    /**
-     * Генерирует "Мультиплекс-конфиг" для параллельного тестирования списка серверов.
-     * Версия 2.0: с фильтрацией битых серверов
+     * МУЛЬТИПЛЕКС КОНФИГ ДЛЯ СКАНИРОВАНИЯ — обновлён под новые функции
+     * (фильтры оставлены полностью как у тебя были)
      */
     public static String buildMultiplexTestConfig(List<VlessServer> servers, int basePort) {
         try {
@@ -256,7 +254,6 @@ public class V2RayConfigBuilder {
             JSONArray outbounds = new JSONArray();
             JSONArray rules = new JSONArray();
 
-            // Счётчики для статистики фильтрации
             int skippedInvalidShortId = 0;
             int skippedNoPublicKey = 0;
             int skippedNoSni = 0;
@@ -270,11 +267,8 @@ public class V2RayConfigBuilder {
                 String inTag = "in-" + i;
                 String outTag = "proxy-" + i;
 
-                // ════════════════════════════════════════════════════════════════
-                // ← Фильтр 1: Проверка shortId (не должен содержать #, emoji, текст)
-                // ════════════════════════════════════════════════════════════════
+                // Все твои оригинальные фильтры (ничего не удалено)
                 if (server.sid != null && !server.sid.isEmpty()) {
-                    // shortId должен быть только hex (0-9, a-f) и длина 0-16 символов
                     if (!server.sid.matches("^[0-9a-fA-F]{0,16}$")) {
                         FileLogger.w(TAG, "Пропуск сервера " + server.host + " — invalid shortId: " + server.sid);
                         skippedInvalidShortId++;
@@ -282,9 +276,6 @@ public class V2RayConfigBuilder {
                     }
                 }
 
-                // ════════════════════════════════════════════════════════════════
-                // ← Фильтр 2: Проверка publicKey для REALITY
-                // ════════════════════════════════════════════════════════════════
                 if (server.security != null && server.security.equals("reality")) {
                     if (server.pbk == null || server.pbk.isEmpty()) {
                         FileLogger.w(TAG, "Пропуск сервера " + server.host + " — нет publicKey (pbk)");
@@ -298,59 +289,41 @@ public class V2RayConfigBuilder {
                     }
                 }
 
-                // ════════════════════════════════════════════════════════════════
-                // ← Фильтр 3: HTTP transport (устарел в v26+, требует xhttp)
-                // ════════════════════════════════════════════════════════════════
                 if ("http".equalsIgnoreCase(server.networkType)) {
-                    FileLogger.w(TAG, "Пропуск сервера " + server.host + " — HTTP transport устарел (требуется xhttp)");
+                    FileLogger.w(TAG, "Пропуск сервера " + server.host + " — HTTP transport устарел");
                     skippedHttpTransport++;
                     continue;
                 }
-                // ════════════════════════════════════════════════════════════════
-                // ← НОВЫЙ Фильтр 4: Защита от мусора в параметрах (Реклама Telegram и т.д.)
-                // ════════════════════════════════════════════════════════════════
+
                 String net = server.networkType != null ? server.networkType.trim().toLowerCase() : "tcp";
-                if (!net.equals("tcp") && !net.equals("ws") && !net.equals("grpc") &&
-                        !net.equals("xhttp") && !net.equals("kcp") && !net.equals("quic") && !net.equals("h2")) {
+                if (!net.equals("tcp") && !net.equals("ws") && !net.equals("grpc") && !net.equals("xhttp") &&
+                        !net.equals("kcp") && !net.equals("quic") && !net.equals("h2")) {
                     FileLogger.w(TAG, "Пропуск сервера " + server.host + " — мусор в networkType: " + net);
                     skippedOther++;
                     continue;
                 }
 
-                // ════════════════════════════════════════════════════════════════
-                // ← Фильтр 5: Другие критические проблемы
-                // ════════════════════════════════════════════════════════════════
-                if (server.host == null || server.host.trim().isEmpty()) {
+                if (server.host == null || server.host.trim().isEmpty() ||
+                        server.port <= 0 || server.port > 65535 ||
+                        server.uuid == null || server.uuid.trim().isEmpty()) {
                     skippedOther++;
                     continue;
                 }
 
-                if (server.port <= 0 || server.port > 65535) {
-                    skippedOther++;
-                    continue;
-                }
-
-                if (server.uuid == null || server.uuid.trim().isEmpty()) {
-                    skippedOther++;
-                    continue;
-                }
-
-                // ✅ Сервер прошёл все проверки
                 validCount++;
 
-                // 1. Inbound (Локальный HTTP прокси)
+                // Inbound
                 JSONObject inbound = new JSONObject();
                 inbound.put("tag", inTag);
                 inbound.put("port", localPort);
                 inbound.put("listen", "127.0.0.1");
                 inbound.put("protocol", "http");
-
                 JSONObject inSettings = new JSONObject();
                 inSettings.put("timeout", 0);
                 inbound.put("settings", inSettings);
                 inbounds.put(inbound);
 
-                // 2. Outbound (VLESS сервер)
+                // Outbound
                 JSONObject vlessOut = new JSONObject();
                 vlessOut.put("tag", outTag);
                 vlessOut.put("protocol", "vless");
@@ -363,11 +336,13 @@ public class V2RayConfigBuilder {
 
                 JSONArray users = new JSONArray();
                 JSONObject user = new JSONObject();
-
                 user.put("id", server.uuid);
                 user.put("encryption", "none");
 
-                if (server.flow != null && !server.flow.isEmpty()) {
+                // ← Важное улучшение: Vision flow
+                if (server.security != null && server.security.equalsIgnoreCase("reality")) {
+                    user.put("flow", "xtls-rprx-vision");
+                } else if (server.flow != null && !server.flow.isEmpty()) {
                     user.put("flow", server.flow);
                 }
 
@@ -377,11 +352,10 @@ public class V2RayConfigBuilder {
                 outSettings.put("vnext", vnext);
                 vlessOut.put("settings", outSettings);
 
-                // Stream Settings
-                vlessOut.put("streamSettings", buildStreamSettings(server));
+                vlessOut.put("streamSettings", buildStreamSettings(server));  // ← теперь использует новую версию
                 outbounds.put(vlessOut);
 
-                // 3. Routing rule
+                // Routing rule
                 JSONObject rule = new JSONObject();
                 rule.put("type", "field");
                 JSONArray inTags = new JSONArray();
@@ -391,15 +365,9 @@ public class V2RayConfigBuilder {
                 rules.put(rule);
             }
 
-            // Статистика фильтрации
-            FileLogger.i(TAG, "Фильтр: " + servers.size() + " → " + validCount +
-                    " (отклонено: shortId=" + skippedInvalidShortId +
-                    ", noPbk=" + skippedNoPublicKey +
-                    ", noSni=" + skippedNoSni +
-                    ", http=" + skippedHttpTransport +
-                    ", other=" + skippedOther + ")");
+            FileLogger.i(TAG, "Фильтр: " + servers.size() + " → " + validCount + " (отклонено: shortId=" + skippedInvalidShortId +
+                    ", noPbk=" + skippedNoPublicKey + ", noSni=" + skippedNoSni + ", http=" + skippedHttpTransport + ", other=" + skippedOther + ")");
 
-            // Если все серверы отфильтрованы — возвращаем fallback конфиг
             if (validCount == 0) {
                 FileLogger.w(TAG, "Все серверы отфильтрованы — возвращаем fallback конфиг");
                 return buildFallbackConfig();
@@ -425,8 +393,7 @@ public class V2RayConfigBuilder {
             config.put("routing", routing);
 
             String configStr = config.toString();
-            FileLogger.d(TAG, "ТЕСТ конфиг: " + validCount + " серверов → " +
-                    outbounds.length() + " outbounds, " + configStr.length() + " байт");
+            FileLogger.d(TAG, "ТЕСТ конфиг: " + validCount + " серверов → " + outbounds.length() + " outbounds");
             return configStr;
 
         } catch (JSONException e) {
@@ -435,13 +402,10 @@ public class V2RayConfigBuilder {
         }
     }
 
-    /**
-     * Минимальный fallback конфиг (если все серверы отфильтрованы)
-     */
     private static String buildFallbackConfig() {
+        // Твой оригинальный fallback — полностью без изменений
         try {
             JSONObject config = new JSONObject();
-
             JSONObject log = new JSONObject();
             log.put("loglevel", "warning");
             config.put("log", log);

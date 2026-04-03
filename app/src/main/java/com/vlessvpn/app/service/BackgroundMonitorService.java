@@ -457,7 +457,13 @@ public class BackgroundMonitorService extends Service {
                 // ЭТАП 2: БАТЧИ V2RAY
                 // ====================================================================
                 if (!tcpSurvived.isEmpty() && !Thread.currentThread().isInterrupted()) {
-                    List<VlessServer> survivedPing = tcpSurvived;
+                    // ← ФИКС: Делаем независимую копию списка!
+                    // Это защитит от зомби-потоков, которые всё ещё могут дописывать данные в tcpSurvived
+                    List<VlessServer> survivedPing;
+                    synchronized (tcpSurvived) {
+                        survivedPing = new java.util.ArrayList<>(tcpSurvived);
+                    }
+
                     Collections.sort(survivedPing, (s1, s2) -> Integer.compare(s1.tcpPingMs, s2.tcpPingMs));
 
                     final int finalSurvivedSize = survivedPing.size();

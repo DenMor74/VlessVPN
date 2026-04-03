@@ -42,8 +42,8 @@ public class FileLogger {
     // ════════════════════════════════════════════════════════════════
     // ← ИЗМЕНЕНО: 100 KB вместо 2 MB
     // ════════════════════════════════════════════════════════════════
-    private static final long MAX_SIZE_BYTES = 50 * 1024; // 50 KB
-    private static final long MIN_SIZE_BYTES = 10 * 1024;  // 10 KB (остаётся после очистки)
+    private static final long MAX_SIZE_BYTES = 50 * 1024; // 20 KB
+    private static final long MIN_SIZE_BYTES = 10 * 1024;  // 2 KB (остаётся после очистки)
 
     private static File logFile = null;
     private static final SimpleDateFormat sdf =

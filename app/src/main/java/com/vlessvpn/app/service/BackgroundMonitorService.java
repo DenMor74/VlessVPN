@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -49,6 +50,18 @@ public class BackgroundMonitorService extends Service {
     private static final String WORK_DOWNLOAD  = "server_download";
     private static final String WORK_SCAN      = "server_scan";
     private static long lastFinalLogTime = 0;   // защита от двойного финального лога
+
+/*    String[] testUrls = {
+            "http://cp.cloudflare.com/generate_204",
+            "http://connectivitycheck.gstatic.com/generate_204",
+            "http://www.msftconnecttest.com/connecttest.txt"
+    };*/
+    private static  String[] testUrls = {
+                "http://cp.cloudflare.com/generate_204",
+                "https://detectportal.firefox.com/success.txt",
+                "http://www.msftconnecttest.com/connecttest.txt"
+        };
+    // https://captive.apple.com/hotspot-detect.html
     // ── Планировщики ────────────────────────────────────────────────────────
 
     public static void scheduleDownload(Context ctx, int intervalHours) {
@@ -125,11 +138,8 @@ public class BackgroundMonitorService extends Service {
                 return Result.success();
             }
 
-            // ИСПРАВЛЕНО: Проверяем не рано ли обновляться (для периодического запуска)
-            // Для ручного запуска (через runDownloadNow) время сброшено заранее в forceRefreshServers
             if (!repo.isUpdateNeeded()) {
                 FileLogger.i(W, "Обновление ещё не нужно — пропускаем скачивание");
-                // Но если в базе нет ни одного протестированного сервера — сканируем
                 if (repo.getWorkingCount() == 0) {
                     FileLogger.i(W, "Нет рабочих серверов — запускаем сканирование");
                     runScanNow(ctx);
@@ -145,36 +155,25 @@ public class BackgroundMonitorService extends Service {
 
             StatusBus.post(ctx, "📥 Скачиваем новые списки...", true);
 
-            // ════════════════════════════════════════════════════════════════
-            // ← ИСПРАВЛЕНО: Получаем URL с состоянием (галочками)
-            // ════════════════════════════════════════════════════════════════
             List<com.vlessvpn.app.model.ConfigUrlItem> urlItems = repo.getConfigUrlItems();
 
-            // Логи для отладки
             int activeCount = 0;
             for (com.vlessvpn.app.model.ConfigUrlItem item : urlItems) {
                 if (item.isEnabled()) activeCount++;
             }
             FileLogger.i(W, "Всего URL: " + urlItems.size() + ", Активных (с галочкой): " + activeCount);
 
-            // ════════════════════════════════════════════════════════════════
-            // ← ИСПРАВЛЕНО: Очищаем ВСЮ базу перед загрузкой
-            // ════════════════════════════════════════════════════════════════
             if (activeCount > 0) {
                 FileLogger.i(W, "Очищаем базу данных перед загрузкой...");
-                repo.deleteAllServersSync();  // ← Удаляем ВСЕ серверы
+                repo.deleteAllServersSync();
                 StatusBus.post(ctx, "🗑️ Очистка базы...", true);
             }
 
             int totalDownloaded = 0;
 
-            // ════════════════════════════════════════════════════════════════
-            // ← Загрузка по списку URL с проверкой галочек
-            // ════════════════════════════════════════════════════════════════
             for (int i = 0; i < urlItems.size(); i++) {
                 com.vlessvpn.app.model.ConfigUrlItem item = urlItems.get(i);
 
-                // ← ПРОВЕРКА ГАЛКИ (главное исправление!)
                 if (!item.isEnabled()) {
                     FileLogger.i(W, "  [✗] Пропущен (выключен): " + item.getUrl());
                     continue;
@@ -191,7 +190,6 @@ public class BackgroundMonitorService extends Service {
                 StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + activeCount, true);
 
                 try {
-                    // Проверяем есть ли фильтр в URL (параметр ?filter=)
                     String filterSNI = null;
                     String cleanUrl = url;
                     if (url.contains("?filter=")) {
@@ -205,15 +203,11 @@ public class BackgroundMonitorService extends Service {
                     List<VlessServer> fresh = new ConfigDownloader().download(ctx, cleanUrl, url, filterSNI);
 
                     if (!fresh.isEmpty()) {
-                        // Сохраняем текущий подключённый сервер чтобы не потерять его
                         VlessServer connectedServer = VpnTunnelService.connectedServer;
 
-                        // Удаляем старые и вставляем новые (бесшовная замена)
                         repo.deleteBySourceUrlSync(url);
                         repo.insertAll(fresh);
 
-                        // Если VPN активен и текущего сервера нет в новом списке —
-                        // восстанавливаем его (помечаем рабочим чтобы не пропал с экрана)
                         if (connectedServer != null && VpnTunnelService.isRunning) {
                             boolean foundInFresh = false;
                             for (VlessServer s : fresh)
@@ -221,7 +215,6 @@ public class BackgroundMonitorService extends Service {
                             if (!foundInFresh) {
                                 connectedServer.sourceUrl = url;
                                 repo.insertAll(java.util.Collections.singletonList(connectedServer));
-                                // FileLogger.i(W, "Текущий сервер сохранён: " + connectedServer.host);
                             }
                         }
 
@@ -238,20 +231,9 @@ public class BackgroundMonitorService extends Service {
                 }
             }
 
-            // ════════════════════════════════════════════════════════════════
-            // ← sevcator vl.txt (только .ru SNI) — теперь через общий список
-            // ← Если хотите отключить — снимите галочку в настройках
-            // ════════════════════════════════════════════════════════════════
-            // Примечание: sevcator теперь должен быть в общем списке urlItems с ?filter=.ru
-            // Этот блок можно удалить если sevcator добавлен в настройки как обычный URL
-
-            // ← Если хотите оставить хардкод — добавьте проверку отдельной галки в настройках
-            // Например: if (repo.isSevcatorEnabled()) { ... }
-
             repo.markUpdated();
             StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
 
-            // ИСПРАВЛЕНО: Всегда запускаем сканирование после скачивания
             if (totalDownloaded > 0) {
                 FileLogger.i(W, "Скачано " + totalDownloaded + " серверов → запускаем сканирование");
                 StatusBus.post(ctx, "🔍 Запускаем проверку серверов...", true);
@@ -262,7 +244,6 @@ public class BackgroundMonitorService extends Service {
                 StatusBus.done(ctx, "⚠️ Нет новых серверов");
             }
 
-            // ← НОВОЕ: показываем реальное количество после дедупликации
             int realInDB = repo.getAllServersSync().size();
             FileLogger.i(W, "✅ Серверов после дедупликации: " + realInDB
                     + " (из " + totalDownloaded + " скачанных — дубли: " + (totalDownloaded - realInDB) + ")");
@@ -288,10 +269,6 @@ public class BackgroundMonitorService extends Service {
             return false;
         }
     }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // ScanWorker — TCP пинг + VLESS measureDelay для всех серверов
-    // ════════════════════════════════════════════════════════════════════════
 
     // ════════════════════════════════════════════════════════════════════════
     // ScanWorker — КОНВЕЙЕР (Fast TCP Ping + Multiplex VLESS HTTP Test)
@@ -324,6 +301,23 @@ public class BackgroundMonitorService extends Service {
             }
         }
 
+        /**
+         * Быстрая проверка, поднялось ли ядро V2Ray и открыло ли порт.
+         * Завершается моментально, как только ядро готово (обычно 100-200 мс).
+         */
+        private void waitForProxyToStart(int testPort, int maxWaitMs) {
+            long start = System.currentTimeMillis();
+            while (System.currentTimeMillis() - start < maxWaitMs) {
+                try (Socket s = new Socket()) {
+                    s.connect(new InetSocketAddress("127.0.0.1", testPort), 200);
+                    return; // Порт открылся, можно начинать тест!
+                } catch (Exception e) {
+                    try { Thread.sleep(50); } catch (InterruptedException ignore) {}
+                }
+            }
+            FileLogger.w(W, "Таймаут ожидания старта локального прокси на порту " + testPort);
+        }
+
         private Result doPipelineScan(Context ctx, ServerRepository repo) {
             List<VlessServer> allServers = repo.getAllServersSync();
             if (allServers.isEmpty()) {
@@ -332,170 +326,262 @@ public class BackgroundMonitorService extends Service {
             }
 
             int total = allServers.size();
-            StatusBus.post(ctx, "🔍 Тестируем " + total + " серверов...", true);
+            StatusBus.post(ctx, "🔍 Подготовка к тесту " + total + " серверов...", true);
             StatusBus.setWorking(ctx, true);
 
-            AtomicInteger done = new AtomicInteger(0);
+            AtomicInteger tcpDone = new AtomicInteger(0);
+            AtomicInteger httpDone = new AtomicInteger(0);
             AtomicInteger ok = new AtomicInteger(0);
 
-            // Получаем мобильную сеть для "честного" теста через DPI провайдера
-            Network cellularNet = ServerTester.getCellularNetwork(ctx);
             ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network cellularNet = null;
+            ConnectivityManager.NetworkCallback cellCallback = null;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                try {
+                    NetworkRequest cellReq = new NetworkRequest.Builder()
+                            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            .build();
+
+                    CountDownLatch latch = new CountDownLatch(1);
+                    Network[] foundNet = new Network[1];
+
+                    cellCallback = new ConnectivityManager.NetworkCallback() {
+                        @Override
+                        public void onAvailable(@NonNull Network network) {
+                            if (foundNet[0] == null) {
+                                foundNet[0] = network;
+                                latch.countDown();
+                            }
+                        }
+                    };
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        cm.requestNetwork(cellReq, cellCallback, 4000);
+                    } else {
+                        cm.requestNetwork(cellReq, cellCallback);
+                    }
+
+                    if (latch.await(5, TimeUnit.SECONDS)) {
+                        cellularNet = foundNet[0];
+                    } else {
+                        cm.unregisterNetworkCallback(cellCallback);
+                        cellCallback = null;
+                    }
+                } catch (Exception e) {
+                    FileLogger.w(W, "Ошибка запроса LTE сети: " + e.getMessage());
+                }
+            }
+
+            if (cellularNet == null) {
+                cellularNet = ServerTester.getCellularNetwork(ctx);
+            }
 
             if (cellularNet != null) {
-                cm.bindProcessToNetwork(cellularNet); // Привязываем ВЕСЬ процесс воркера к LTE
-            } else {
-                FileLogger.w(W, "LTE не найден, тест пойдет через активную сеть (WiFi)");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    cm.bindProcessToNetwork(cellularNet);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    ConnectivityManager.setProcessDefaultNetwork(cellularNet);
+                }
             }
 
             try {
                 // ====================================================================
-                // ЭТАП 1: Быстрый параллельный TCP Ping (отсев мертвецов)
+                // ЭТАП 1: МАССОВЫЙ ПАРАЛЛЕЛЬНЫЙ ПИНГ
                 // ====================================================================
-                List<VlessServer> survivedPing = new java.util.ArrayList<>();
-                ExecutorService pingPool = Executors.newFixedThreadPool(30); // Широкий пул для скорости
+                final List<VlessServer> tcpSurvived = new java.util.ArrayList<>();
+                int poolSize = Math.min(150, total);
+                ExecutorService pingPool = Executors.newFixedThreadPool(poolSize);
                 CountDownLatch pingLatch = new CountDownLatch(total);
+                final Network finalCellularNet = cellularNet;
+
+                java.util.concurrent.atomic.AtomicBoolean phase1Active = new java.util.concurrent.atomic.AtomicBoolean(true);
 
                 for (VlessServer server : allServers) {
                     pingPool.submit(() -> {
+                        // ← ПРЕДОХРАНИТЕЛЬ: Мгновенно убиваем зомби-поток, не давая ему лезть в сеть (обход EPERM)
+                        if (!phase1Active.get() || Thread.currentThread().isInterrupted()) {
+                            pingLatch.countDown();
+                            return;
+                        }
+
                         try {
-                            ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server);
-                            int curr = done.incrementAndGet();
+                            ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server, finalCellularNet);
+                            int currTcp = tcpDone.incrementAndGet();
 
                             if (tcp.trafficOk) {
                                 server.tcpPingMs = (int) tcp.pingMs;
-                                synchronized (survivedPing) { survivedPing.add(server); }
-                                StatusBus.postServer(ctx, server.id, server.host, "pinging", tcp.pingMs, false, "TCP OK");
+                                server.lastTestedAt = System.currentTimeMillis();
+                                repo.updateServerSync(server);
+
+                                synchronized (tcpSurvived) { tcpSurvived.add(server); }
+                                if (phase1Active.get()) StatusBus.postServer(ctx, server.id, server.host, "pinging", tcp.pingMs, false, "TCP OK");
                             } else {
                                 server.trafficOk = false;
                                 server.pingMs = -1;
                                 server.tcpPingMs = (int) tcp.pingMs;
                                 server.lastTestedAt = System.currentTimeMillis();
                                 repo.updateServerSync(server);
-                                StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
+                                if (phase1Active.get()) StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
                             }
-                            StatusBus.setProgress(ctx, (curr * 50) / total); // Первая половина прогресс-бара
+
+                            if (phase1Active.get()) {
+                                int progress = (currTcp * 50) / total;
+                                String msg = "⚡ Пинг TCP: " + currTcp + "/" + total + " (ответили: " + tcpSurvived.size() + ")";
+                                StatusBus.postWithProgress(ctx, msg, true, progress);
+                            }
+                        } catch (Exception e) {
+                            // Игнорируем сетевые сбои при отмене
                         } finally {
                             pingLatch.countDown();
                         }
                     });
                 }
 
-                // Таймаут пропорционален размеру — минимум 30с, +1с на каждые 10 серверов
-                long pingTimeout = Math.max(30, total / 10 + 10);
-                pingLatch.await(pingTimeout, TimeUnit.SECONDS);
-                pingPool.shutdownNow();
+                int batches = (int) Math.ceil((double) total / poolSize);
+                long pingTimeout = Math.min(60, Math.max(5, batches * 5L));
 
-                FileLogger.i(W, "Прошли TCP Ping: " + survivedPing.size() + " из " + total);
+                try {
+                    pingLatch.await(pingTimeout, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    // ← ПРАВИЛЬНЫЙ ВЫХОД ПРИ ОТМЕНЕ СТАРОЙ ЗАДАЧИ
+                    FileLogger.w(W, "Фаза 1 прервана (задача отменена системой)");
+                    return Result.success();
+                } finally {
+                    phase1Active.set(false);
+                    pingPool.shutdownNow();
+                }
 
                 // ====================================================================
-                // ЭТАП 2: Глубокий тест выживших (Мультиплексирование V2Ray)
+                // ЭТАП 2: БАТЧИ V2RAY
                 // ====================================================================
-                if (!survivedPing.isEmpty()) {
-                    int basePort = 10800;
+                if (!tcpSurvived.isEmpty() && !Thread.currentThread().isInterrupted()) {
+                    List<VlessServer> survivedPing = tcpSurvived;
+                    Collections.sort(survivedPing, (s1, s2) -> Integer.compare(s1.tcpPingMs, s2.tcpPingMs));
 
-                    // 1. Генерируем мега-конфиг
-                    String multiplexConfig = V2RayConfigBuilder.buildMultiplexTestConfig(survivedPing, basePort);
+                    final int finalSurvivedSize = survivedPing.size();
+                    final int BATCH_SIZE = 100;
+                    java.util.concurrent.atomic.AtomicBoolean phase2Active = new java.util.concurrent.atomic.AtomicBoolean(true);
 
-                    // 2. Тихо запускаем одно ядро V2Ray без TUN интерфейса
-                    boolean coreStarted = V2RayManager.startSilentMultiplexInstance(ctx, multiplexConfig);
-                    Thread.sleep(1500);
+                    for (int startIndex = 0; startIndex < finalSurvivedSize; startIndex += BATCH_SIZE) {
+                        if (Thread.currentThread().isInterrupted() || !phase2Active.get()) break;
 
-                    if (coreStarted) {
-                        ExecutorService httpPool = Executors.newFixedThreadPool(20);
-                        CountDownLatch httpLatch = new CountDownLatch(survivedPing.size());
+                        int endIndex = Math.min(startIndex + BATCH_SIZE, finalSurvivedSize);
+                        List<VlessServer> currentBatch = survivedPing.subList(startIndex, endIndex);
 
-                        // 3. Параллельно стучимся в открытые локальные порты
-                        for (int i = 0; i < survivedPing.size(); i++) {
-                            final VlessServer server = survivedPing.get(i);
-                            final int localProxyPort = basePort + i;
-                            final int currentIndex = i;
+                        int basePort = 10800;
+                        V2RayManager.setTestNetworkForMultiplex(finalCellularNet);
 
-                            httpPool.submit(() -> {
-                                try {
-                                    long startTime = System.currentTimeMillis();
-                                    boolean success = testHttpThroughProxy(localProxyPort);
-                                    long vlessDelay = System.currentTimeMillis() - startTime;
+                        try {
+                            String multiplexConfig = V2RayConfigBuilder.buildMultiplexTestConfig(currentBatch, basePort);
+                            boolean coreStarted = V2RayManager.startSilentMultiplexInstance(ctx, multiplexConfig);
 
-                                    server.lastTestedAt = System.currentTimeMillis();
-                                    if (success) {
-                                        server.pingMs = vlessDelay;
-                                        server.trafficOk = true;
-                                        ok.incrementAndGet();
-                                        StatusBus.postServer(ctx, server.id, server.host, "ok", vlessDelay, true, "✓ VLESS " + vlessDelay + "ms");
-                                    } else {
-                                        server.trafficOk = false;
-                                        server.pingMs = -1;
-                                        StatusBus.postServer(ctx, server.id, server.host, "fail", server.tcpPingMs, false, "✗ DPI Блок");
-                                    }
-                                    repo.updateServerSync(server);
+                            if (coreStarted) {
+                                waitForProxyToStart(basePort, 2000);
 
-                                    int currProgress = 50 + ((currentIndex + 1) * 50) / survivedPing.size();
-                                    StatusBus.setProgress(ctx, currProgress);
-                                    StatusBus.post(ctx, "🔍 Тест трафика (✓ " + ok.get() + " рабочих)", true);
+                                ExecutorService httpPool = Executors.newFixedThreadPool(40);
+                                ExecutorService fastUrlPool = Executors.newCachedThreadPool();
+                                CountDownLatch httpLatch = new CountDownLatch(currentBatch.size());
 
-                                } finally {
-                                    httpLatch.countDown();
+                                for (int i = 0; i < currentBatch.size(); i++) {
+                                    final VlessServer server = currentBatch.get(i);
+                                    final int localProxyPort = basePort + i;
+
+                                    httpPool.submit(() -> {
+                                        // ← ПРЕДОХРАНИТЕЛЬ: защита от зомби во 2 фазе
+                                        if (!phase2Active.get() || Thread.currentThread().isInterrupted()) {
+                                            httpLatch.countDown();
+                                            return;
+                                        }
+
+                                        try {
+                                            long startTime = System.currentTimeMillis();
+                                            boolean success = testHttpThroughProxy(localProxyPort, fastUrlPool);
+                                            long vlessDelay = System.currentTimeMillis() - startTime;
+
+                                            server.lastTestedAt = System.currentTimeMillis();
+
+                                            if (success) {
+                                                server.pingMs = vlessDelay;
+                                                server.trafficOk = true;
+                                                ok.incrementAndGet();
+                                                if (phase2Active.get()) StatusBus.postServer(ctx, server.id, server.host, "ok", vlessDelay, true, "✓ VLESS " + vlessDelay + "ms");
+                                            } else {
+                                                server.trafficOk = false;
+                                                server.pingMs = -1;
+                                                if (phase2Active.get()) StatusBus.postServer(ctx, server.id, server.host, "fail", server.tcpPingMs, false, "✗ DPI Блок");
+                                            }
+                                            repo.updateServerSync(server);
+
+                                            if (phase2Active.get()) {
+                                                int currHttp = httpDone.incrementAndGet();
+                                                int currProgress = 50 + ((currHttp * 50) / finalSurvivedSize);
+                                                String msg = "🔍 Тест VLESS: " + currHttp + "/" + finalSurvivedSize + " (✓ рабочих: " + ok.get() + ")";
+                                                StatusBus.postWithProgress(ctx, msg, true, currProgress);
+                                            }
+                                        } catch (Exception e) {
+                                            // игнор при отмене
+                                        } finally {
+                                            httpLatch.countDown();
+                                        }
+                                    });
                                 }
-                            });
+
+                                try {
+                                    long httpTimeout = Math.max(30, currentBatch.size());
+                                    httpLatch.await(httpTimeout, TimeUnit.SECONDS);
+                                } catch (InterruptedException e) {
+                                    FileLogger.w(W, "Фаза 2 прервана (задача отменена системой)");
+                                    phase2Active.set(false);
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                } finally {
+                                    httpPool.shutdownNow();
+                                    fastUrlPool.shutdownNow();
+                                }
+                            }
+                        } finally {
+                            V2RayManager.clearTestNetwork();
+                            V2RayManager.stopSilentMultiplexInstance();
                         }
-
-                        // Таймаут этапа 2: минимум 60с, +1с на каждый сервер
-                        long httpTimeout = Math.max(60, survivedPing.size());
-                        httpLatch.await(httpTimeout, TimeUnit.SECONDS);
-                        httpPool.shutdownNow();
-
-                        // 4. Убиваем ядро
-                        V2RayManager.stopSilentMultiplexInstance();
-                    } else {
-                        FileLogger.e(W, "Не удалось запустить Мультиплекс V2Ray. Серверы помечены как нерабочие.");
                     }
+                    phase2Active.set(false);
                 }
 
             } catch (Exception e) {
-                FileLogger.e(W, "Критическая ошибка конвейера: " + e.getMessage());
+                // Если ошибка не null, логируем её. NPE (null) больше не должен возникать, т.к. мы отловили InterruptedException выше
+                String errMsg = e.getMessage() != null ? e.getMessage() : e.toString();
+                FileLogger.e(W, "Критическая ошибка конвейера: " + errMsg);
             } finally {
-                // Возвращаем сеть по умолчанию
-                cm.bindProcessToNetwork(null);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    cm.bindProcessToNetwork(null);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    ConnectivityManager.setProcessDefaultNetwork(null);
+                }
+
+                if (cellCallback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    try {
+                        cm.unregisterNetworkCallback(cellCallback);
+                    } catch (Exception ignore) {}
+                }
             }
 
             repo.markScanned();
 
-            // ================================================
-            // ← ИСПРАВЛЕННЫЙ ФИНАЛЬНЫЙ ИТОГ (работает при батчах и двойном запуске)
-            // ================================================
-            int realTotal   = repo.getAllServersSync().size();   // реальное количество ВСЕХ серверов в БД
-            int realWorking = repo.getWorkingCount();            // реальное количество рабочих
+            int realTotal   = repo.getAllServersSync().size();
+            int realWorking = repo.getWorkingCount();
 
-            // Защита от двойного логирования (если ScanWorker запустился дважды подряд)
             long now = System.currentTimeMillis();
-            if (now - lastFinalLogTime > 8000) {   // печатаем только один раз за 8 секунд
+            if (now - lastFinalLogTime > 8000) {
                 lastFinalLogTime = now;
-
                 StatusBus.setWorking(ctx, false);
                 StatusBus.done(ctx, realWorking + " рабочих из " + realTotal + " (FAIL " + (realTotal - realWorking) + ")");
-
-                FileLogger.i(W, "╔══════════════════════════════════════════════╗");
-                FileLogger.i(W, "║          ИТОГОВАЯ СТАТИСТИКА СКАНИРОВАНИЯ          ║");
-                FileLogger.i(W, "╟──────────────────────────────────────────────╢");
-                FileLogger.i(W, "║ Всего серверов в базе данных   : " + String.format("%4d", realTotal)   + "                ║");
-                FileLogger.i(W, "║ Рабочих серверов               : " + String.format("%4d", realWorking) + "                ║");
-                FileLogger.i(W, "║ Не прошло тест                 : " + String.format("%4d", realTotal - realWorking) + "                ║");
-                FileLogger.i(W, "╚══════════════════════════════════════════════╝");
+                FileLogger.i(W, "Проверка завершена: " + String.format("%4d", realWorking) + "/" + String.format("%4d", realTotal));
             }
 
             if (realWorking == 0) {
-                FileLogger.w(W, "0 рабочих серверов — включаем fallback (30 серверов)");
                 enableFallbackServers(ctx, repo, allServers);
-            }
-
-            // Обновляем AOD
-            if (com.vlessvpn.app.service.AodOverlayService.isRunning
-                    && com.vlessvpn.app.service.VpnTunnelService.isRunning) {
-                String host = com.vlessvpn.app.service.VpnTunnelService.getCurrentServer() != null
-                        ? com.vlessvpn.app.service.VpnTunnelService.getCurrentServer().host : null;
-                com.vlessvpn.app.service.AodOverlayService.sendStatus(
-                        ctx, true, host, null, realWorking + "/" + realTotal);
             }
 
             checkAutoConnect(ctx, repo);
@@ -504,7 +590,6 @@ public class BackgroundMonitorService extends Service {
         }
 
         private void enableFallbackServers(Context ctx, ServerRepository repo, List<VlessServer> allServers) {
-            // Берём первые 30 серверов с рабочим TCP ping (или любые если TCP тоже failed)
             List<VlessServer> fallbackCandidates = new java.util.ArrayList<>();
 
             for (VlessServer server : allServers) {
@@ -514,18 +599,16 @@ public class BackgroundMonitorService extends Service {
                 if (fallbackCandidates.size() >= 30) break;
             }
 
-            // Если TCP ping тоже все failed — берём просто первые 30
             if (fallbackCandidates.isEmpty()) {
                 for (int i = 0; i < Math.min(30, allServers.size()); i++) {
                     fallbackCandidates.add(allServers.get(i));
                 }
             }
 
-            // Помечаем как потенциально рабочие (сбрасываем статус теста)
             int enabled = 0;
             for (VlessServer server : fallbackCandidates) {
-                server.trafficOk = true;  // ← Помечаем как рабочий
-                server.pingMs = server.tcpPingMs > 0 ? server.tcpPingMs : 9999;  // ← Используем TCP ping
+                server.trafficOk = true;
+                server.pingMs = server.tcpPingMs > 0 ? server.tcpPingMs : 9999;
                 server.lastTestedAt = System.currentTimeMillis();
                 repo.updateServerSync(server);
                 enabled++;
@@ -536,49 +619,60 @@ public class BackgroundMonitorService extends Service {
         }
 
         /**
-         * Делает HTTP GET запрос к легковесному эндпоинту через локальный HTTP прокси.
+         * УМНЫЙ ТЕСТ: Запускает параллельно запросы ко всем URL.
+         * Завершается моментально при первом успешном ответе (код 200-399).
+         * Если все падают — сразу возвращает false без долгого ожидания.
          */
-        private boolean testHttpThroughProxy(int proxyPort) {
-            java.net.HttpURLConnection conn = null;
-            try {
-                // HTTP proxy поддерживает только HTTP URLs напрямую (не HTTPS без CONNECT)
-                // Используем несколько лёгких HTTP endpoint — первый успешный = сервер рабочий
-                String[] testUrls = {
-                    "http://cp.cloudflare.com/generate_204",     // 204 без тела — мгновенно
-                    "http://connectivitycheck.gstatic.com/generate_204",
-                    "http://www.msftconnecttest.com/connecttest.txt"
-                };
-                java.net.Proxy proxy = new java.net.Proxy(
-                        java.net.Proxy.Type.HTTP,
-                        new java.net.InetSocketAddress("127.0.0.1", proxyPort));
+        private boolean testHttpThroughProxy(int proxyPort, ExecutorService fastUrlPool) {
+            java.net.Proxy proxy = new java.net.Proxy(
+                    java.net.Proxy.Type.HTTP,
+                    new java.net.InetSocketAddress("127.0.0.1", proxyPort));
 
-                for (String urlStr : testUrls) {
+            CountDownLatch latch = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicBoolean success = new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.concurrent.atomic.AtomicInteger finishedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            for (String urlStr : testUrls) {
+                fastUrlPool.submit(() -> {
+                    java.net.HttpURLConnection conn = null;
                     try {
-                        conn = (java.net.HttpURLConnection)
-                                new java.net.URL(urlStr).openConnection(proxy);
-                        conn.setConnectTimeout(4000);
-                        conn.setReadTimeout(4000);
-                        conn.setRequestMethod("GET");
+                        conn = (java.net.HttpURLConnection) new java.net.URL(urlStr).openConnection(proxy);
+                        conn.setConnectTimeout(3000);
+                        conn.setReadTimeout(3000);
+                        conn.setRequestMethod("GET"); // Оставляем GET для лучшего прохождения DPI
                         conn.setUseCaches(false);
                         conn.setInstanceFollowRedirects(false);
-                        int code = conn.getResponseCode();
-                        conn.disconnect(); conn = null;
-                        if (code >= 200 && code < 400) return true;
-                    } catch (Exception e) {
-                        if (conn != null) { conn.disconnect(); conn = null; }
-                    }
-                }
-                return false;
 
-            } catch (Exception e) {
-                return false;
-            } finally {
-                if (conn != null) conn.disconnect();
+                        int code = conn.getResponseCode();
+                        if (code >= 200 && code < 400) {
+                            // Если мы первые получили успех, меняем флаг и отпускаем защелку
+                            if (success.compareAndSet(false, true)) {
+                                latch.countDown();
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Ошибка (таймаут/разрыв) - игнорируем
+                    } finally {
+                        if (conn != null) conn.disconnect();
+                        // Если это был последний URL и все они завершились неудачно, отпускаем защелку
+                        if (finishedCount.incrementAndGet() == testUrls.length) {
+                            latch.countDown();
+                        }
+                    }
+                });
             }
+
+            try {
+                // Максимальное время ожидания - чуть больше таймаута коннекта (3.5 сек)
+                latch.await(3500, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            return success.get();
         }
 
         private static void checkAutoConnect(Context ctx, ServerRepository repo) {
-            // ... оставляете ваш существующий код метода checkAutoConnect без изменений ...
             if (!repo.isAutoConnectAfterScan()) return;
 
             boolean wifiConnected = WifiMonitor.isWifiConnected(ctx);
@@ -634,9 +728,6 @@ public class BackgroundMonitorService extends Service {
 
             StatusBus.post(ctx, "📥 Скачиваем список через белый сервер...", true);
 
-            // ════════════════════════════════════════════════════════════════
-            // ← НОВОЕ: Берём URL из настроек (как основные списки)
-            // ════════════════════════════════════════════════════════════════
             String[] configUrls = repo.getConfigUrls();
 
             int totalDownloaded = 0;
@@ -644,19 +735,11 @@ public class BackgroundMonitorService extends Service {
                 String url = configUrls[i];
                 if (url == null || url.trim().isEmpty()) continue;
 
-                // ════════════════════════════════════════════════════════════════
-                // ← НОВОЕ: Оборачиваем URL в Yandex translate proxy
-                // ════════════════════════════════════════════════════════════════
                 String wrappedUrl = wrapWithYandexTranslate(url);
-                // FileLogger.i(W, "Оригинал: " + url);
-                //FileLogger.i(W, "Через Yandex: " + wrappedUrl);
 
                 StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + configUrls.length, true);
 
                 try {
-                    // ════════════════════════════════════════════════════════════════
-                    // ← Скачиваем через обёрнутый URL
-                    // ════════════════════════════════════════════════════════════════
                     List<VlessServer> fresh = new ConfigDownloader().download(ctx, wrappedUrl, url.trim());
                     if (!fresh.isEmpty()) {
                         repo.deleteBySourceUrlSync(url.trim());
@@ -672,9 +755,6 @@ public class BackgroundMonitorService extends Service {
             repo.markUpdated();
             StatusBus.done(ctx, "✅ Загружено " + totalDownloaded + " серверов");
 
-            // ════════════════════════════════════════════════════════════════
-            // ← Всегда запускаем сканирование после скачивания
-            // ════════════════════════════════════════════════════════════════
             if (totalDownloaded > 0) {
                 FileLogger.i(W, "Скачано " + totalDownloaded + " серверов → запускаем сканирование");
                 StatusBus.post(ctx, "🔍 Запускаем проверку серверов...", true);
@@ -685,14 +765,8 @@ public class BackgroundMonitorService extends Service {
             return Result.success();
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // ← НОВЫЙ МЕТОД: Оборачивает URL в Yandex translate proxy
-        // ════════════════════════════════════════════════════════════════
         private String wrapWithYandexTranslate(String originalUrl) {
             try {
-                // ════════════════════════════════════════════════════════════════
-                // ← Очищаем URL от всех лишних символов перед кодированием
-                // ════════════════════════════════════════════════════════════════
                 String cleanUrl = originalUrl.trim().replaceAll("\\r?\\n", "").replaceAll("\\s+", "");
 
                 String encodedUrl = java.net.URLEncoder.encode(cleanUrl, "UTF-8");

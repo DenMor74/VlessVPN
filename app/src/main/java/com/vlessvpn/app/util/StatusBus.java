@@ -160,6 +160,25 @@ public class StatusBus {
         }
     }
 
+    public static synchronized void postWithProgress(Context ctx, String msg, boolean isRunning, int percent) {
+        // ОБЯЗАТЕЛЬНО создаем НОВЫЙ объект, чтобы потоки не перезаписывали данные друг друга
+        StatusEvent newEvent = new StatusEvent();
+        newEvent.message = msg;
+        newEvent.isRunning = isRunning; // ← ИСПРАВЛЕНО: используем правильное имя поля
+        newEvent.progress = percent;
+
+        globalStatus.postValue(newEvent);
+
+        if (ctx != null) {
+            Intent intent = new Intent(ACTION_STATUS_CHANGED);
+            // ← ИСПРАВЛЕНО: используем ваши константы для правильной передачи в UI
+            intent.putExtra(EXTRA_PROGRESS, percent);
+            intent.putExtra(EXTRA_MESSAGE, msg);
+            intent.putExtra(EXTRA_IS_RUNNING, isRunning);
+            ctx.sendBroadcast(intent);
+        }
+    }
+
     public static void updateCounts(Context ctx, int total, int ok, int fail) {
         StatusEvent event = globalStatus.getValue();
         if (event == null) event = new StatusEvent();

@@ -110,6 +110,18 @@
             android:textColor="#FFFFFF"
             android:gravity="start"/>
 
+        <ProgressBar
+            android:id="@+id/progress_scan"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="2dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="#4CAF50"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/tv_server_counts"
             android:layout_width="match_parent"

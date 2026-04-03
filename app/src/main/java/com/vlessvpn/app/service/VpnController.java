@@ -8,6 +8,8 @@ import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
+import java.util.List;
+
 /**
  * VpnController — ЕДИНАЯ ТОЧКА УПРАВЛЕНИЯ подключением.
  * Всё подключение/отключение теперь только через этот класс.
@@ -120,11 +122,24 @@ public class VpnController {
     // Вызывается из WifiMonitor и AutoConnectManager
     public void startAutoConnect() {
         VlessServer best = repository.getLastWorkingServer();
+
         if (best != null) {
             FileLogger.i(TAG, "VpnController → startAutoConnect: " + best.host);
             connect(best, true);
-        } else {
-            FileLogger.w(TAG, "Нет рабочих серверов для авто-подключения");
+            return;
         }
+
+        FileLogger.i(TAG, "startAutoConnect: нет lastWorkingServer — пробуем топ серверов");
+
+        List<VlessServer> top = repository.getTopServersSync();
+        if (top != null && !top.isEmpty()) {
+            best = top.get(0);
+            FileLogger.i(TAG, "startAutoConnect: fallback — выбран " + best.host + " из топ-" + top.size());
+            connect(best, true);
+            return;
+        }
+
+        FileLogger.w(TAG, "Нет рабочих серверов для авто-подключения");
     }
+
 }

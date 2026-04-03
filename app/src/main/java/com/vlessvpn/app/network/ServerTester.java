@@ -12,6 +12,7 @@ import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.util.FileLogger;
 
 import java.io.FileDescriptor;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -56,24 +57,49 @@ public class ServerTester {
 
     // ── 1. TCP пинг ────────────────────────────────────────────────────────
 
-    public static TestResult tcpTest(Context ctx, VlessServer server) {
+// ── 1. TCP пинг ────────────────────────────────────────────────────────
+
+    /**
+     * Перегрузка: явная передача сети для теста (используется в ScanWorker)
+     */
+    public static TestResult tcpTest(Context ctx, VlessServer server, Network bindNet) {
         TestResult r = new TestResult();
-        Network cellular = getCellularNetwork(ctx);
         long best = -1;
 
-        if (cellular != null) {
+        // Если сеть задана — используем только её
+        if (bindNet != null) {
             for (int i = 0; i < REPEAT; i++) {
-                long ms = socketConnect(ctx, server.host, server.port, cellular);
-                if (ms >= 0 && (best < 0 || ms < best)) { best = ms; r.networkType = "LTE"; }
+                long ms = socketConnect(ctx, server.host, server.port, bindNet);
+                if (ms >= 0 && (best < 0 || ms < best)) {
+                    best = ms;
+                    r.networkType = getNetworkTypeName(bindNet, ctx);
+                }
             }
         }
+        // Если сеть не задана — авто-выбор (старая логика)
+        else {
+            Network cellular = getCellularNetwork(ctx);
 
-        // Fallback на WiFi только если LTE сети нет совсем
-        if (best < 0 && cellular == null) {
-            Network wifi = getWifiNetwork(ctx);
-            for (int i = 0; i < REPEAT; i++) {
-                long ms = socketConnect(ctx, server.host, server.port, wifi);
-                if (ms >= 0 && (best < 0 || ms < best)) { best = ms; r.networkType = "WiFi"; }
+            if (cellular != null) {
+                for (int i = 0; i < REPEAT; i++) {
+                    long ms = socketConnect(ctx, server.host, server.port, cellular);
+                    if (ms >= 0 && (best < 0 || ms < best)) {
+                        best = ms;
+                        r.networkType = "LTE";
+                    }
+                }
+            }
+
+            // Fallback на WiFi только если LTE сети нет совсем
+            if (best < 0 && cellular == null) {
+                Network wifi = getWifiNetwork(ctx);
+                for (int i = 0; i < REPEAT; i++) {
+                    long ms = socketConnect(ctx, server.host, server.port, wifi);
+                    if (ms >= 0 && (best < 0 || ms < best)) {
+                        best = ms;
+                        r.networkType = "WiFi";
+                    }
+                }
             }
         }
 
@@ -82,9 +108,33 @@ public class ServerTester {
             r.trafficOk = true;
         } else {
             r.errorMessage = "недоступен";
-            r.networkType  = cellular != null ? "LTE" : "WiFi";
+            r.networkType  = bindNet != null ? getNetworkTypeName(bindNet, ctx) : "unknown";
         }
         return r;
+    }
+
+    /**
+     * Старая сигнатура для обратной совместимости
+     */
+    public static TestResult tcpTest(Context ctx, VlessServer server) {
+        return tcpTest(ctx, server, null);
+    }
+
+    /**
+     * Вспомогательный метод: определение типа сети для лога
+     */
+    private static String getNetworkTypeName(Network net, Context ctx) {
+        if (net == null || ctx == null) return "unknown";
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return "unknown";
+
+        android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+        if (caps == null) return "unknown";
+
+        if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) return "LTE/5G";
+        if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) return "WiFi";
+        if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) return "Ethernet";
+        return "Other";
     }
 
     // ── 2. Проверка трафика через VPN ──────────────────────────────────────
@@ -151,7 +201,24 @@ public class ServerTester {
 
             // Привязка сокета к LTE/WiFi (это само по себе пускает трафик в обход VPN)
             if (bindNet != null) {
-                try { bindNet.bindSocket(fd); } catch (Exception ignored) {}
+                try {
+                    // Пробуем привязать сокет к сети
+                    bindNet.bindSocket(fd);
+                    // FileLogger.d(TAG, "Socket bound via bindSocket");
+
+                } catch (SecurityException e) {
+                    // Android 13+: нет разрешения BIND_NETWORK
+                    // Это нормально! Процесс уже привязан через bindProcessToNetwork
+                    FileLogger.d(TAG, "bindSocket: нет прав BIND_NETWORK — используем process-bound");
+
+                } catch (IOException e) {
+                    // Сетевая ошибка привязки
+                    FileLogger.w(TAG, "bindSocket IO error: " + e.getMessage());
+
+                } catch (Exception e) {
+                    // Любая другая ошибка — не критична
+                    FileLogger.d(TAG, "bindSocket skipped: " + e.getMessage());
+                }
             }
 
             java.net.InetAddress addr = java.net.InetAddress.getByName(host);
@@ -212,4 +279,5 @@ public class ServerTester {
         }
         return null;
     }
+
 }

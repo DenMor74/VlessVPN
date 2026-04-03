@@ -28,6 +28,14 @@ public class V2RayConfigBuilder {
             log.put("loglevel", "warning");
             config.put("log", log);
 
+            // ===== DNS (Безопасный блок) =====
+            JSONObject dns = new JSONObject();
+            JSONArray dnsServers = new JSONArray();
+            dnsServers.put("1.1.1.1");
+            dnsServers.put("8.8.8.8");
+            dns.put("servers", dnsServers);
+            config.put("dns", dns);
+
             // ===== INBOUNDS =====
             JSONArray inbounds = new JSONArray();
 
@@ -42,6 +50,7 @@ public class V2RayConfigBuilder {
             socksSettings.put("udp", true);
             socksInbound.put("settings", socksSettings);
 
+            // Сниффинг (безопасный вариант без quic и routeOnly)
             JSONObject sniffing = new JSONObject();
             sniffing.put("enabled", true);
             JSONArray destOverride = new JSONArray();
@@ -70,12 +79,7 @@ public class V2RayConfigBuilder {
             JSONArray users = new JSONArray();
             JSONObject user = new JSONObject();
 
-            // ════════════════════════════════════════════════════════════════
-            // ← ИСПРАВЛЕНО: используем server.uuid (НЕ server.id!)
-            // server.id = uuid@host:port (для БД)
-            // server.uuid = только UUID (для V2Ray)
-            // ════════════════════════════════════════════════════════════════
-            user.put("id", server.uuid);  // ← ВАЖНО: uuid, не id!
+            user.put("id", server.uuid);
             user.put("encryption", "none");
 
             if (server.flow != null && !server.flow.isEmpty()) {
@@ -88,17 +92,17 @@ public class V2RayConfigBuilder {
             outSettings.put("vnext", vnext);
             vlessOut.put("settings", outSettings);
 
-            // Stream Settings
+            // Stream Settings (используем тот же buildStreamSettings)
             vlessOut.put("streamSettings", buildStreamSettings(server));
             outbounds.put(vlessOut);
 
-            // Freedom outbound
+            // Freedom outbound (прямое соединение)
             JSONObject freedom = new JSONObject();
             freedom.put("tag", "direct");
             freedom.put("protocol", "freedom");
             outbounds.put(freedom);
 
-            // Blackhole
+            // Blackhole outbound (блокировка)
             JSONObject blackhole = new JSONObject();
             blackhole.put("tag", "block");
             blackhole.put("protocol", "blackhole");
@@ -108,13 +112,31 @@ public class V2RayConfigBuilder {
 
             // ===== ROUTING =====
             JSONObject routing = new JSONObject();
-            routing.put("domainStrategy", "AsIs");
+            routing.put("domainStrategy", "IPIfNonMatch");
+
             JSONArray rules = new JSONArray();
+
+            // 1. Исключаем локальную сеть (LAN) без использования geoip.dat
+            JSONObject directPrivate = new JSONObject();
+            directPrivate.put("type", "field");
+            directPrivate.put("outboundTag", "direct");
+            JSONArray privateIps = new JSONArray();
+            privateIps.put("10.0.0.0/8");        // Локалки
+            privateIps.put("172.16.0.0/12");     // Docker / Локалки
+            privateIps.put("192.168.0.0/16");    // Wi-Fi Роутеры
+            privateIps.put("127.0.0.0/8");       // Localhost
+            privateIps.put("fc00::/7");          // IPv6 Local
+            privateIps.put("fe80::/10");         // IPv6 Link-local
+            directPrivate.put("ip", privateIps);
+            rules.put(directPrivate);
+
+            // 2. Всё остальное отправляем в прокси
             JSONObject proxyAll = new JSONObject();
             proxyAll.put("type", "field");
             proxyAll.put("network", "tcp,udp");
             proxyAll.put("outboundTag", "proxy");
             rules.put(proxyAll);
+
             routing.put("rules", rules);
             config.put("routing", routing);
 
@@ -135,15 +157,22 @@ public class V2RayConfigBuilder {
 
         String security = server.security != null ? server.security : "none";
 
+        // Стандартный набор ALPN для маскировки под HTTPS
+        JSONArray alpn = new JSONArray();
+        alpn.put("h2");
+        alpn.put("http/1.1");
+
         switch (security) {
             case "reality":
                 stream.put("security", "reality");
                 JSONObject realitySettings = new JSONObject();
                 realitySettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
-                realitySettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "chrome");
+                // "random" или "randomized" лучше защищают от DPI, чем просто "chrome"
+                realitySettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "randomized");
                 realitySettings.put("publicKey", server.pbk != null ? server.pbk : "");
                 realitySettings.put("shortId", server.sid != null ? server.sid : "");
-                realitySettings.put("spiderX", "");  // требуется v2ray-core ≥ v5
+                realitySettings.put("spiderX", "");  // Можно заменить на server.spiderX если добавите в модель
+                realitySettings.put("alpn", alpn); // Добавлен ALPN
                 stream.put("realitySettings", realitySettings);
                 break;
 
@@ -151,14 +180,16 @@ public class V2RayConfigBuilder {
                 stream.put("security", "tls");
                 JSONObject tlsSettings = new JSONObject();
                 tlsSettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
-                tlsSettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "chrome");
+                tlsSettings.put("fingerprint", server.fp != null && !server.fp.isEmpty() ? server.fp : "randomized");
                 tlsSettings.put("allowInsecure", false);
+                tlsSettings.put("alpn", alpn); // Добавлен ALPN
                 stream.put("tlsSettings", tlsSettings);
                 break;
 
             default:
                 stream.put("security", "none");
         }
+
 
         switch (server.networkType != null ? server.networkType : "tcp") {
             case "xhttp":
@@ -275,9 +306,19 @@ public class V2RayConfigBuilder {
                     skippedHttpTransport++;
                     continue;
                 }
+                // ════════════════════════════════════════════════════════════════
+                // ← НОВЫЙ Фильтр 4: Защита от мусора в параметрах (Реклама Telegram и т.д.)
+                // ════════════════════════════════════════════════════════════════
+                String net = server.networkType != null ? server.networkType.trim().toLowerCase() : "tcp";
+                if (!net.equals("tcp") && !net.equals("ws") && !net.equals("grpc") &&
+                        !net.equals("xhttp") && !net.equals("kcp") && !net.equals("quic") && !net.equals("h2")) {
+                    FileLogger.w(TAG, "Пропуск сервера " + server.host + " — мусор в networkType: " + net);
+                    skippedOther++;
+                    continue;
+                }
 
                 // ════════════════════════════════════════════════════════════════
-                // ← Фильтр 4: Другие критические проблемы
+                // ← Фильтр 5: Другие критические проблемы
                 // ════════════════════════════════════════════════════════════════
                 if (server.host == null || server.host.trim().isEmpty()) {
                     skippedOther++;
@@ -351,7 +392,7 @@ public class V2RayConfigBuilder {
             }
 
             // Статистика фильтрации
-            FileLogger.i(TAG, "Фильтрация: " + servers.size() + " → " + validCount +
+            FileLogger.i(TAG, "Фильтр: " + servers.size() + " → " + validCount +
                     " (отклонено: shortId=" + skippedInvalidShortId +
                     ", noPbk=" + skippedNoPublicKey +
                     ", noSni=" + skippedNoSni +
@@ -384,7 +425,7 @@ public class V2RayConfigBuilder {
             config.put("routing", routing);
 
             String configStr = config.toString();
-            FileLogger.d(TAG, "Мультиплекс конфиг: " + validCount + " серверов → " +
+            FileLogger.d(TAG, "ТЕСТ конфиг: " + validCount + " серверов → " +
                     outbounds.length() + " outbounds, " + configStr.length() + " байт");
             return configStr;
 

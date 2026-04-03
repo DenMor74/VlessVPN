@@ -5,6 +5,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.TrafficStats;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -12,7 +13,8 @@ import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.util.FileLogger;
 
-
+import java.io.FileDescriptor;
+import java.io.IOException;
 
 public class V2RayManager {
 
@@ -24,6 +26,11 @@ public class V2RayManager {
 
     private static volatile boolean coreEnvReady = false;
     private static final Object     envLock      = new Object();
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВОЕ: Сеть для тестов (LTE) — используется в onEmitStatus
+    // ════════════════════════════════════════════════════════════════
+    private static Network sTestCellularNetwork = null;
 
     public static void initEnvOnce(Context ctx) {
         if (coreEnvReady) return;
@@ -42,37 +49,22 @@ public class V2RayManager {
 
     public long[] getStats() {
         try {
-            // ════════════════════════════════════════════════════════════════
-            // ← Получаем ОБЩИЙ трафик устройства
-            // ════════════════════════════════════════════════════════════════
             long currentTotalTx = TrafficStats.getTotalTxBytes();
             long currentTotalRx = TrafficStats.getTotalRxBytes();
             long currentTime = System.currentTimeMillis();
 
-            // ════════════════════════════════════════════════════════════════
-            // ← Вычисляем разницу с последнего замера (байты за секунду)
-            // ════════════════════════════════════════════════════════════════
             long timeDelta = currentTime - lastQueryTime;
 
             if (timeDelta < 500) {
-                // Слишком быстро — возвращаем последние значения
                 return new long[]{currentTotalTx - lastTotalTx, currentTotalRx - lastTotalRx};
             }
 
             long up = currentTotalTx - lastTotalTx;
             long down = currentTotalRx - lastTotalRx;
 
-            // ════════════════════════════════════════════════════════════════
-            // ← Сохраняем для следующего замера
-            // ════════════════════════════════════════════════════════════════
             lastTotalTx = currentTotalTx;
             lastTotalRx = currentTotalRx;
             lastQueryTime = currentTime;
-
-            // ════════════════════════════════════════════════════════════════
-            // ← Логирование (для отладки)
-            // ════════════════════════════════════════════════════════════════
-            //FileLogger.d(TAG, "queryStats: up=" + up + " down=" + down + " (timeDelta=" + timeDelta + "ms)");
 
             return new long[]{up, down};
 
@@ -99,13 +91,9 @@ public class V2RayManager {
         this.callback = callback;
     }
 
-    /** Запускает v2ray core. Блокирует поток до остановки. */
     public boolean start(VlessServer server) {
         stop();
         currentServer = server;
-        // ════════════════════════════════════════════════════════════════
-        // ← Сбросить счётчики при старте VPN
-        // ════════════════════════════════════════════════════════════════
         lastTotalTx = TrafficStats.getTotalTxBytes();
         lastTotalRx = TrafficStats.getTotalRxBytes();
         lastQueryTime = System.currentTimeMillis();
@@ -156,12 +144,8 @@ public class V2RayManager {
         return coreController != null && coreController.getIsRunning();
     }
 
-    // ── Измерение задержки (для ScanWorker) ────────────────────────────────
+    // ── Измерение задержки ────────────────────────────────
 
-    /**
-     * Статический measureDelay через Xray core.
-     * Безопасно вызывается из параллельных потоков ScanWorker.
-     */
     public static long measureDelay(Context ctx, String configJson) {
         initEnvOnce(ctx);
         try {
@@ -170,6 +154,26 @@ public class V2RayManager {
         } catch (Exception e) {
             return -1;
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ← НОВЫЕ МЕТОДЫ: Управление тестовой сетью
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Установить мобильную сеть для тестов (вызывать ПЕРЕД запуском мультиплекса)
+     */
+    public static void setTestNetworkForMultiplex(Network cellularNet) {
+        sTestCellularNetwork = cellularNet;
+        FileLogger.i(TAG, "Test network set: " + (cellularNet != null ? "LTE/5G" : "null"));
+    }
+
+    /**
+     * Очистить тестовую сеть (вызывать ПОСЛЕ завершения тестов)
+     */
+    public static void clearTestNetwork() {
+        sTestCellularNetwork = null;
+        FileLogger.i(TAG, "Test network cleared");
     }
 
     // ── CoreCallbackHandler ───────────────────────────────────────────────
@@ -193,6 +197,7 @@ public class V2RayManager {
         @Override
         public long onEmitStatus(long level, String message) {
             if (message == null || message.isEmpty()) return 0;
+
             // Fallback protect (некоторые версии libv2ray шлют через onEmitStatus)
             if (message.startsWith("protect:") || message.startsWith("Protect:")) {
                 try {
@@ -210,24 +215,17 @@ public class V2RayManager {
 
     /**
      * Запускает единый инстанс ядра с мультиплекс-конфигом в "тихом" режиме.
-     * Не привязывается к VpnService, не возвращает TunFd, не делает protectSocket.
-     *
-     * @param context Context приложения
-     * @param multiplexConfigJson Конфиг, сгенерированный V2RayConfigBuilder.buildMultiplexTestConfig
-     * @return true если запустилось
+     * Теперь: сокеты привязываются к LTE если задана sTestCellularNetwork.
      */
     public static boolean startSilentMultiplexInstance(Context context, String multiplexConfigJson) {
-        stopSilentMultiplexInstance(); // На всякий случай убиваем старый
+        stopSilentMultiplexInstance();
         initEnvOnce(context);
 
         try {
-            // Создаем заглушку (SilentCallback), которая ни при каких условиях
-            // не будет дергать VpnTunnelService, чтобы не будить экран!
             silentCoreController = libv2ray.Libv2ray.newCoreController(new libv2ray.CoreCallbackHandler() {
                 @Override
                 public long startup() {
-                    // Возвращаем -1, потому что нам не нужен TUN интерфейс для теста
-                    return -1;
+                    return -1;  // Не нужен TUN интерфейс для теста
                 }
 
                 @Override
@@ -237,17 +235,49 @@ public class V2RayManager {
 
                 @Override
                 public long onEmitStatus(long level, String message) {
-                    // ИГНОРИРУЕМ запросы "protect:", так как мы привяжем
-                    // весь процесс к LTE сети на уровне Android (bindProcessToNetwork)
+                    // ════════════════════════════════════════════════════════════════
+                    // ← Обрабатываем protect-запросы от v2ray
+                    // ════════════════════════════════════════════════════════════════
+                    if (message != null && !message.isEmpty()) {
+                        if (message.startsWith("protect:") || message.startsWith("Protect:")) {
+                            try {
+                                int fd = Integer.parseInt(message.substring(8).trim());
+
+                                // ════════════════════════════════════════════════════
+                                // ← Если задана тестовая сеть — привязываем сокет к ней
+                                // ════════════════════════════════════════════════════
+                                Network testNet = sTestCellularNetwork;
+                                if (testNet != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                    // ← ИСПРАВЛЕНО: bindSocket() возвращает void, не int!
+                                    FileDescriptor fdObj = intToFileDescriptor(fd);
+                                    if (fdObj != null) {
+                                        try {
+                                            testNet.bindSocket(fdObj);  // ← Просто вызываем, без присваивания
+                                            // FileLogger.d(TAG, "Socket fd=" + fd + " bound to LTE");
+                                            return 0;  // Успех
+                                        } catch (IOException e) {
+                                            FileLogger.w(TAG, "bindSocket failed: " + e.getMessage());
+                                            // Если ошибка — пробуем fallback к protect
+                                        }
+                                    }
+                                }
+
+                                // Fallback: protect для обхода VPN (если не тест)
+                                // if (VpnTunnelService.vpnInterface != null) {
+                                //    VpnTunnelService.protectSocket(fd);
+                                //}
+
+                            } catch (Exception e) {
+                                FileLogger.w(TAG, "onEmitStatus error: " + e.getMessage());
+                            }
+                        }
+                    }
                     return 0;
                 }
             });
 
-            // Запускаем ядро в фоне
-            // ВАЖНО: 0 (или -1 в зависимости от вашей версии libv2ray) означает отсутствие tunFd
             silentCoreController.startLoop(multiplexConfigJson, 0);
 
-            // Даем ядру немного времени на инициализацию портов
             int retries = 0;
             while (!silentCoreController.getIsRunning() && retries < 5) {
                 Thread.sleep(200);
@@ -259,7 +289,6 @@ public class V2RayManager {
                 return false;
             }
 
-            // FileLogger.i(TAG, "Тихий v2ray (Мультиплекс) успешно запущен");
             return true;
 
         } catch (Exception e) {
@@ -269,18 +298,31 @@ public class V2RayManager {
         }
     }
 
-    /**
-     * Останавливает "тихий" инстанс после завершения тестов.
-     */
     public static void stopSilentMultiplexInstance() {
         if (silentCoreController != null) {
             try {
                 silentCoreController.stopLoop();
-               // FileLogger.i(TAG, "Тихий v2ray остановлен");
             } catch (Exception e) {
                 FileLogger.w(TAG, "stopSilentMultiplexLoop: " + e.getMessage());
             }
             silentCoreController = null;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+// ← Вспомогательный метод: int fd → FileDescriptor
+// ════════════════════════════════════════════════════════════════
+    private static FileDescriptor intToFileDescriptor(int fd) {
+        if (fd < 0) return null;
+        try {
+            FileDescriptor fdObj = new FileDescriptor();
+            java.lang.reflect.Field f = FileDescriptor.class.getDeclaredField("descriptor");
+            f.setAccessible(true);
+            f.setInt(fdObj, fd);
+            return fdObj;
+        } catch (Exception e) {
+            FileLogger.w(TAG, "intToFileDescriptor failed: " + e.getMessage());
+            return null;
         }
     }
 

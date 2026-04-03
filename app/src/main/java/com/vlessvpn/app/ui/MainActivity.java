@@ -87,6 +87,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvServerCounts;
     private TextView tvLastUpdate;
     private TextView tvLastScan;
+    private ProgressBar progressScan;
 
     private VlessServer pendingServer = null;
     private boolean receiverRegistered = false;
@@ -126,16 +127,37 @@ public class MainActivity extends AppCompatActivity {
                 int ok = intent.getIntExtra(StatusBus.EXTRA_OK, 0);
                 int fail = intent.getIntExtra(StatusBus.EXTRA_FAIL, 0);
 
+                // ← ДОБАВЛЕНО: Читаем текущий прогресс (от -1 до 100)
+                int progress = intent.getIntExtra(StatusBus.EXTRA_PROGRESS, -1);
+
                 if (message != null && !message.isEmpty()) {
                     mainHandler.post(() -> {
+                        // Меняем текст
                         if (isRunning) {
                             tvStatusMode.setText("🔍 " + message);
                         } else {
                             tvStatusMode.setText("✅ " + message);
                         }
 
+                        // Обновляем счетчики
                         if (total > 0) {
                             tvServerCounts.setText("📊 Всего: " + total + " | ✓ Рабочих: " + ok + " | ✗ Нет связи: " + fail);
+                        }
+
+                        // ← ДОБАВЛЕНО: Управляем полосой загрузки
+                        if (progressScan != null) {
+                            if (isRunning && progress >= 0) {
+                                progressScan.setVisibility(View.VISIBLE);
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                    progressScan.setProgress(progress, true); // Плавная анимация
+                                } else {
+                                    progressScan.setProgress(progress);
+                                }
+                            } else if (!isRunning) {
+                                // Прячем полосу по завершении
+                                progressScan.setVisibility(View.GONE);
+                                progressScan.setProgress(0);
+                            }
                         }
                     });
                 }
@@ -251,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
         tvSpeedTest = findViewById(R.id.tv_speed_test);
         btnSpeedTest = findViewById(R.id.btn_speed_test);
         btnDeepCheckRefresh = findViewById(R.id.btn_deep_check_refresh);
-
+        progressScan = findViewById(R.id.progress_scan);
         tvTraffic = findViewById(R.id.tv_traffic);
         tvAutoConnectStatus = findViewById(R.id.tv_auto_connect_status);
         tvStatusMode = findViewById(R.id.tv_status_mode);
@@ -548,7 +570,7 @@ public class MainActivity extends AppCompatActivity {
         if (btnSpeedTest != null) {
             btnSpeedTest.setImageResource(R.drawable.ic_play);
             btnSpeedTest.setImageTintList(
-                android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+                    android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
         }
         if (panelSpeedTest != null) panelSpeedTest.setBackgroundColor(0xFF111827);
         // IP — очищаем через ViewModel (отдельная LiveData)
@@ -675,7 +697,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String aboutText =
-                        "═════════════════════════\n" +
+                "═════════════════════════\n" +
                         "              DenMor VPN v" + versionName + "\n" +
                         "═════════════════════════\n\n" +
 

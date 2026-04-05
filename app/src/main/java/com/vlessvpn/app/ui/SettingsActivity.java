@@ -188,8 +188,8 @@ public class SettingsActivity extends AppCompatActivity {
             }
         });
 
-        // SeekBar количество серверов: 1-30
-        seekTopCount.setMax(29);
+        // SeekBar количество серверов: 1-100
+        seekTopCount.setMax(99);
         seekTopCount.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean u) {
                 int cnt = p + 1;

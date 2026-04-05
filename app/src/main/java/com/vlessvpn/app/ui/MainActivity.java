@@ -389,8 +389,8 @@ public class MainActivity extends AppCompatActivity {
             if (tvLastStatus == null) return;
 
             if (ip == null || ip.isEmpty()) {
-                if (VpnTunnelService.isRunning) {
-                    tvLastStatus.setText("Определяем IP...");
+                if (VpnTunnelService.isRunning && !VpnTunnelService.isIpDetermined) {
+                    tvLastStatus.setText("Ждём IP...");
                     tvLastStatus.setTextColor(0xFFFFFFFF);
                 }
                 return;

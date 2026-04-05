@@ -56,7 +56,7 @@ public class ServerRepository {
     public  static final String PREF_REMOTE_YANDEX_LOG_ENABLED = "remote_yandex_log_enabled";
     public  static final String PREF_REMOTE_LOG_URL     = "remote_log_url";
 
-    public static final int DEFAULT_TOP_COUNT    = 10;
+    public static final int DEFAULT_TOP_COUNT    = 30;
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
 
     // Добавьте новые ключи SharedPreferences
@@ -272,7 +272,7 @@ public class ServerRepository {
     public int getTopCount() { return prefs.getInt(PREF_TOP_COUNT, DEFAULT_TOP_COUNT); }
 
     public void saveTopCount(int count) {
-        prefs.edit().putInt(PREF_TOP_COUNT, Math.max(1, Math.min(50, count))).apply();
+        prefs.edit().putInt(PREF_TOP_COUNT, Math.max(1, Math.min(200, count))).apply();
     }
 
     // ── Настройки: поведение при запуске ──────────────────────────────────

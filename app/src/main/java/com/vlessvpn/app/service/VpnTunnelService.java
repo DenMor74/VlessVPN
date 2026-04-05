@@ -85,6 +85,9 @@ public class VpnTunnelService extends VpnService {
     public static volatile boolean isRunning = false;
     public static volatile boolean haveInternet = false;
     public static volatile boolean whiteInternet = false; // проверка что интернет по белым спискам
+    public static volatile boolean isIpDetermined = false;
+    public static volatile boolean isTunnelVerified = false;
+
     public static volatile VlessServer connectedServer = null;
     public static volatile long totalUp = 0;
     public static volatile long totalDown = 0;
@@ -164,6 +167,8 @@ public class VpnTunnelService extends VpnService {
     }
 
     public void runDeepCheck() {
+        if (!isTunnelVerified) return;
+        isIpDetermined = false;
         if (bgExecutor != null && !bgExecutor.isShutdown()) bgExecutor.execute(this::doDeepCheck);
     }
 
@@ -338,6 +343,8 @@ public class VpnTunnelService extends VpnService {
                     currentServer = s;
                     totalUp = totalDown = prevUp = prevDown = 0;
                     failCount = deepCheckRetryCount = 0;
+                    isIpDetermined = false;
+                    isTunnelVerified = false;
 
                     ServerTester.setVpnActive(true);
                     RemoteLogger.getInstance(VpnTunnelService.this).start();
@@ -424,7 +431,7 @@ public class VpnTunnelService extends VpnService {
             int total = all.size(), working = 0;
             for (VlessServer sv : all) if (sv.trafficOk) working++;
             AodOverlayService.sendStatus(VpnTunnelService.this, true,
-                    server.host, "Определяем IP...", working + "/" + total);
+                    server.host, "Проверка туннеля...", working + "/" + total);
         });
 
         mainHandler.post(() -> StatusBus.post(this, "Проверка подключения...", true));
@@ -473,6 +480,7 @@ public class VpnTunnelService extends VpnService {
     /** Вызывается когда тоннель подтверждён — общая логика успеха */
     private void onTunnelVerified(VlessServer server) {
         FileLogger.i(TAG, "Проверка: OK");
+        isTunnelVerified = true;
         failCount = 0;
         new ServerRepository(this).saveLastWorkingServer(server);
         mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
@@ -750,6 +758,14 @@ public class VpnTunnelService extends VpnService {
             FileLogger.w(TAG, "doDeepCheckInternal: VPN уже отключён");
             return;
         }
+        if (!isTunnelVerified) {
+            FileLogger.d(TAG, "IP Check отклонён: туннель еще не прошел проверку связи");
+            return;
+        }
+        if (isIpDetermined) {
+            FileLogger.d(TAG, "IP уже найден!");
+            return;
+        }
 
         if (Looper.myLooper() == Looper.getMainLooper()) {
             FileLogger.e(TAG, "Deep Check запущен на UI-потоке! Перезапускаем в фоне.");
@@ -816,7 +832,7 @@ public class VpnTunnelService extends VpnService {
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
             URL url = new URL(urlStr);
 
-            FileLogger.i(TAG, "Deep Check → Запрос к " + serviceName + ": " + url);
+            FileLogger.i(TAG, "IP → Запрос к " + serviceName + ": " + url);
 
             conn = (HttpURLConnection) url.openConnection(proxy);
 
@@ -833,7 +849,7 @@ public class VpnTunnelService extends VpnService {
             int responseCode = conn.getResponseCode();
             long duration = System.currentTimeMillis() - startTime;
 
-            FileLogger.i(TAG, "Deep Check → " + serviceName + " ответил: HTTP " + responseCode + " (" + duration + "ms)");
+            FileLogger.i(TAG, "IP → " + serviceName + " ответил: HTTP " + responseCode + " (" + duration + "ms)");
 
             if (responseCode != 200) {
                 FileLogger.w(TAG, serviceName + " вернул код " + responseCode);
@@ -877,8 +893,8 @@ public class VpnTunnelService extends VpnService {
                     ? "🔬 ✓ " + ip + " " + location + " (" + duration + "ms)"
                     : "🔬 IP: ✓ ответ получен (" + duration + "ms)";
 
-            FileLogger.i(TAG, "Deep Check УСПЕХ через " + serviceName + ": " + ip);
-
+            FileLogger.i(TAG, "IP найден " + serviceName + ": " + ip);
+            isIpDetermined = true;
             deepCheckRetryCount = 0;
 
             final String finalResult = result;

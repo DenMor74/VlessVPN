@@ -131,6 +131,11 @@ public class BackgroundMonitorService extends Service {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
 
+            if (VpnTunnelService.isRunning) {
+                FileLogger.w(TAG, "Блокировка скачивания листов: VPN активен!");
+                return Result.success();
+            }
+
             // Ночной режим
             if (repo.isNightTime()) {
                 FileLogger.i(W, "Ночное время — пропуск скачивания");
@@ -325,6 +330,10 @@ public class BackgroundMonitorService extends Service {
         }
 
         private Result doPipelineScan(Context ctx, ServerRepository repo) {
+            if (VpnTunnelService.isRunning) {
+                FileLogger.w(TAG, "Блокировка тестирования листа: VPN уже активен!");
+                return Result.retry();
+            }
             List<VlessServer> allServers = repo.getAllServersSync();
             if (allServers.isEmpty()) {
                 StatusBus.done(ctx, "⚠️ Нет серверов в базе");

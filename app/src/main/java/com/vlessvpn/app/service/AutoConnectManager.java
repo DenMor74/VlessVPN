@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 public class AutoConnectManager {
 
     private static final String TAG = "AutoConnectManager";
-    private static final int VPN_STARTUP_WAIT_MS = 15000;
+    private static final int VPN_STARTUP_WAIT_MS = 12000;
     private static final int SERVER_SWITCH_DELAY_MS = 1000;
 
     private static ExecutorService executor = Executors.newSingleThreadExecutor();

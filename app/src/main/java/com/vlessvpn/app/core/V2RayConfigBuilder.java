@@ -20,6 +20,7 @@ public class V2RayConfigBuilder {
      * Основной конфиг для подключения (одиночный сервер)
      */
     public static String build(VlessServer server, int socksPort, int tunFd) {
+        sanitizeServer(server);
         try {
             JSONObject config = new JSONObject();
 
@@ -28,12 +29,20 @@ public class V2RayConfigBuilder {
             log.put("loglevel", "warning");
             config.put("log", log);
 
-            // DNS
+            // ===== DNS (DoH + защита от утечек) =====
             JSONObject dns = new JSONObject();
             JSONArray dnsServers = new JSONArray();
+            //dnsServers.put("https://dns.yandex.ru/dns-query");
+            //dnsServers.put("https://1.1.1.1/dns-query");
             dnsServers.put("1.1.1.1");
             dnsServers.put("8.8.8.8");
+
+            dnsServers.put("localhost");
             dns.put("servers", dnsServers);
+            dns.put("queryStrategy", "UseIP");
+            dns.put("disableCache", false);
+            dns.put("disableFallback", true);
+            dns.put("tag", "dns-out");
             config.put("dns", dns);
 
             // INBOUNDS
@@ -263,6 +272,8 @@ public class V2RayConfigBuilder {
 
             for (int i = 0; i < servers.size(); i++) {
                 VlessServer server = servers.get(i);
+                sanitizeServer(server); // ← ДОБАВЛЕНА ОЧИСТКА: Спасаем серверы от мусора вроде "#🇩🇪 Germany"
+
                 int localPort = basePort + i;
                 String inTag = "in-" + i;
                 String outTag = "proxy-" + i;
@@ -443,5 +454,22 @@ public class V2RayConfigBuilder {
         } catch (Exception e) {
             return "{\"log\":{\"loglevel\":\"warning\"},\"inbounds\":[],\"outbounds\":[{\"protocol\":\"freedom\",\"tag\":\"direct\"}]}";
         }
+    }
+
+    private static void sanitizeServer(VlessServer server) {
+        if (server.pbk != null && server.pbk.contains("#"))
+            server.pbk = server.pbk.substring(0, server.pbk.indexOf("#")).trim();
+
+        if (server.sid != null && server.sid.contains("#"))
+            server.sid = server.sid.substring(0, server.sid.indexOf("#")).trim();
+
+        if (server.sni != null && server.sni.contains("#"))
+            server.sni = server.sni.substring(0, server.sni.indexOf("#")).trim();
+
+        if (server.networkType != null && server.networkType.contains("#"))
+            server.networkType = server.networkType.substring(0, server.networkType.indexOf("#")).trim();
+
+        if (server.security != null && server.security.contains("#"))
+            server.security = server.security.substring(0, server.security.indexOf("#")).trim();
     }
 }

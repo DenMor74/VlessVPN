@@ -50,6 +50,9 @@ import java.util.function.Consumer;
 
 public class VpnTunnelService extends VpnService {
 
+    static final String TUN_ADDRESS = "10.10.14.1";
+    static final int    TUN_PREFIX  = 24;
+
     private static final String TAG = "VpnTunnelService";
     private static final String CHANNEL_ID = "vpn_channel";
     private static final int NOTIF_ID = 1001;
@@ -77,6 +80,8 @@ public class VpnTunnelService extends VpnService {
 
     private static volatile VpnTunnelService instance;
     public static volatile boolean isRunning = false;
+    public static volatile boolean haveInternet = false;
+    public static volatile boolean whiteInternet = false; // проверка что интернет по белым спискам
     public static volatile VlessServer connectedServer = null;
     public static volatile long totalUp = 0;
     public static volatile long totalDown = 0;
@@ -281,9 +286,10 @@ public class VpnTunnelService extends VpnService {
                 Builder builder = new Builder();
                 builder.setSession("VlessVPN");
                 builder.setMtu(1500);
-                builder.addAddress("10.10.14.1", 24);
-                builder.addDnsServer("8.8.8.8");
-                builder.addDnsServer("8.8.4.4");
+                builder.addAddress(TUN_ADDRESS, TUN_PREFIX);
+               // builder.addDnsServer("8.8.8.8");
+               // builder.addDnsServer("8.8.4.4");
+                builder.addDnsServer("10.10.14.2"); // любой IP внутри 10.10.14.0/24
                 addRoutesExcluding(builder, server.host);
                 try { builder.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
                 applyAppBlacklist(builder);
@@ -408,69 +414,69 @@ public class VpnTunnelService extends VpnService {
                 bgExecutor = Executors.newSingleThreadExecutor();
         }
 
+        // Обновляем AOD статус в фоне
         bgExecutor.execute(() -> {
             ServerRepository r = new ServerRepository(VpnTunnelService.this);
-            java.util.List<com.vlessvpn.app.model.VlessServer> all = r.getAllServersSync();
+            List<VlessServer> all = r.getAllServersSync();
             int total = all.size(), working = 0;
-            for (com.vlessvpn.app.model.VlessServer sv : all) if (sv.trafficOk) working++;
+            for (VlessServer sv : all) if (sv.trafficOk) working++;
             AodOverlayService.sendStatus(VpnTunnelService.this, true,
                     server.host, "Определяем IP...", working + "/" + total);
         });
+
         mainHandler.post(() -> StatusBus.post(this, "Проверка подключения...", true));
 
         bgExecutor.execute(() -> {
-            boolean hasPhysicalInternet = checkPhysicalInternetBypassingVpn();
-            FileLogger.i(TAG, "Интернет: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
+            // Шаг 1: интернет вне тоннеля
+            boolean hasInternet = checkPhysicalInternetBypassingVpn();
+            haveInternet = hasInternet;
+            boolean isWhite = hasInternet && checkWhiteInternetBypassingVpn();
+            FileLogger.i(TAG, "Интернет: " + (hasInternet ? "✅" : "❌") +
+                    "; Белый: " + (isWhite ? "✅ ДА" : "❌ НЕТ"));
 
-            if (!hasPhysicalInternet) {
+            if (!hasInternet) {
                 mainHandler.post(() -> StatusBus.post(this, "Ожидание сети...", true));
                 AutoConnectManager.reportVerificationResult(false);
                 return;
             }
 
+            // Шаг 2: первая проверка тоннеля (параллельные запросы к 3 сайтам)
             boolean tunnelOk = checkTunnelProxyFastSync();
 
             if (tunnelOk) {
-                FileLogger.i(TAG, "1 проверка: OK");
-                failCount = 0;
-                new ServerRepository(this).saveLastWorkingServer(server);
-                mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
-                AutoConnectManager.reportVerificationResult(true);
-
-                if (new ServerRepository(this).isDeepCheckOnConnect()) {
-                    mainHandler.postDelayed(this::doDeepCheck, 1500);
-                }
+                onTunnelVerified(server);
                 return;
             }
 
             FileLogger.w(TAG, "1 проверка: FAIL...");
 
-            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-
+            // Шаг 3: вторая проверка — сразу без паузы
             boolean tunnelOk2 = checkTunnelProxyFastSync();
 
             if (tunnelOk2) {
-                FileLogger.i(TAG, "2 проверка: OK");
-                failCount = 0;
-                new ServerRepository(this).saveLastWorkingServer(server);
-                mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
-                AutoConnectManager.reportVerificationResult(true);
-
-                if (new ServerRepository(this).isDeepCheckOnConnect()) {
-                    mainHandler.postDelayed(this::doDeepCheck, 1500);
-                }
+                onTunnelVerified(server);
             } else {
                 failCount++;
                 FileLogger.e(TAG, "Обе проверки: FAIL! (failCount = " + failCount + ")");
                 new ServerRepository(this).clearLastWorkingServer();
                 AutoConnectManager.reportVerificationResult(false);
-
-                if (!isAutoConnectMode) {
-                    FileLogger.i(TAG, "Переключаемся...");
-                    switchToNextServer();
-                }
+                // Сразу переключаем — не ждём третьего провала
+                FileLogger.i(TAG, "Переключаемся...");
+                switchToNextServer();
             }
         });
+    }
+
+    /** Вызывается когда тоннель подтверждён — общая логика успеха */
+    private void onTunnelVerified(VlessServer server) {
+        FileLogger.i(TAG, "Проверка: OK");
+        failCount = 0;
+        new ServerRepository(this).saveLastWorkingServer(server);
+        mainHandler.post(() -> StatusBus.post(this, "✅ Подключено: " + server.remark, true));
+        AutoConnectManager.reportVerificationResult(true);
+        if (new ServerRepository(this).isDeepCheckOnConnect()) {
+            mainHandler.postDelayed(this::doDeepCheck, 1500);
+        }
     }
 
     private boolean checkPhysicalInternetBypassingVpn() {
@@ -493,13 +499,49 @@ public class VpnTunnelService extends VpnService {
             if (active == null) return false;
 
             conn = (HttpURLConnection) active.openConnection(new URL("https://ya.ru"));
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
             conn.setRequestMethod("HEAD");
             int code = conn.getResponseCode();
-            return code >= 200 && code < 400;
+            haveInternet = code >= 200 && code < 400;
+            return haveInternet;
         } catch (Exception e) {
+            haveInternet = false;
             return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private boolean checkWhiteInternetBypassingVpn() {
+        if (connectivityManager == null) return false;
+        HttpURLConnection conn = null;
+        try {
+            Network active = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ?
+                    connectivityManager.getActiveNetwork() : null;
+
+            if (active == null) {
+                for (Network net : connectivityManager.getAllNetworks()) {
+                    NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
+                    if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                        active = net;
+                        break;
+                    }
+                }
+            }
+            if (active == null) return false;
+
+            conn = (HttpURLConnection) active.openConnection(new URL("https://google.com"));
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            conn.setRequestMethod("HEAD");
+            int code = conn.getResponseCode();
+            whiteInternet = !(code >= 200 && code < 400);
+            return whiteInternet;
+        } catch (Exception e) {
+            whiteInternet = true;
+            return whiteInternet;
         } finally {
             if (conn != null) conn.disconnect();
         }
@@ -512,10 +554,11 @@ public class VpnTunnelService extends VpnService {
     private void doConnectivityCheck() {
         if (!isRunning) return;
 
-        boolean hasPhysicalInternet = checkPhysicalInternetBypassingVpn();
-        FileLogger.i(TAG, "Интернет: " + (hasPhysicalInternet ? "✅ ЕСТЬ" : "❌ НЕТ"));
+        boolean hasInternet = checkPhysicalInternetBypassingVpn();
+        FileLogger.i(TAG, "Интернет: " + (hasInternet ? "✅" : "❌") +
+                "; Белый: " + (checkWhiteInternetBypassingVpn() ? "✅" : "❌"));
 
-        if (!hasPhysicalInternet) {
+        if (!hasInternet) {
             failCount = 0;
             return;
         }
@@ -525,33 +568,27 @@ public class VpnTunnelService extends VpnService {
         if (tunnelOk) {
             FileLogger.i(TAG, "1 проверка: OK");
             failCount = 0;
-            if (currentServer != null) {
+            if (currentServer != null)
                 new ServerRepository(this).saveLastWorkingServer(currentServer);
-            }
             return;
         }
 
         FileLogger.w(TAG, "1 проверка: FAIL");
-
-        try { Thread.sleep(100); } catch (InterruptedException ignored) {}
 
         boolean tunnelOk2 = checkTunnelProxyFastSync();
 
         if (tunnelOk2) {
             FileLogger.i(TAG, "2 проверка: OK");
             failCount = 0;
-            if (currentServer != null) {
+            if (currentServer != null)
                 new ServerRepository(this).saveLastWorkingServer(currentServer);
-            }
         } else {
             failCount++;
             FileLogger.e(TAG, "Обе проверки: FAIL (failCount = " + failCount + ")");
             new ServerRepository(this).clearLastWorkingServer();
-
-            if (failCount >= 1) {
-                FileLogger.i(TAG, "Переключаемся...");
-                switchToNextServer();
-            }
+            // Переключаемся сразу при первом двойном сбое
+            FileLogger.i(TAG, "Переключаемся...");
+            switchToNextServer();
         }
     }
 
@@ -1029,31 +1066,82 @@ public class VpnTunnelService extends VpnService {
     // ════════════════════════════════════════════════════════════════
 
     public static boolean checkTunnelProxyFastSync() {
-        String[] testUrls = {"https://google.ru", "https://github.com", "https://www.wikipedia.org/"};
+        String[] testUrls = {"https://google.com", "https://github.com", "https://www.wikipedia.org/"};
         CountDownLatch latch = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
         ExecutorService pool = Executors.newFixedThreadPool(testUrls.length);
 
         for (String url : testUrls) {
             pool.execute(() -> {
+                if (success.get()) return; // уже нашли — не тратим время
                 if (checkSingleUrlProxyStatic(url)) {
+                    success.set(true);
+                    latch.countDown(); // останавливаем ожидание сразу
+                }
+            });
+        }
+
+        try { latch.await(8, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        pool.shutdownNow();
+        return success.get();
+    }
+
+/*    *//**
+     * Проверяет именно TUN-интерфейс — так же как браузер.
+     * Никакого явного прокси — трафик идёт через VPN tun автоматически.
+     *//*
+    public static boolean checkTunnelProxyFastSync() {
+        String[] testUrls = {
+                "https://google.com",
+                "https://github.com",
+                "https://www.wikipedia.org/"
+        };
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+        ExecutorService pool = Executors.newFixedThreadPool(testUrls.length);
+
+        for (String url : testUrls) {
+            pool.execute(() -> {
+                if (checkSingleUrlViaTun(url)) {
                     success.set(true);
                     latch.countDown();
                 }
             });
         }
-        try { latch.await(10, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        try { latch.await(4, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
         pool.shutdownNow();
         return success.get();
-    }
+    }*/
 
     private static boolean checkSingleUrlProxyStatic(String urlStr) {
         HttpURLConnection conn = null;
         try {
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
             conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
+            conn.setConnectTimeout(8000);  // ← было 10000
+            conn.setReadTimeout(8000);     // ← было 10000
+            conn.setUseCaches(false);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("HEAD");
+            int code = conn.getResponseCode();
+            return code >= 200 && code < 400;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * Обычное подключение БЕЗ явного прокси — идёт через TUN как браузер.
+     */
+    private static boolean checkSingleUrlViaTun(String urlStr) {
+        HttpURLConnection conn = null;
+        try {
+            // Proxy.NO_PROXY — принудительно без SOCKS, трафик пойдёт через TUN
+            conn = (HttpURLConnection) new URL(urlStr).openConnection(Proxy.NO_PROXY);
+            conn.setConnectTimeout(3500);
+            conn.setReadTimeout(3500);
             conn.setUseCaches(false);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("HEAD");

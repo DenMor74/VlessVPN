@@ -64,7 +64,7 @@ public class RemoteLogger {
 
         stop();
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        task = scheduler.scheduleAtFixedRate(this::tick, 2, INTERVAL, TimeUnit.SECONDS);
+        task = scheduler.scheduleWithFixedDelay(this::tick, 2, INTERVAL, TimeUnit.SECONDS);
         FileLogger.i(TAG, "RemoteLogger запущен");
     }
 
@@ -79,6 +79,9 @@ public class RemoteLogger {
 
             if (!repo.isRemoteLogEnabled() || !VpnTunnelService.isRunning) {
                 stop();
+                return;
+            }
+            if (!VpnTunnelService.haveInternet) {
                 return;
             }
 
@@ -260,33 +263,51 @@ public class RemoteLogger {
     private void sendToCustomUrl(String endpoint,
                                  String device, int total, int working,
                                  String server, String lastUpdate) {
-        HttpURLConnection conn = null;
+
+        java.net.HttpURLConnection conn = null;
+
         try {
+            // Создаём URL из переданного endpoint
+            URL url = new URL(endpoint);
+
+            java.net.Proxy proxy = new java.net.Proxy(
+                    java.net.Proxy.Type.HTTP,
+                    new java.net.InetSocketAddress("127.0.0.1", 10808));
+
+            conn = (java.net.HttpURLConnection) url.openConnection(proxy);
+
             JSONObject json = new JSONObject();
-            json.put("device",      device);
-            json.put("total",       total);
-            json.put("working",     working);
-            json.put("connected",   VpnTunnelService.isRunning);
-            json.put("server",      server);
+            json.put("device", device);
+            json.put("total", total);
+            json.put("working", working);
+            json.put("connected", VpnTunnelService.isRunning);
+            json.put("server", server);
             json.put("last_update", lastUpdate);
-            json.put("ts",          System.currentTimeMillis());
+            json.put("ts", System.currentTimeMillis());
 
             byte[] bytes = json.toString().getBytes(StandardCharsets.UTF_8);
 
-            conn = (HttpURLConnection) new URL(endpoint).openConnection();
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
-            conn.setConnectTimeout(5_000);
-            conn.setReadTimeout(5_000);
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(10_000);
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
 
-            try (OutputStream os = conn.getOutputStream()) { os.write(bytes); }
-            FileLogger.d(TAG, "Custom → HTTP " + conn.getResponseCode());
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bytes);
+            }
+
+            int responseCode = conn.getResponseCode();
+            FileLogger.d(TAG, "HA Logger → HTTP " + responseCode);
 
         } catch (Exception e) {
-            FileLogger.w(TAG, "Custom ошибка: " + e.getMessage());
+            FileLogger.w(TAG, "HA Logger ошибка: " + e.getMessage());
         } finally {
-            if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+            if (conn != null) {
+                try {
+                    conn.disconnect();
+                } catch (Exception ignored) {}
+            }
         }
     }
 }

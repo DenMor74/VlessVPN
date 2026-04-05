@@ -79,14 +79,20 @@ public class HevTunnel {
      * Формат как в v2rayNG TProxyService.buildConfig().
      */
     private String writeConfig() throws Exception {
+        // Берём IP из того же пула что и Android TUN
+
         StringBuilder sb = new StringBuilder();
         sb.append("tunnel:\n");
         sb.append("  mtu: 1500\n");
-        sb.append("  ipv4: 10.1.10.1\n");      // локальный IP туннеля (не tun0)
+        sb.append("  ipv4: ").append(VpnTunnelService.TUN_ADDRESS).append("\n");
         sb.append("socks5:\n");
         sb.append("  port: ").append(SOCKS_PORT).append("\n");
         sb.append("  address: 127.0.0.1\n");
         sb.append("  udp: 'udp'\n");
+        sb.append("dns:\n");
+        sb.append("  port: 53\n");            // перехватывать DNS на порту 53
+        sb.append("  address: '127.0.0.1'\n");// локальный DNS резолвер
+        sb.append("  udp: 'udp'\n");          // DNS работает по UDP
         sb.append("misc:\n");
         sb.append("  task-stack-size: 81920\n");
         sb.append("  connect-timeout: 5000\n");
@@ -97,8 +103,6 @@ public class HevTunnel {
         try (FileWriter writer = new FileWriter(configFile)) {
             writer.write(sb.toString());
         }
-
-        //FileLogger.d(TAG, "hev config:\n" + sb);
         return configFile.getAbsolutePath();
     }
 }

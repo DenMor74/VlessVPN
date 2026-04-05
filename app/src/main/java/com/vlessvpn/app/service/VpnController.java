@@ -119,27 +119,35 @@ public class VpnController {
         disconnect(true);
     }
 
-    // Вызывается из WifiMonitor и AutoConnectManager
     public void startAutoConnect() {
-        VlessServer best = repository.getLastWorkingServer();
+        // Оборачиваем ВСЮ логику работы с БД в фоновый поток (решает проблему краша)
+        new Thread(() -> {
+            try {
+                VlessServer best = repository.getLastWorkingServer();
 
-        if (best != null) {
-            FileLogger.i(TAG, "VpnController → startAutoConnect: " + best.host);
-            connect(best, true);
-            return;
-        }
+                if (best != null) {
+                    FileLogger.i(TAG, "VpnController → startAutoConnect: " + best.host);
+                    // connect() безопасно вызывать из фонового потока, т.к. он стартует Service
+                    connect(best, true);
+                    return;
+                }
 
-        FileLogger.i(TAG, "startAutoConnect: нет lastWorkingServer — пробуем топ серверов");
+                FileLogger.i(TAG, "startAutoConnect: нет lastWorkingServer — пробуем топ серверов");
 
-        List<VlessServer> top = repository.getTopServersSync();
-        if (top != null && !top.isEmpty()) {
-            best = top.get(0);
-            FileLogger.i(TAG, "startAutoConnect: fallback — выбран " + best.host + " из топ-" + top.size());
-            connect(best, true);
-            return;
-        }
+                List<VlessServer> top = repository.getTopServersSync();
+                if (top != null && !top.isEmpty()) {
+                    best = top.get(0);
+                    FileLogger.i(TAG, "startAutoConnect: fallback — выбран " + best.host + " из топ-" + top.size());
+                    connect(best, true);
+                    return;
+                }
 
-        FileLogger.w(TAG, "Нет рабочих серверов для авто-подключения");
+                FileLogger.w(TAG, "Нет рабочих серверов для авто-подключения");
+
+            } catch (Exception e) {
+                FileLogger.e(TAG, "Ошибка в startAutoConnect: " + e.getMessage());
+            }
+        }).start();
     }
 
 }

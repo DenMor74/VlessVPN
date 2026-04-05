@@ -11,6 +11,7 @@ import android.os.Looper;
 
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.service.VpnTunnelService;
+import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
 import java.io.FileDescriptor;
@@ -98,8 +99,9 @@ public class V2RayManager {
         lastTotalRx = TrafficStats.getTotalRxBytes();
         lastQueryTime = System.currentTimeMillis();
         try {
+            int socksPort = new ServerRepository(context).getLocalSocksPort();
             initEnvOnce(context);
-            String cfg = V2RayConfigBuilder.build(server, 10808, -1);
+            String cfg = V2RayConfigBuilder.build(server, socksPort, -1);
             FileLogger.i(TAG, "start: " + server.host);
             coreController = libv2ray.Libv2ray.newCoreController(new VpnCallback(server));
             coreController.startLoop(cfg, 0);

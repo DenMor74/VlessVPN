@@ -48,6 +48,8 @@ public class ServerRepository {
     public static final String PREF_NIGHT_END_HOUR      = "night_end_hour";
     public static final String PREF_FORCE_MOBILE_TESTS  = "force_mobile_for_tests";
     public static final String PREF_DEEP_CHECK_ON_CONNECT = "deep_check_on_connect";
+    public static final String PREF_SOCKS_PORT = "socks_port";
+    public static final int DEFAULT_SOCKS_PORT = 10808;
 
     // Единая константа для времени обновления (устранён дубль PREF_LAST_UPDATE vs PREF_LAST_UPDATE_TIMESTAMP)
     private static final String PREF_LAST_UPDATE_TS     = "last_update_timestamp";
@@ -417,8 +419,12 @@ public class ServerRepository {
                 ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
 
         if (VpnTunnelService.isRunning) {
+            int socksPort = new ServerRepository(ctx).getLocalSocksPort();
+
             java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                    new java.net.InetSocketAddress("127.0.0.1", 10808));
+                    new java.net.InetSocketAddress("127.0.0.1", socksPort));
+
+            FileLogger.i(TAG, "Скачивание подписки через SOCKS: " + socksPort);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection(proxy);
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
@@ -437,5 +443,25 @@ public class ServerRepository {
         }
 
         return (HttpURLConnection) url.openConnection();
+    }
+
+    public int getLocalSocksPort() {
+        try {
+            // EditTextPreference в Android сохраняет значения как String!
+            String portStr = prefs.getString(PREF_SOCKS_PORT, String.valueOf(DEFAULT_SOCKS_PORT));
+            int port = Integer.parseInt(portStr);
+
+            // Защита от ввода системных (до 1024) или невалидных портов
+            if (port <= 1024 || port > 65535) return DEFAULT_SOCKS_PORT;
+            return port;
+        } catch (Exception e) {
+            return DEFAULT_SOCKS_PORT;
+        }
+    }
+
+    public void saveLocalSocksPort(int port) {
+        // Обязательно сохраняем как String, иначе при открытии экрана настроек
+        // AndroidX выбросит ClassCastException
+        prefs.edit().putString(PREF_SOCKS_PORT, String.valueOf(port)).apply();
     }
 }

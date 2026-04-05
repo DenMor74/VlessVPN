@@ -3,6 +3,7 @@ package com.vlessvpn.app.service;
 import android.content.Context;
 import android.os.ParcelFileDescriptor;
 
+import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
 import java.io.File;
@@ -21,7 +22,6 @@ import java.io.FileWriter;
 public class HevTunnel {
 
     private static final String TAG = "HevTunnel";
-    private static final int SOCKS_PORT = 10808;
 
     private final Context context;
     private volatile boolean running = false;
@@ -84,8 +84,9 @@ public class HevTunnel {
         sb.append("tunnel:\n");
         sb.append("  mtu: 1500\n");
         sb.append("  ipv4: ").append(VpnTunnelService.TUN_ADDRESS).append("\n");
+        int socksPort = new ServerRepository(context).getLocalSocksPort();
         sb.append("socks5:\n");
-        sb.append("  port: ").append(SOCKS_PORT).append("\n");
+        sb.append("  port: ").append(socksPort).append("\n");
         sb.append("  address: 127.0.0.1\n");
         sb.append("  udp: 'udp'\n");
         // Блок dns удален! Пусть hev отдает DNS-пакеты в Xray "как есть" (по UDP)

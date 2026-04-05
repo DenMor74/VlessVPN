@@ -829,7 +829,9 @@ public class VpnTunnelService extends VpnService {
     private boolean tryGetIpFromService(String urlStr, String serviceName) {
         HttpURLConnection conn = null;
         try {
-            Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
+
+            int socksPort = new ServerRepository(this).getLocalSocksPort();
+            Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", socksPort));
             URL url = new URL(urlStr);
 
             FileLogger.i(TAG, "IP → Запрос к " + serviceName + ": " + url);
@@ -956,7 +958,9 @@ public class VpnTunnelService extends VpnService {
         mainHandler.post(() -> StatusBus.post(VpnTunnelService.this, "⏱ Тест скорости...", true));
         java.net.HttpURLConnection conn = null;
         try {
-            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS, new java.net.InetSocketAddress("127.0.0.1", 10808));
+            int socksPort = new ServerRepository(VpnTunnelService.this).getLocalSocksPort();
+            java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS, new java.net.InetSocketAddress("127.0.0.1", socksPort));
+
             conn = (java.net.HttpURLConnection) new java.net.URL("http://speed.cloudflare.com/__down?bytes=262144").openConnection(proxy);
             conn.setConnectTimeout(10_000);
             conn.setReadTimeout(30_000);
@@ -1093,7 +1097,7 @@ public class VpnTunnelService extends VpnService {
         for (String url : testUrls) {
             pool.execute(() -> {
                 if (success.get()) return; // уже нашли — не тратим время
-                if (checkSingleUrlProxyStatic(url)) {
+                if (checkSingleUrlProxyStatic(instance, url)) {
                     success.set(true);
                     latch.countDown(); // останавливаем ожидание сразу
                 }
@@ -1132,10 +1136,11 @@ public class VpnTunnelService extends VpnService {
         return success.get();
     }*/
 
-    private static boolean checkSingleUrlProxyStatic(String urlStr) {
+    private static boolean checkSingleUrlProxyStatic(Context context, String urlStr) {
         HttpURLConnection conn = null;
         try {
-            Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 10808));
+            int socksPort = new ServerRepository(context).getLocalSocksPort();
+            Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", socksPort));
             conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
             conn.setConnectTimeout(8000);  // ← было 10000
             conn.setReadTimeout(8000);     // ← было 10000
@@ -1249,5 +1254,19 @@ public class VpnTunnelService extends VpnService {
         if (bytesPerSec < 10 * 1024 * 1024)
             return String.format("%6.1f KB/s", bytesPerSec / 1024.0);
         return String.format("%6.1f MB/s", bytesPerSec / (1024.0 * 1024));
+    }
+
+    public static int getLocalSocksPort(Context context) {
+        if (context == null) return 10808;
+        android.content.SharedPreferences prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context);
+        try {
+            // Android EditTextPreference хранит значения как String
+            String portStr = prefs.getString("socks_port", "10808");
+            int port = Integer.parseInt(portStr);
+            if (port <= 1024 || port > 65535) return 10808; // Защита от системных и невалидных портов
+            return port;
+        } catch (Exception e) {
+            return 10808;
+        }
     }
 }

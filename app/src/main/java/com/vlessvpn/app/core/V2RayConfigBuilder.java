@@ -390,7 +390,7 @@ public class V2RayConfigBuilder {
 
             if (validCount == 0) {
                 FileLogger.w(TAG, "Все серверы отфильтрованы — возвращаем fallback конфиг");
-                return buildFallbackConfig();
+                return buildFallbackConfig(10808);
             }
 
             // Обязательные outbounds
@@ -418,11 +418,11 @@ public class V2RayConfigBuilder {
 
         } catch (JSONException e) {
             FileLogger.e(TAG, "Ошибка генерации Multiplex-конфига: " + e.getMessage(), e);
-            return buildFallbackConfig();
+            return buildFallbackConfig(10808);
         }
     }
 
-    private static String buildFallbackConfig() {
+    private static String buildFallbackConfig(int socksPort) {
         // Твой оригинальный fallback — полностью без изменений
         try {
             JSONObject config = new JSONObject();
@@ -432,7 +432,7 @@ public class V2RayConfigBuilder {
 
             JSONArray inbounds = new JSONArray();
             JSONObject inbound = new JSONObject();
-            inbound.put("port", 10808);
+            inbound.put("port", socksPort);
             inbound.put("listen", "127.0.0.1");
             inbound.put("protocol", "socks");
             JSONObject settings = new JSONObject();

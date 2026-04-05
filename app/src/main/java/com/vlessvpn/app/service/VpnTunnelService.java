@@ -50,8 +50,11 @@ import java.util.function.Consumer;
 
 public class VpnTunnelService extends VpnService {
 
+
     static final String TUN_ADDRESS = "10.10.14.1";
-    static final int    TUN_PREFIX  = 24;
+    static final int    TUN_PREFIX  = 30;            // ← /30, не /24
+    //static final String TUN_DNS     = "10.10.14.2";  // ← роутер как DNS
+    static final String TUN_DNS     = "8.8.8.8";
 
     private static final String TAG = "VpnTunnelService";
     private static final String CHANNEL_ID = "vpn_channel";
@@ -289,7 +292,7 @@ public class VpnTunnelService extends VpnService {
                 builder.addAddress(TUN_ADDRESS, TUN_PREFIX);
                // builder.addDnsServer("8.8.8.8");
                // builder.addDnsServer("8.8.4.4");
-                builder.addDnsServer("10.10.14.2"); // любой IP внутри 10.10.14.0/24
+                builder.addDnsServer(TUN_DNS);  // DNS запросы идут через TUN → hev
                 addRoutesExcluding(builder, server.host);
                 try { builder.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
                 applyAppBlacklist(builder);

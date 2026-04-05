@@ -290,6 +290,12 @@ public class BackgroundMonitorService extends Service {
                 return Result.success();
             }
 
+            if (VpnTunnelService.isRunning) {
+                FileLogger.i(W, "VPN работает — пропуск сканирования");
+                StatusBus.post(ctx, "VPN работает — пропуск сканирования", false);
+                return Result.success();
+            }
+
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VlessVPN::ScanWorker");
             wakeLock.acquire(5 * 60 * 1000L); // 5 минут с запасом

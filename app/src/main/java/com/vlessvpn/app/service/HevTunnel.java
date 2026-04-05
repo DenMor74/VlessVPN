@@ -42,6 +42,7 @@ public class HevTunnel {
         try {
             String configPath = writeConfig();
             int fd = vpnInterface.getFd();
+            FileLogger.i(TAG, "hev start: fd=" + fd + ", config=" + configPath);
             //FileLogger.i(TAG, "TProxyStartService configPath=" + configPath + " fd=" + fd);
             // Вызываем через stub — JNI ищет методы в com.v2ray.ang.service.TProxyService
             com.v2ray.ang.service.TProxyService.TProxyStartService(configPath, fd);
@@ -92,12 +93,13 @@ public class HevTunnel {
         sb.append("dns:\n");
         sb.append("  port: 53\n");            // перехватывать DNS на порту 53
         sb.append("  address: '127.0.0.1'\n");// локальный DNS резолвер
-        sb.append("  udp: 'udp'\n");          // DNS работает по UDP
+        // sb.append("  udp: 'udp'\n");          // DNS работает по UDP
+         sb.append("  udp: 'tcp'\n");   // ← было 'udp', DNS будет идти по TCP
         sb.append("misc:\n");
-        sb.append("  task-stack-size: 81920\n");
-        sb.append("  connect-timeout: 5000\n");
-        sb.append("  read-write-timeout: 60000\n");
-        sb.append("  log-level: error\n");
+        sb.append("misc:\n");
+        sb.append("  tcp-read-write-timeout: 300000\n");  // ← правильный ключ
+        sb.append("  udp-read-write-timeout: 60000\n");   // ← правильный ключ
+        sb.append("  log-level: debug\n");                 // ← warn чтобы видеть проблемы
 
         File configFile = new File(context.getFilesDir(), "hev-socks5-tunnel.yaml");
         try (FileWriter writer = new FileWriter(configFile)) {

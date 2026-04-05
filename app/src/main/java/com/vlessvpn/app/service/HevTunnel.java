@@ -80,8 +80,6 @@ public class HevTunnel {
      * Формат как в v2rayNG TProxyService.buildConfig().
      */
     private String writeConfig() throws Exception {
-        // Берём IP из того же пула что и Android TUN
-
         StringBuilder sb = new StringBuilder();
         sb.append("tunnel:\n");
         sb.append("  mtu: 1500\n");
@@ -90,16 +88,11 @@ public class HevTunnel {
         sb.append("  port: ").append(SOCKS_PORT).append("\n");
         sb.append("  address: 127.0.0.1\n");
         sb.append("  udp: 'udp'\n");
-        sb.append("dns:\n");
-        sb.append("  port: 53\n");            // перехватывать DNS на порту 53
-        sb.append("  address: '127.0.0.1'\n");// локальный DNS резолвер
-        // sb.append("  udp: 'udp'\n");          // DNS работает по UDP
-         sb.append("  udp: 'tcp'\n");   // ← было 'udp', DNS будет идти по TCP
+        // Блок dns удален! Пусть hev отдает DNS-пакеты в Xray "как есть" (по UDP)
         sb.append("misc:\n");
-        sb.append("misc:\n");
-        sb.append("  tcp-read-write-timeout: 300000\n");  // ← правильный ключ
-        sb.append("  udp-read-write-timeout: 60000\n");   // ← правильный ключ
-        sb.append("  log-level: debug\n");                 // ← warn чтобы видеть проблемы
+        sb.append("  tcp-read-write-timeout: 300000\n");
+        sb.append("  udp-read-write-timeout: 60000\n");
+        sb.append("  log-level: warn\n"); // Изменил на warn, чтобы не спамил логами
 
         File configFile = new File(context.getFilesDir(), "hev-socks5-tunnel.yaml");
         try (FileWriter writer = new FileWriter(configFile)) {

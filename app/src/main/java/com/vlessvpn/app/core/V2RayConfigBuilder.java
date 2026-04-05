@@ -26,56 +26,67 @@ public class V2RayConfigBuilder {
 
             // ── LOG ──────────────────────────────────────────────────────────
             JSONObject log = new JSONObject();
-            log.put("loglevel", "debug");
+            log.put("loglevel", "warning"); // warning, чтобы не засорять логи
             config.put("log", log);
 
-            // ── DNS ──────────────────────────────────────────────────────────
-            // Серверы только как fallback — реальный DNS идёт через dokodemo-door
+            // ── FAKEDNS (НОВОЕ) ──────────────────────────────────────────────
+            JSONArray fakednsArray = new JSONArray();
+            JSONObject fakednsObj = new JSONObject();
+            fakednsObj.put("ipPool", "198.18.0.0/15");
+            fakednsObj.put("poolSize", 65535);
+            fakednsArray.put(fakednsObj);
+            config.put("fakedns", fakednsArray);
+
+            // ── DNS (ОБНОВЛЕНО) ──────────────────────────────────────────────
             JSONObject dns = new JSONObject();
             JSONArray dnsServers = new JSONArray();
+            dnsServers.put("fakedns"); // Обязательно первым!
             dnsServers.put("8.8.8.8");
             dnsServers.put("1.1.1.1");
             dns.put("servers", dnsServers);
             dns.put("queryStrategy", "UseIPv4");
-            dns.put("disableCache", false);
-            dns.put("disableFallback", false);
             config.put("dns", dns);
 
             // ── INBOUNDS ─────────────────────────────────────────────────────
             JSONArray inbounds = new JSONArray();
 
-            // SOCKS5 — для hev-socks5-tunnel (TCP + UDP over TCP)
+            // SOCKS5 — для hev-socks5-tunnel
             JSONObject socksInbound = new JSONObject();
             socksInbound.put("tag", "socks-in");
             socksInbound.put("port", socksPort);       // 10808
             socksInbound.put("listen", "127.0.0.1");
             socksInbound.put("protocol", "socks");
+
             JSONObject socksSettings = new JSONObject();
             socksSettings.put("auth", "noauth");
             socksSettings.put("udp", true);
             socksInbound.put("settings", socksSettings);
+
+            // Включаем сниффинг FakeDNS
+            JSONObject sniffing = new JSONObject();
+            sniffing.put("enabled", true);
+            JSONArray destOverride = new JSONArray();
+            destOverride.put("http");
+            destOverride.put("tls");
+            destOverride.put("quic");
+            destOverride.put("fakedns");
+            sniffing.put("destOverride", destOverride);
+            sniffing.put("routeOnly", false);
+            socksInbound.put("sniffing", sniffing);
+
             inbounds.put(socksInbound);
-
-            // DNS — перехватывает запросы к 10.10.14.2:53 (TUN router)
-            // и пересылает их на 8.8.8.8:53 через proxy
-            JSONObject dnsInbound = new JSONObject();
-            dnsInbound.put("tag", "dns-in");
-            dnsInbound.put("port", 10853);
-            dnsInbound.put("listen", "127.0.0.1");
-            dnsInbound.put("protocol", "dokodemo-door");
-            JSONObject dnsInSettings = new JSONObject();
-            dnsInSettings.put("address", "8.8.8.8");
-            dnsInSettings.put("port", 53);
-            dnsInSettings.put("network", "tcp,udp");
-            dnsInbound.put("settings", dnsInSettings);
-            inbounds.put(dnsInbound);
-
-            config.put("inbounds", inbounds); // ← после всех inbounds
+            config.put("inbounds", inbounds);
 
             // ── OUTBOUNDS ────────────────────────────────────────────────────
             JSONArray outbounds = new JSONArray();
 
-            // VLESS proxy
+            // 1. DNS (Для перехвата 53 порта и обработки FakeDNS)
+            JSONObject dnsOut = new JSONObject();
+            dnsOut.put("tag", "dns-out");
+            dnsOut.put("protocol", "dns");
+            outbounds.put(dnsOut);
+
+            // 2. VLESS proxy
             JSONObject vlessOut = new JSONObject();
             vlessOut.put("tag", "proxy");
             vlessOut.put("protocol", "vless");
@@ -101,13 +112,13 @@ public class V2RayConfigBuilder {
             vlessOut.put("streamSettings", buildStreamSettings(server));
             outbounds.put(vlessOut);
 
-            // Direct (без fragment — не ломает DNS fallback)
+            // 3. Direct
             JSONObject freedom = new JSONObject();
             freedom.put("tag", "direct");
             freedom.put("protocol", "freedom");
             outbounds.put(freedom);
 
-            // Blackhole
+            // 4. Blackhole
             JSONObject blackhole = new JSONObject();
             blackhole.put("tag", "block");
             blackhole.put("protocol", "blackhole");
@@ -117,19 +128,17 @@ public class V2RayConfigBuilder {
 
             // ── ROUTING ──────────────────────────────────────────────────────
             JSONObject routing = new JSONObject();
-            routing.put("domainStrategy", "AsIs"); // без DNS-резолвинга в роутере
+            routing.put("domainStrategy", "AsIs");
             JSONArray rules = new JSONArray();
 
-            // 1. DNS через прокси
+            // Правило 1: Порт 53 ловим и отправляем в dns-out (FakeDNS)
             JSONObject dnsRule = new JSONObject();
             dnsRule.put("type", "field");
-            JSONArray dnsInTags = new JSONArray();
-            dnsInTags.put("dns-in");
-            dnsRule.put("inboundTag", dnsInTags);
-            dnsRule.put("outboundTag", "proxy");
+            dnsRule.put("port", "53");
+            dnsRule.put("outboundTag", "dns-out");
             rules.put(dnsRule);
 
-            // 2. Приватные адреса — direct (кроме 10.0.0.0/8: там TUN 10.10.14.x)
+            // Правило 2: Приватные адреса — direct
             JSONObject directPrivate = new JSONObject();
             directPrivate.put("type", "field");
             directPrivate.put("outboundTag", "direct");
@@ -142,7 +151,7 @@ public class V2RayConfigBuilder {
             directPrivate.put("ip", privateIps);
             rules.put(directPrivate);
 
-            // 3. Всё остальное — через proxy
+            // Правило 3: Всё остальное — через proxy
             JSONObject proxyAll = new JSONObject();
             proxyAll.put("type", "field");
             proxyAll.put("network", "tcp,udp");

@@ -442,7 +442,7 @@ public class VpnTunnelService extends VpnService {
             haveInternet = hasInternet;
             boolean isWhite = hasInternet && checkWhiteInternetBypassingVpn();
             FileLogger.i(TAG, "Интернет: " + (hasInternet ? "✅" : "❌") +
-                    "; Белый: " + (isWhite ? "✅ ДА" : "❌ НЕТ"));
+                    "; Белый: " + (isWhite ? "✅" : "❌"));
 
             if (!hasInternet) {
                 mainHandler.post(() -> StatusBus.post(this, "Ожидание сети...", true));

@@ -268,6 +268,14 @@ public class V2RayConfigBuilder {
             log.put("loglevel", "warning");
             config.put("log", log);
 
+            JSONObject dns = new JSONObject();
+            JSONArray dnsServers = new JSONArray();
+            dnsServers.put("8.8.8.8");
+            dnsServers.put("1.1.1.1");
+            dns.put("servers", dnsServers);
+            dns.put("queryStrategy", "UseIPv4");
+            config.put("dns", dns);
+
             JSONArray inbounds = new JSONArray();
             JSONArray outbounds = new JSONArray();
             JSONArray rules = new JSONArray();
@@ -337,9 +345,13 @@ public class V2RayConfigBuilder {
                 inbound.put("tag", inTag);
                 inbound.put("port", localPort);
                 inbound.put("listen", "127.0.0.1");
-                inbound.put("protocol", "http");
+                //inbound.put("protocol", "http");
+                inbound.put("protocol", "socks"); // <--- БЫЛО "http"
+
                 JSONObject inSettings = new JSONObject();
                 inSettings.put("timeout", 0);
+                inSettings.put("auth", "noauth");
+                inSettings.put("udp", false); // UDP для пинга не нужен
                 inbound.put("settings", inSettings);
                 inbounds.put(inbound);
 

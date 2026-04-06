@@ -24,8 +24,8 @@ android {
         applicationId "com.vlessvpn.app"
         minSdk 26          // Android 8.0 — минимум для нормальной работы VPN API
         targetSdk 34
-        versionCode 62
-        versionName "3.3.6"
+        versionCode 71
+        versionName "3.4.5"
 
         // Поддержка нативных библиотек (libv2ray собран для этих архитектур)
         ndk {
@@ -91,7 +91,6 @@ dependencies {
 
     // ========== СЕТЬ ==========
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-
     // ========== JSON ==========
     implementation 'com.google.code.gson:gson:2.10.1'
 

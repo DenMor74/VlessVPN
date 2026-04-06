@@ -43,6 +43,7 @@ public class SettingsActivity extends AppCompatActivity {
     private Switch switchRemoteLog;
     private Switch switchRemoteyandexLog;
     private android.widget.EditText etRemoteLogUrl;
+    private EditText etSocksPort;
 
     private RecyclerView rvConfigUrls;
     private ConfigUrlAdapter urlAdapter;
@@ -227,7 +228,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchRemoteLog    = findViewById(R.id.switch_remote_log);
         switchRemoteyandexLog    = findViewById(R.id.switch_remote_yandex_log);
         etRemoteLogUrl     = findViewById(R.id.et_remote_log_url);
-
+        etSocksPort = findViewById(R.id.et_socks_port);
     }
 
     private void loadCurrentSettings() {
@@ -276,6 +277,10 @@ public class SettingsActivity extends AppCompatActivity {
         if (switchRemoteyandexLog    != null) switchRemoteyandexLog.setChecked(repository.isRemoteLogYandexEnabled());
         if (etRemoteLogUrl     != null) etRemoteLogUrl.setText(repository.getRemoteLogUrl());
 
+        if (etSocksPort != null) {
+            int port = repository.getLocalSocksPort();           // ← будет 10808 по умолчанию
+            etSocksPort.setText(String.valueOf(port));
+        }
     }
 
     private void saveSettings() {
@@ -335,6 +340,23 @@ public class SettingsActivity extends AppCompatActivity {
         if (switchRemoteLog    != null) repository.saveRemoteLogEnabled(switchRemoteLog.isChecked());
         if (switchRemoteyandexLog    != null) repository.saveRemoteLogYandexEnabled(switchRemoteyandexLog.isChecked());
         if (etRemoteLogUrl     != null) repository.saveRemoteLogUrl(etRemoteLogUrl.getText().toString());
+        // ← НОВОЕ: Сохранение SOCKS-порта
+        if (etSocksPort != null) {
+            String portText = etSocksPort.getText().toString().trim();
+            if (!portText.isEmpty()) {
+                try {
+                    int newPort = Integer.parseInt(portText);
+                    // Защита от совсем кривых значений
+                    if (newPort > 0 && newPort <= 65535) {
+                        repository.saveLocalSocksPort(newPort);
+                    } else {
+                        Toast.makeText(this, "Порт должен быть от 1 до 65535", Toast.LENGTH_SHORT).show();
+                    }
+                } catch (NumberFormatException ignored) {
+                    // если пользователь ввёл какую-то дичь — просто оставляем старое значение
+                }
+            }
+        }
         finish();
     }
 

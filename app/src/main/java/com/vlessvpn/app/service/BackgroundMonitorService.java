@@ -37,11 +37,13 @@ import com.vlessvpn.app.util.StatusBus;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class BackgroundMonitorService extends Service {
@@ -455,10 +457,17 @@ public class BackgroundMonitorService extends Service {
                 }
 
                 int batches = (int) Math.ceil((double) total / poolSize);
-                long pingTimeout = Math.min(60, Math.max(5, batches * 5L));
+
+                long pingTimeout = Math.min(240, batches * 20L); // до 4 минут максимум
 
                 try {
-                    pingLatch.await(pingTimeout, TimeUnit.SECONDS);
+                    boolean finished = pingLatch.await(pingTimeout, TimeUnit.SECONDS);
+
+                    if (!finished) {
+                        FileLogger.w(W, "Фаза 1: таймаут (" + pingTimeout + " сек). " +
+                                "Осталось задач: " + pingLatch.getCount());
+                        // Можно либо увеличить таймаут, либо продолжить, но хотя бы залогировать
+                    }
                 } catch (InterruptedException e) {
                     // ← ПРАВИЛЬНЫЙ ВЫХОД ПРИ ОТМЕНЕ СТАРОЙ ЗАДАЧИ
                     FileLogger.w(W, "Фаза 1 прервана (задача отменена системой)");
@@ -479,7 +488,7 @@ public class BackgroundMonitorService extends Service {
                         survivedPing = new java.util.ArrayList<>(tcpSurvived);
                     }
 
-                    Collections.sort(survivedPing, (s1, s2) -> Integer.compare(s1.tcpPingMs, s2.tcpPingMs));
+                    Collections.sort(survivedPing, Comparator.comparingInt(s -> s.tcpPingMs));
 
                     final int finalSurvivedSize = survivedPing.size();
                     final int BATCH_SIZE = 100;
@@ -491,7 +500,7 @@ public class BackgroundMonitorService extends Service {
                         int endIndex = Math.min(startIndex + BATCH_SIZE, finalSurvivedSize);
                         List<VlessServer> currentBatch = survivedPing.subList(startIndex, endIndex);
 
-                        int basePort = 10800;
+                        int basePort = 10900;
                         V2RayManager.setTestNetworkForMultiplex(finalCellularNet);
 
                         try {
@@ -550,8 +559,17 @@ public class BackgroundMonitorService extends Service {
                                 }
 
                                 try {
-                                    long httpTimeout = Math.max(30, currentBatch.size());
-                                    httpLatch.await(httpTimeout, TimeUnit.SECONDS);
+                                    long httpTimeout = Math.max(180, currentBatch.size());
+                                   //httpLatch.await(httpTimeout, TimeUnit.SECONDS);
+
+                                    boolean finished = httpLatch.await(httpTimeout, TimeUnit.SECONDS);
+
+                                    if (!finished) {
+                                        FileLogger.w(W, "Фаза 2: таймаут (" + httpTimeout + " сек). " +
+                                                "Осталось задач: " + httpLatch.getCount());
+                                        // Можно либо увеличить таймаут, либо продолжить, но хотя бы залогировать
+                                    }
+
                                 } catch (InterruptedException e) {
                                     FileLogger.w(W, "Фаза 2 прервана (задача отменена системой)");
                                     phase2Active.set(false);
@@ -645,6 +663,58 @@ public class BackgroundMonitorService extends Service {
          * Если все падают — сразу возвращает false без долгого ожидания.
          */
         private boolean testHttpThroughProxy(int proxyPort, ExecutorService fastUrlPool) {
+            // SOCKS5 — именно это слушает xray/v2ray на proxyPort
+            java.net.Proxy proxy = new java.net.Proxy(
+                    java.net.Proxy.Type.SOCKS,
+                    new java.net.InetSocketAddress("127.0.0.1", proxyPort));
+
+            CountDownLatch latch = new CountDownLatch(1);
+            AtomicBoolean success = new AtomicBoolean(false);
+            // AtomicInteger считает завершённые — и успешные, и нет
+            AtomicInteger finishedCount = new AtomicInteger(0);
+            int total = testUrls.length; // List.size() вместо .length
+
+            for (String urlStr : testUrls) {
+                fastUrlPool.submit(() -> {
+                    java.net.HttpURLConnection conn = null;
+                    try {
+                        conn = (java.net.HttpURLConnection) new java.net.URL(urlStr).openConnection(proxy);
+                        conn.setConnectTimeout(10000);   // ← 3.5s вместо 6s
+                        conn.setReadTimeout(10000);
+                        conn.setRequestMethod("HEAD");  // ← HEAD быстрее GET, не читает тело
+                        conn.setUseCaches(false);
+                        conn.setInstanceFollowRedirects(false);
+                        // User-Agent чтобы не блокировали как бота
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+
+                        int code = conn.getResponseCode();
+                        // HEAD может вернуть 405 (Method Not Allowed) — это тоже значит сервер живой
+                        if (code >= 200 && code < 500) {
+                            if (success.compareAndSet(false, true)) {
+                                latch.countDown(); // первый успех — сразу выходим
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // таймаут, разрыв — нормально
+                    } finally {
+                        if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+                        // countDown только если все завершились И ещё не было успеха
+                        if (finishedCount.incrementAndGet() == total && !success.get()) {
+                            latch.countDown(); // все провалились — разблокируем
+                        }
+                    }
+                });
+            }
+
+            try {
+                latch.await(10500, TimeUnit.MILLISECONDS); // ← чуть больше таймаута одного запроса
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            return success.get();
+        }
+/*        private boolean testHttpThroughProxy(int proxyPort, ExecutorService fastUrlPool) {
             java.net.Proxy proxy = new java.net.Proxy(
                     java.net.Proxy.Type.HTTP,
                     new java.net.InetSocketAddress("127.0.0.1", proxyPort));
@@ -658,8 +728,8 @@ public class BackgroundMonitorService extends Service {
                     java.net.HttpURLConnection conn = null;
                     try {
                         conn = (java.net.HttpURLConnection) new java.net.URL(urlStr).openConnection(proxy);
-                        conn.setConnectTimeout(3000);
-                        conn.setReadTimeout(3000);
+                        conn.setConnectTimeout(6000);
+                        conn.setReadTimeout(6000);
                         conn.setRequestMethod("GET"); // Оставляем GET для лучшего прохождения DPI
                         conn.setUseCaches(false);
                         conn.setInstanceFollowRedirects(false);
@@ -685,13 +755,13 @@ public class BackgroundMonitorService extends Service {
 
             try {
                 // Максимальное время ожидания - чуть больше таймаута коннекта (3.5 сек)
-                latch.await(3500, TimeUnit.MILLISECONDS);
+                latch.await(6500, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
 
             return success.get();
-        }
+        }*/
 
         private static void checkAutoConnect(Context ctx, ServerRepository repo) {
             if (!repo.isAutoConnectAfterScan()) return;

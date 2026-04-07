@@ -348,7 +348,9 @@ public class VpnTunnelService extends VpnService {
 
                     ServerTester.setVpnActive(true);
                     RemoteLogger.getInstance(VpnTunnelService.this).start();
-                    startFastVerification(s);
+                    //startFastVerification(s);
+                    // В onStarted(), вместо startFastVerification(s):
+                    mainHandler.postDelayed(() -> startFastVerification(s), 800); // ← дать hev время поднять UDP
 
                     checkHandler.removeCallbacks(checkRunnable);
                     checkHandler.postDelayed(checkRunnable, 60_000L);
@@ -479,6 +481,19 @@ public class VpnTunnelService extends VpnService {
 
     /** Вызывается когда тоннель подтверждён — общая логика успеха */
     private void onTunnelVerified(VlessServer server) {
+        // ← НОВОЕ: дополнительная DNS-проверка после подтверждения туннеля
+        boolean dnsOk = checkDnsTcpViaSocks();
+        if (!dnsOk) {
+            failCount++;
+            FileLogger.e(TAG, "Туннель работает, но DNS сломан → переключаемся");
+            new ServerRepository(this).clearLastWorkingServer();
+            AutoConnectManager.reportVerificationResult(false);
+            switchToNextServer();
+            return;
+        }
+
+        FileLogger.i(TAG, "Проверка: OK (tunnel + DNS)");
+        isTunnelVerified = true;
         FileLogger.i(TAG, "Проверка: OK");
         isTunnelVerified = true;
         failCount = 0;
@@ -488,6 +503,78 @@ public class VpnTunnelService extends VpnService {
         if (new ServerRepository(this).isDeepCheckOnConnect()) {
             mainHandler.postDelayed(this::doDeepCheck, 1500);
         }
+    }
+
+    /**
+     * Проверяет доступность DNS через туннель.
+     * Отправляет реальный DNS-запрос по TCP к 8.8.8.8:53 через SOCKS прокси.
+     * Если TCP DNS не работает — UDP DNS через hev тоже почти наверняка сломан.
+     */
+    private boolean checkDnsTcpViaSocks() {
+        java.net.Socket socket = null;
+        try {
+            int socksPort = new ServerRepository(this).getLocalSocksPort();
+            Proxy proxy = new Proxy(Proxy.Type.SOCKS,
+                    new InetSocketAddress("127.0.0.1", socksPort));
+
+            socket = new java.net.Socket(proxy);
+            socket.connect(new InetSocketAddress("8.8.8.8", 53), 5000);
+            socket.setSoTimeout(5000);
+
+            byte[] query = buildDnsQuery("google.com");
+            // TCP DNS: 2-байтовый префикс длины + сам запрос
+            byte[] tcpQuery = new byte[query.length + 2];
+            tcpQuery[0] = (byte) (query.length >> 8);
+            tcpQuery[1] = (byte) (query.length & 0xFF);
+            System.arraycopy(query, 0, tcpQuery, 2, query.length);
+
+            java.io.OutputStream os = socket.getOutputStream();
+            os.write(tcpQuery);
+            os.flush();
+
+            java.io.InputStream is = socket.getInputStream();
+            int hi = is.read(), lo = is.read();
+            if (hi < 0 || lo < 0) return false;
+
+            int responseLen = (hi << 8) | lo;
+            byte[] response = new byte[Math.min(responseLen, 512)];
+            int read = 0;
+            while (read < response.length) {
+                int n = is.read(response, read, response.length - read);
+                if (n < 0) break;
+                read += n;
+            }
+
+            // Проверяем: QR-бит = 1 (это ответ, а не запрос)
+            boolean isValidResponse = read >= 4 && (response[2] & 0x80) != 0;
+            FileLogger.i(TAG, "DNS TCP check: " + (isValidResponse ? "✅ OK" : "❌")
+                    + " (read=" + read + " bytes)");
+            return isValidResponse;
+
+        } catch (Exception e) {
+            FileLogger.w(TAG, "DNS TCP check failed: " + e.getMessage());
+            return false;
+        } finally {
+            if (socket != null) try { socket.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private byte[] buildDnsQuery(String domain) {
+        java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+        b.write(0x12); b.write(0x34);  // Transaction ID
+        b.write(0x01); b.write(0x00);  // Flags: recursion desired
+        b.write(0x00); b.write(0x01);  // Questions: 1
+        b.write(0x00); b.write(0x00);  // Answer RRs: 0
+        b.write(0x00); b.write(0x00);  // Authority RRs: 0
+        b.write(0x00); b.write(0x00);  // Additional RRs: 0
+        for (String part : domain.split("\\.")) {
+            b.write(part.length());
+            for (byte c : part.getBytes()) b.write(c);
+        }
+        b.write(0x00);                  // End of QNAME
+        b.write(0x00); b.write(0x01);  // QTYPE: A
+        b.write(0x00); b.write(0x01);  // QCLASS: IN
+        return b.toByteArray();
     }
 
     private boolean checkPhysicalInternetBypassingVpn() {
@@ -572,6 +659,18 @@ public class VpnTunnelService extends VpnService {
         if (!hasInternet) {
             failCount = 0;
             return;
+        }
+
+        // ← НОВОЕ: DNS через туннель
+        if (isTunnelVerified) {
+            boolean dnsOk = checkDnsTcpViaSocks();
+            if (!dnsOk) {
+                FileLogger.e(TAG, "DNS через туннель не работает → переключаем сервер");
+                failCount++;
+                new ServerRepository(this).clearLastWorkingServer();
+                switchToNextServer();
+                return;
+            }
         }
 
         boolean tunnelOk = checkTunnelProxyFastSync();

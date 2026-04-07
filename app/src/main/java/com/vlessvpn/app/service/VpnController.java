@@ -121,6 +121,7 @@ public class VpnController {
 
     public void startAutoConnect() {
         // Оборачиваем ВСЮ логику работы с БД в фоновый поток (решает проблему краша)
+
         new Thread(() -> {
             try {
                 VlessServer best = repository.getLastWorkingServer();

@@ -223,14 +223,16 @@ public class ServerTester {
                     FileLogger.d(TAG, "bindSocket: нет прав BIND_NETWORK — используем process-bound");
 
                 } catch (IOException e) {
-                    // Сетевая ошибка привязки
-                    FileLogger.w(TAG, "bindSocket IO error: " + e.getMessage());
-
+                    if (!e.getMessage().contains("EPERM")) {
+                        FileLogger.w(TAG, "bindSocket IO error: " + e.getMessage());
+                    }
                 } catch (Exception e) {
                     // Любая другая ошибка — не критична
                     FileLogger.d(TAG, "bindSocket skipped: " + e.getMessage());
                 }
+
             }
+
 
             InetAddress addr = InetAddress.getByName(host);
             StructTimeval tv = null;

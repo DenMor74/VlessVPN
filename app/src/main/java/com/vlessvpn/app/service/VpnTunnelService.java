@@ -71,6 +71,7 @@ public class VpnTunnelService extends VpnService {
     private volatile boolean isAutoConnectMode = false;
 
     private static final CopyOnWriteArrayList<Consumer<Boolean>> connectionListeners = new CopyOnWriteArrayList<>();
+    private final List<String> failedHostsThisSession = new ArrayList<>();
 
     public static void registerConnectionListener(Context ctx, Consumer<Boolean> listener) {
         connectionListeners.add(listener);
@@ -272,6 +273,14 @@ public class VpnTunnelService extends VpnService {
 
         v2rayThread = new Thread(() -> {
             try {
+                ServerTester.TestResult ping = ServerTester.tcpTest(this, server);
+                if (ping.pingMs < 0) {
+                    FileLogger.w(TAG, "TCP недоступен: " + server.host + " → пропускаем");
+                    // Сразу переключаемся без запуска xray
+                    safeExecute(() -> switchToNextServer());
+                    return;
+                }
+                FileLogger.i(TAG, "PING: " + ping.pingMs);
                 vpnInterface = buildTunWithRetries(server);
                 if (vpnInterface == null) {
                     mainHandler.post(() -> {
@@ -365,6 +374,7 @@ public class VpnTunnelService extends VpnService {
 
                     sendVpnBroadcast(true, s, null);
                     notifyConnectionChanged(true);
+                    VpnController.getInstance(VpnTunnelService.this).onConnectFinished();
                 });
 
                 if (statsFuture != null) statsFuture.cancel(false);
@@ -544,37 +554,76 @@ public class VpnTunnelService extends VpnService {
         return !(code >= 200 && code < 400); // Инверсия: если Google доступен, значит "не белый (не РФ)" интернет
     }
 
-    // ════════════════════════════════════════════════════════════════════════
 
     private void switchToNextServer() {
         if (VpnController.getInstance(this).isUserManuallyDisconnected()) {
-            // FileLogger.i(TAG, "switchToNextServer: пропуск — пользователь отключил вручную");
             disconnect();
+            return;
+        }
+        // Защита от вызова на главном потоке
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            FileLogger.e(TAG, "switchToNextServer вызван на UI потоке! Перезапускаем в фоне.");
+            safeExecute(this::switchToNextServer);
             return;
         }
 
         ServerRepository repo = new ServerRepository(this);
+
+        // Помечаем текущий как плохой и запоминаем
         if (currentServer != null) {
             currentServer.trafficOk = false;
             currentServer.pingMs = -1;
             repo.updateServerSync(currentServer);
+            if (!failedHostsThisSession.contains(currentServer.host)) {
+                failedHostsThisSession.add(currentServer.host);
+            }
         }
 
+        // Ищем следующий — пропуская все уже провалившиеся
         List<VlessServer> servers = repo.getAllWorkingServersSync();
-        if (servers.isEmpty()) {
-            mainHandler.post(() -> StatusBus.post(this, "Нет рабочих серверов!", true));
+        if (servers == null || servers.isEmpty()) {
+            servers = repo.getTopServersSync();
+        }
+
+        VlessServer next = null;
+        if (servers != null) {
+            for (VlessServer s : servers) {
+                if (!failedHostsThisSession.contains(s.host)) {
+                    next = s;
+                    break;
+                }
+            }
+        }
+
+        // Все серверы исчерпаны — запускаем внеочередное сканирование
+        if (next == null) {
+            FileLogger.w(TAG, "switchToNextServer: все серверы исчерпаны → запускаем сканирование");
+            failedHostsThisSession.clear(); // сбрасываем историю
+            mainHandler.post(() -> StatusBus.post(this, "🔄 Обновляем список серверов...", true));
+            VpnController.getInstance(this).onConnectFinished();
+
+            // Запускаем внеочередное сканирование и после него — авто-подключение
+            safeExecute(() -> {
+                ServerRepository r = new ServerRepository(this);
+                r.triggerImmediateScan(this, () -> {
+                    FileLogger.i(TAG, "Сканирование завершено → авто-подключение");
+                    VpnController.getInstance(this).startAutoConnect();
+                });
+            });
             return;
         }
 
-        VlessServer next = servers.get(0);
+        FileLogger.i(TAG, "switchToNextServer → " + next.host);
+        final VlessServer finalNext = next;
         mainHandler.post(() -> {
-            StatusBus.post(this, "Переключение на " + next.remark, true);
+            StatusBus.post(this, "Переключение на " + finalNext.remark, true);
             StatusBus.post(this, "⚡RESET_PANELS", true);
         });
 
+        VpnController.getInstance(this).onConnectFinished();
         long newId = System.currentTimeMillis();
         activeConnectId = newId;
-        new Thread(() -> connect(next, newId), "reconnect-thread").start();
+        new Thread(() -> connect(finalNext, newId), "reconnect-thread").start();
     }
 
     private void startHev() {
@@ -598,7 +647,7 @@ public class VpnTunnelService extends VpnService {
         if (isStopping) return;
         isStopping = true;
 
-        activeConnectId = 0;
+        //activeConnectId = 0;
         isRunning = false;
         connectedServer = null;
 
@@ -662,6 +711,7 @@ public class VpnTunnelService extends VpnService {
 
        // FileLogger.i(TAG, "VPN полностью отключён");
         BackgroundMonitorService.scheduleCatchUpTasks(this);
+        VpnController.getInstance(this).onConnectFinished();
     }
 
     private void doDeepCheckInternal() {

@@ -31,6 +31,7 @@ public class WifiMonitor {
     private static Context appContext;
     private static final Handler handler = new Handler(Looper.getMainLooper());
     private static volatile boolean wifiLostPending = false;
+    private static Runnable pendingAutoConnect = null;
 
     public static void startMonitoring(Context context) {
         if (defaultCallback != null) return;
@@ -73,13 +74,24 @@ public class WifiMonitor {
                 else if (isCellular) {
                     FileLogger.i(TAG, "Default Network: LTE активен");
 
-                    // НЕ запускаем авто-подключение, если пользователь вручную отключил
                     if (repo.isAutoConnectOnWifiDisconnect() &&
                             !VpnTunnelService.isRunning &&
                             !controller.isUserManuallyDisconnected()) {
 
                         FileLogger.i(TAG, "LTE → запускаем авто-подключение");
-                        controller.startAutoConnect();
+
+                        // ← DEBOUNCE: отменяем предыдущий запрос и ждём стабилизации сети
+                        if (pendingAutoConnect != null) {
+                            handler.removeCallbacks(pendingAutoConnect);
+                        }
+                        pendingAutoConnect = () -> {
+                            pendingAutoConnect = null;
+                            if (!VpnTunnelService.isRunning) {
+                                controller.startAutoConnect();
+                            }
+                        };
+                        handler.postDelayed(pendingAutoConnect, 1500); // 1.5 сек стабилизации
+
                     } else if (controller.isUserManuallyDisconnected()) {
                         FileLogger.i(TAG, "Пользователь вручную отключил VPN — авто-подключение заблокировано на LTE");
                     }
@@ -88,8 +100,13 @@ public class WifiMonitor {
 
             @Override
             public void onLost(@NonNull Network network) {
+                // ← отменяем pending авто-подключение если сеть снова пропала
+                if (pendingAutoConnect != null) {
+                    handler.removeCallbacks(pendingAutoConnect);
+                    pendingAutoConnect = null;
+                }
                 if (repo.isAutoConnectOnWifiDisconnect()) {
-                    FileLogger.w(TAG, "Default Network потеряна (возможно Wi-Fi отвалился). Ждём LTE...");
+                    FileLogger.w(TAG, "Default Network потеряна. Ждём LTE...");
                     wifiLostPending = true;
                     handler.removeCallbacks(onWifiLostRunnable);
                     handler.postDelayed(onWifiLostRunnable, WIFI_LOST_DELAY_MS);

@@ -3,6 +3,7 @@ package com.vlessvpn.app.service;
 import android.content.Context;
 import android.content.Intent;
 import androidx.annotation.NonNull;
+import java.util.concurrent.atomic.AtomicBoolean;
 import com.google.gson.Gson;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.storage.ServerRepository;
@@ -21,6 +22,7 @@ public class VpnController {
     private final Context appContext;
     private final ServerRepository repository;
     private volatile boolean userManuallyDisconnected = false;
+    private final AtomicBoolean isConnecting = new AtomicBoolean(false);
 
     private VpnController(Context context) {
         appContext = context.getApplicationContext();
@@ -119,22 +121,28 @@ public class VpnController {
         disconnect(true);
     }
 
+
     public void startAutoConnect() {
-        // Оборачиваем ВСЮ логику работы с БД в фоновый поток (решает проблему краша)
+        // ← ГЛАВНЫЙ GUARD
+        if (isConnecting.getAndSet(true)) {
+            FileLogger.w(TAG, "startAutoConnect: уже идёт подключение, пропускаем");
+            return;
+        }
+        if (VpnTunnelService.isRunning) {
+            FileLogger.w(TAG, "startAutoConnect: VPN уже работает");
+            isConnecting.set(false);
+            return;
+        }
 
         new Thread(() -> {
             try {
                 VlessServer best = repository.getLastWorkingServer();
-
                 if (best != null) {
                     FileLogger.i(TAG, "startAutoConnect: " + best.host);
-                    // connect() безопасно вызывать из фонового потока, т.к. он стартует Service
                     connect(best, true);
                     return;
                 }
-
                 FileLogger.i(TAG, "startAutoConnect: нет lastWorkingServer — пробуем топ серверов");
-
                 List<VlessServer> top = repository.getTopServersSync();
                 if (top != null && !top.isEmpty()) {
                     best = top.get(0);
@@ -142,13 +150,18 @@ public class VpnController {
                     connect(best, true);
                     return;
                 }
-
                 FileLogger.w(TAG, "Нет рабочих серверов для авто-подключения");
-
+                isConnecting.set(false); // сбросить если серверов нет
             } catch (Exception e) {
                 FileLogger.e(TAG, "Ошибка в startAutoConnect: " + e.getMessage());
+                isConnecting.set(false); // сбросить при ошибке
             }
         }).start();
+    }
+
+    // Добавить метод сброса — вызывать при успехе и провале:
+    public void onConnectFinished() {
+        isConnecting.set(false);
     }
 
 }

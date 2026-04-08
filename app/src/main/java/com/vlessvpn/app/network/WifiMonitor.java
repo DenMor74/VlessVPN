@@ -40,7 +40,7 @@ public class WifiMonitor {
 
         ServerRepository repo = new ServerRepository(appContext);
 
-        FileLogger.i(TAG, "WifiMonitor старт. Текущий Wi-Fi: " + isWifiConnected(appContext));
+       // FileLogger.i(TAG, "WifiMonitor старт. Текущий Wi-Fi: " + isWifiConnected(appContext));
 
         defaultCallback = new ConnectivityManager.NetworkCallback() {
             @Override
@@ -106,7 +106,7 @@ public class WifiMonitor {
                         .build();
                 cm.registerNetworkCallback(defaultReq, defaultCallback);
             }
-            FileLogger.i(TAG, "WifiMonitor успешно запущен");
+           // FileLogger.i(TAG, "WifiMonitor успешно запущен");
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка старта WifiMonitor", e);
         }
@@ -151,7 +151,7 @@ public class WifiMonitor {
 
         try {
             cm.registerNetworkCallback(wifiRequest, wifiSpecificCallback);
-            FileLogger.i(TAG, "Wi-Fi specific callback успешно зарегистрирован");
+            //FileLogger.i(TAG, "Wi-Fi specific callback успешно зарегистрирован");
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка регистрации Wi-Fi specific callback", e);
         }

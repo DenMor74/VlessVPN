@@ -112,7 +112,7 @@ public class V2RayManager {
                 return false;
             }
 
-            FileLogger.i(TAG, "v2ray запущен");
+           // FileLogger.i(TAG, "v2ray запущен");
             if (callback != null) callback.onStarted(server);
 
             while (coreController != null && coreController.getIsRunning()) {

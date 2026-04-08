@@ -35,14 +35,20 @@ public class V2RayConfigBuilder {
             fakednsObj.put("ipPool", "198.18.0.0/15");
             fakednsObj.put("poolSize", 65535);
             fakednsArray.put(fakednsObj);
+            // ДОБАВИТЬ IPv6
+//            JSONObject fakednsIp6 = new JSONObject();
+//            fakednsIp6.put("ipPool", "fc00::/18");
+//            fakednsIp6.put("poolSize", 65535);
+//            fakednsArray.put(fakednsIp6);
+
             config.put("fakedns", fakednsArray);
 
             // ── DNS (ОБНОВЛЕНО) ──────────────────────────────────────────────
             JSONObject dns = new JSONObject();
             JSONArray dnsServers = new JSONArray();
             dnsServers.put("fakedns"); // Обязательно первым!
-            dnsServers.put("8.8.8.8");
-            dnsServers.put("1.1.1.1");
+            dnsServers.put("tcp://8.8.8.8");
+            dnsServers.put("https://1.1.1.1/dns-query"); // DoH работает еще надежнее
             dns.put("servers", dnsServers);
             dns.put("queryStrategy", "UseIPv4");
             config.put("dns", dns);
@@ -134,6 +140,11 @@ public class V2RayConfigBuilder {
             // Правило 1: Порт 53 ловим и отправляем в dns-out (FakeDNS)
             JSONObject dnsRule = new JSONObject();
             dnsRule.put("type", "field");
+            // ДОБАВЛЕНА ЭТА СТРОКА, чтобы избежать бесконечной петли:
+            JSONArray inTags = new JSONArray();
+            inTags.put("socks-in");
+            dnsRule.put("inboundTag", inTags);
+
             dnsRule.put("port", "53");
             dnsRule.put("outboundTag", "dns-out");
             rules.put(dnsRule);

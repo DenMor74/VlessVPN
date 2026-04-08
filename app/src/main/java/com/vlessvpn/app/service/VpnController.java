@@ -40,11 +40,11 @@ public class VpnController {
 
 
     public void disconnect(boolean isUserAction) {
-        FileLogger.i(TAG, "VpnController → DISCONNECT (userAction=" + isUserAction + ")");
+        FileLogger.i(TAG, "DISCONNECT (userAction=" + isUserAction + ")");
 
         if (isUserAction) {
             userManuallyDisconnected = true;   // ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
-            FileLogger.i(TAG, "Пользователь вручную отключил VPN — авто-подключение заблокировано до смены сети");
+            FileLogger.i(TAG, "VPN отключен вручную.");
         }
 
         stopAllPendingOperations();
@@ -58,7 +58,7 @@ public class VpnController {
     }
 
     public void connect(@NonNull VlessServer server, boolean isAutoMode) {
-        FileLogger.i(TAG, "VpnController → CONNECT " +
+        FileLogger.i(TAG, "CONNECT " +
                 (isAutoMode ? "(AUTO)" : "(MANUAL)") + ": " + server.host);
 
         // Если пользователь вручную отключил — снимаем блокировку только при ручном подключении
@@ -84,13 +84,13 @@ public class VpnController {
     public void resetManualDisconnectFlag() {
         if (userManuallyDisconnected) {
             userManuallyDisconnected = false;
-            FileLogger.i(TAG, "Сброс флага ручного отключения — разрешено авто-подключение");
+            //FileLogger.i(TAG, "Сброс флага ручного отключения — разрешено авто-подключение");
         }
     }
 
     /** Полная остановка ВСЕГО (используется перед любым новым действием) */
     public void stopAllPendingOperations() {
-        FileLogger.i(TAG, "VpnController → stopAllPendingOperations");
+        //FileLogger.i(TAG, "stopAllPendingOperations");
         AutoConnectManager.cancelAutoConnect();
         // Если в будущем добавишь WorkManager-таски — отменяй здесь
     }
@@ -127,7 +127,7 @@ public class VpnController {
                 VlessServer best = repository.getLastWorkingServer();
 
                 if (best != null) {
-                    FileLogger.i(TAG, "VpnController → startAutoConnect: " + best.host);
+                    FileLogger.i(TAG, "startAutoConnect: " + best.host);
                     // connect() безопасно вызывать из фонового потока, т.к. он стартует Service
                     connect(best, true);
                     return;

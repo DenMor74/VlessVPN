@@ -1,7 +1,6 @@
 package com.vlessvpn.app.network;
 
 import android.content.Context;
-import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -9,10 +8,10 @@ import android.net.NetworkRequest;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+
 import androidx.annotation.NonNull;
-import com.vlessvpn.app.service.AutoConnectManager;
+
 import com.vlessvpn.app.service.VpnController;
-import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
@@ -41,8 +40,6 @@ public class WifiMonitor {
 
         ServerRepository repo = new ServerRepository(appContext);
 
-       // FileLogger.i(TAG, "WifiMonitor старт. Текущий Wi-Fi: " + isWifiConnected(appContext));
-
         defaultCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(@NonNull Network network) {
@@ -64,9 +61,9 @@ public class WifiMonitor {
                     wifiLostPending = false;
                     handler.removeCallbacks(onWifiLostRunnable);
 
-                    controller.resetManualDisconnectFlag();   // ← сбрасываем флаг при появлении Wi-Fi
+                    controller.resetManualDisconnectFlag(); // сбрасываем флаг при появлении Wi-Fi
 
-                    if (repo.isAutoConnectOnWifiDisconnect() && VpnTunnelService.isRunning) {
+                    if (repo.isAutoConnectOnWifiDisconnect() && controller.isRunning()) {
                         FileLogger.i(TAG, "Wi-Fi появился → отключаем VPN");
                         controller.disconnect(false);
                     }
@@ -75,18 +72,18 @@ public class WifiMonitor {
                     FileLogger.i(TAG, "Default Network: LTE активен");
 
                     if (repo.isAutoConnectOnWifiDisconnect() &&
-                            !VpnTunnelService.isRunning &&
+                            !controller.isRunning() &&
                             !controller.isUserManuallyDisconnected()) {
 
                         FileLogger.i(TAG, "LTE → запускаем авто-подключение");
 
-                        // ← DEBOUNCE: отменяем предыдущий запрос и ждём стабилизации сети
+                        // DEBOUNCE: отменяем предыдущий запрос и ждём стабилизации сети
                         if (pendingAutoConnect != null) {
                             handler.removeCallbacks(pendingAutoConnect);
                         }
                         pendingAutoConnect = () -> {
                             pendingAutoConnect = null;
-                            if (!VpnTunnelService.isRunning) {
+                            if (!controller.isRunning()) {
                                 controller.startAutoConnect();
                             }
                         };
@@ -100,7 +97,7 @@ public class WifiMonitor {
 
             @Override
             public void onLost(@NonNull Network network) {
-                // ← отменяем pending авто-подключение если сеть снова пропала
+                // отменяем pending авто-подключение если сеть снова пропала
                 if (pendingAutoConnect != null) {
                     handler.removeCallbacks(pendingAutoConnect);
                     pendingAutoConnect = null;
@@ -123,10 +120,10 @@ public class WifiMonitor {
                         .build();
                 cm.registerNetworkCallback(defaultReq, defaultCallback);
             }
-           // FileLogger.i(TAG, "WifiMonitor успешно запущен");
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка старта WifiMonitor", e);
         }
+
         // Регистрируем отдельный callback только на Wi-Fi (для надёжного отключения VPN)
         registerWifiSpecificCallback();
     }
@@ -145,35 +142,33 @@ public class WifiMonitor {
         wifiSpecificCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(@NonNull Network network) {
-                //FileLogger.i(TAG, "Wi-Fi появился");
                 wifiLostPending = false;
                 handler.removeCallbacks(onWifiLostRunnable);
 
+                VpnController controller = VpnController.getInstance(appContext);
                 ServerRepository repo = new ServerRepository(appContext);
-                if (repo.isAutoConnectOnWifiDisconnect() && VpnTunnelService.isRunning) {
+
+                if (repo.isAutoConnectOnWifiDisconnect() && controller.isRunning()) {
                     FileLogger.i(TAG, "Wi-Fi → отключаем VPN");
-                    VpnController.getInstance(appContext).disconnect(false);
+                    controller.disconnect(false);
                 }
 
                 // Сбрасываем флаг ручного отключения
-                VpnController.getInstance(appContext).resetManualDisconnectFlag();
+                controller.resetManualDisconnectFlag();
             }
 
             @Override
             public void onLost(@NonNull Network network) {
-                //FileLogger.w(TAG, "Wi-Fi Specific Callback: onLost");
                 // Здесь ничего не запускаем — отключение Wi-Fi обрабатывает default callback
             }
         };
 
         try {
             cm.registerNetworkCallback(wifiRequest, wifiSpecificCallback);
-            //FileLogger.i(TAG, "Wi-Fi specific callback успешно зарегистрирован");
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка регистрации Wi-Fi specific callback", e);
         }
     }
-
 
     private static final Runnable onWifiLostRunnable = () -> {
         if (!wifiLostPending) return;
@@ -181,8 +176,9 @@ public class WifiMonitor {
 
         VpnController controller = VpnController.getInstance(appContext);
 
-        if (VpnTunnelService.isRunning ||
-                AutoConnectManager.isFailoverInProgress() ||
+        // Проверяем статус через Единую Точку входа
+        if (controller.isRunning() ||
+                controller.getState().getValue() == VpnController.VpnState.CONNECTING ||
                 controller.isUserManuallyDisconnected()) {
             return;
         }
@@ -230,7 +226,6 @@ public class WifiMonitor {
     }
 
     public static boolean isWifiConnected(Context ctx) {
-        // (оставлен без изменений — твой оригинальный метод)
         ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

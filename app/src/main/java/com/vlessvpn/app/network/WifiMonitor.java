@@ -24,7 +24,7 @@ public class WifiMonitor {
 
     private static final String TAG = "WifiMonitor";
     private static final long WIFI_LOST_DELAY_MS = 2_000L;
-
+    private static volatile long lastNetworkEventMs = 0;
     private static ConnectivityManager.NetworkCallback defaultCallback;
     private static ConnectivityManager.NetworkCallback wifiSpecificCallback;
 
@@ -45,8 +45,8 @@ public class WifiMonitor {
         defaultCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(@NonNull Network network) {
-                FileLogger.i(TAG, "onAvailable");
-
+                // FileLogger.i(TAG, "onAvailable");
+                lastNetworkEventMs = System.currentTimeMillis();
                 NetworkCapabilities caps = cm.getNetworkCapabilities(network);
                 if (caps == null) return;
 
@@ -88,6 +88,8 @@ public class WifiMonitor {
 
             @Override
             public void onLost(@NonNull Network network) {
+                if (System.currentTimeMillis() - lastNetworkEventMs < 500) return; //
+
                 if (repo.isAutoConnectOnWifiDisconnect()) {
                     FileLogger.w(TAG, "Default Network потеряна (возможно Wi-Fi отвалился). Ждём LTE...");
                     wifiLostPending = true;

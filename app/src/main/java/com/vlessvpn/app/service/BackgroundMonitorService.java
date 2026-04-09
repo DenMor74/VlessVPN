@@ -455,7 +455,7 @@ public class BackgroundMonitorService extends Service {
                 }
 
                 int batches = (int) Math.ceil((double) total / poolSize);
-                long pingTimeout = Math.min(240, Math.max(5, batches * 10L));
+                long pingTimeout = Math.min(300, Math.max(5, batches * 12L));
 
                 try {
                     pingLatch.await(pingTimeout, TimeUnit.SECONDS);
@@ -491,7 +491,7 @@ public class BackgroundMonitorService extends Service {
                         int endIndex = Math.min(startIndex + BATCH_SIZE, finalSurvivedSize);
                         List<VlessServer> currentBatch = survivedPing.subList(startIndex, endIndex);
 
-                        int basePort = 10800;
+                        int basePort = 10200;
                         V2RayManager.setTestNetworkForMultiplex(finalCellularNet);
 
                         try {
@@ -550,7 +550,7 @@ public class BackgroundMonitorService extends Service {
                                 }
 
                                 try {
-                                    long httpTimeout = Math.max(240, currentBatch.size());
+                                    long httpTimeout = Math.max(300, currentBatch.size());
                                     httpLatch.await(httpTimeout, TimeUnit.SECONDS);
                                 } catch (InterruptedException e) {
                                     FileLogger.w(W, "Фаза 2 прервана (задача отменена системой)");

@@ -11,30 +11,20 @@ import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.util.FileLogger;
 
-import java.io.FileDescriptor;
 import java.io.IOException;
-import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.net.InetSocketAddress;
-import java.net.URL;
 
-/**
- * ServerTester — два типа проверок:
- *
- * 1. tcpTest()    — TCP пинг через LTE (приоритет) или WiFi (fallback).
- *                  Используется как первый этап в ScanWorker.
- *
- * 2. trafficTest() — HTTP GET через SOCKS5→v2ray.
- *                  Используется для проверки работы VPN в doConnectivityCheck.
- */
 public class ServerTester {
 
     private static final String TAG      = "ServerTester";
-    private static final int TIMEOUT_MS  = 10_000;
+    private static final int TIMEOUT_MS  = 12_000;   // немного увеличил
     private static final int REPEAT      = 2;
     private static final String[] CHECK_URLS = {
             "http://speed.cloudflare.com/__down?bytes=512",
@@ -57,16 +47,10 @@ public class ServerTester {
 
     // ── 1. TCP пинг ────────────────────────────────────────────────────────
 
-// ── 1. TCP пинг ────────────────────────────────────────────────────────
-
-    /**
-     * Перегрузка: явная передача сети для теста (используется в ScanWorker)
-     */
     public static TestResult tcpTest(Context ctx, VlessServer server, Network bindNet) {
         TestResult r = new TestResult();
         long best = -1;
 
-        // Если сеть задана — используем только её
         if (bindNet != null) {
             for (int i = 0; i < REPEAT; i++) {
                 long ms = socketConnect(ctx, server.host, server.port, bindNet);
@@ -75,11 +59,8 @@ public class ServerTester {
                     r.networkType = getNetworkTypeName(bindNet, ctx);
                 }
             }
-        }
-        // Если сеть не задана — авто-выбор (старая логика)
-        else {
+        } else {
             Network cellular = getCellularNetwork(ctx);
-
             if (cellular != null) {
                 for (int i = 0; i < REPEAT; i++) {
                     long ms = socketConnect(ctx, server.host, server.port, cellular);
@@ -89,9 +70,7 @@ public class ServerTester {
                     }
                 }
             }
-
-            // Fallback на WiFi только если LTE сети нет совсем
-            if (best < 0 && cellular == null) {
+            if (best < 0) {
                 Network wifi = getWifiNetwork(ctx);
                 for (int i = 0; i < REPEAT; i++) {
                     long ms = socketConnect(ctx, server.host, server.port, wifi);
@@ -113,36 +92,22 @@ public class ServerTester {
         return r;
     }
 
-    /**
-     * Старая сигнатура для обратной совместимости
-     */
     public static TestResult tcpTest(Context ctx, VlessServer server) {
         return tcpTest(ctx, server, null);
     }
 
-    /**
-     * Вспомогательный метод: определение типа сети для лога
-     */
     private static String getNetworkTypeName(Network net, Context ctx) {
         if (net == null || ctx == null) return "unknown";
         ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return "unknown";
-
-        android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+        NetworkCapabilities caps = cm.getNetworkCapabilities(net);
         if (caps == null) return "unknown";
-
-        if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) return "LTE";
-        if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) return "WiFi";
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return "LTE";
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return "WiFi";
         return "Other";
     }
 
-    // ── 2. Проверка трафика через VPN ──────────────────────────────────────
-
-    /**
-     * Проверка трафика через VPN — 3 параллельных запроса к разным URL.
-     * Возвращает true при первом успешном ответе.
-     * Быстрее последовательной проверки при медленном туннеле.
-     */
+    // ── 2. Проверка трафика через VPN (без изменений) ──────────────────────
     public static boolean trafficTest() {
         if (!vpnActive.get()) return false;
 
@@ -156,18 +121,14 @@ public class ServerTester {
         for (String urlStr : CHECK_URLS) {
             pool.execute(() -> {
                 try {
-                    HttpURLConnection conn = (HttpURLConnection)
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
                             new URL(urlStr).openConnection(proxy);
                     conn.setConnectTimeout(TIMEOUT_MS);
                     conn.setReadTimeout(TIMEOUT_MS);
                     conn.setRequestMethod("GET");
                     int code = conn.getResponseCode();
                     conn.disconnect();
-                    if (code >= 200 && code < 400) {
-                        success.set(true);
-                        // Сигналим остальным потокам что можно заканчивать
-                        while (latch.getCount() > 0) latch.countDown();
-                    }
+                    if (code >= 200 && code < 400) success.set(true);
                 } catch (Exception ignored) {
                 } finally {
                     latch.countDown();
@@ -182,101 +143,86 @@ public class ServerTester {
         return success.get();
     }
 
-    // ── Сетевые утилиты ────────────────────────────────────────────────────
+    // ── НОВЫЙ: безопасная привязка сокета ─────────────────────────────────
+    private static boolean safeBindSocket(Socket socket, Network network) {
+        if (network == null || socket == null) return false;
 
-    private static long socketConnect(Context ctx, String host, int port, Network bindNet) {
-        FileDescriptor fd = null;
-        try {
-            fd = Os.socket(OsConstants.AF_INET, OsConstants.SOCK_STREAM, 0);
-
-            // 🔴 ИСПРАВЛЕНИЕ: Вызываем protect() ТОЛЬКО если VPN реально включен пользователем.
-            // Если VPN выключен, вызов VpnTunnelService.protect() будит сервис,
-            // создает Foreground-уведомление и зажигает AOD-экран.
-            if (isVpnActive()) {
-                try {
-                    VpnTunnelService.protectSocket(getIntFd(fd));
-                } catch (Exception ignored) {}
-            }
-
-            // Привязка сокета к LTE/WiFi (это само по себе пускает трафик в обход VPN)
-            if (bindNet != null) {
-                try {
-                    // Пробуем привязать сокет к сети
-                    bindNet.bindSocket(fd);
-                    // FileLogger.d(TAG, "Socket bound via bindSocket");
-
-                } catch (SecurityException e) {
-                    // Android 13+: нет разрешения BIND_NETWORK
-                    // Это нормально! Процесс уже привязан через bindProcessToNetwork
-                    FileLogger.d(TAG, "bindSocket: нет прав BIND_NETWORK — используем process-bound");
-
-                } catch (IOException e) {
-                    // Сетевая ошибка привязки
-                    FileLogger.w(TAG, "bindSocket IO error: " + e.getMessage());
-
-                } catch (Exception e) {
-                    // Любая другая ошибка — не критична
-                    FileLogger.d(TAG, "bindSocket skipped: " + e.getMessage());
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                network.bindSocket(socket);
+                return true;
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : "";
+                if (msg.contains("EPERM") || msg.contains("Operation not permitted")) {
+                    if (attempt == 0) {
+                        FileLogger.w(TAG, "bindSocket EPERM → retry 400мс (смена сети)");
+                        try { Thread.sleep(400); } catch (InterruptedException ignored) {}
+                        continue;
+                    }
+                    FileLogger.w(TAG, "bindSocket EPERM → игнорируем, продолжаем тест");
+                    return false;
+                } else {
+                    FileLogger.e(TAG, "bindSocket неожиданная ошибка", e);
+                    return false;
                 }
             }
+        }
+        return false;
+    }
 
-            java.net.InetAddress addr = java.net.InetAddress.getByName(host);
-            android.system.StructTimeval tv = android.system.StructTimeval.fromMillis(TIMEOUT_MS);
-            Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, tv);
-            Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, tv);
+    // ── Обновлённый socketConnect ─────────────────────────────────────────
+    private static long socketConnect(Context ctx, String host, int port, Network bindNet) {
+        Socket socket = new Socket();
+        try {
+            // protect от утечек через VPN
+            if (VpnTunnelService.getInstance() != null) {
+                VpnTunnelService.getInstance().protect(socket);
+            }
+
+            if (bindNet != null) {
+                safeBindSocket(socket, bindNet);   // ← теперь безопасно
+            }
 
             long start = System.currentTimeMillis();
-            Os.connect(fd, addr, port);
-            long ms = System.currentTimeMillis() - start;
+            socket.connect(new InetSocketAddress(host, port), TIMEOUT_MS);
+            return System.currentTimeMillis() - start;
 
-            Os.close(fd);
-            fd = null;
-            return ms;
         } catch (Exception e) {
             return -1;
         } finally {
-            if (fd != null) try { Os.close(fd); } catch (Exception ignored) {}
+            try { socket.close(); } catch (Exception ignored) {}
         }
     }
 
-    private static int getIntFd(FileDescriptor fd) {
-        try {
-            java.lang.reflect.Field f = FileDescriptor.class.getDeclaredField("descriptor");
-            f.setAccessible(true);
-            return (int) f.get(fd);
-        } catch (Exception e) { return -1; }
-    }
-
-    public static Network getCellularNetwork(Context ctx) {
+    // ── Остальные методы без изменений ────────────────────────────────────
+    public static Network getCellularNetwork(Context ctx) { /* ... твой код ... */
+        // (оставляю как было)
         if (ctx == null) return null;
-        ConnectivityManager cm = (ConnectivityManager)
-                ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return null;
         for (Network net : cm.getAllNetworks()) {
             NetworkCapabilities caps = cm.getNetworkCapabilities(net);
             if (caps == null) continue;
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))       continue;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) continue;
-            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                    || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
         }
         return null;
     }
 
-    public static Network getWifiNetwork(Context ctx) {
+    public static Network getWifiNetwork(Context ctx) { /* ... твой код ... */
         if (ctx == null) return null;
-        ConnectivityManager cm = (ConnectivityManager)
-                ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return null;
         for (Network net : cm.getAllNetworks()) {
             NetworkCapabilities caps = cm.getNetworkCapabilities(net);
             if (caps == null) continue;
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))  continue;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue;
-            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                    || caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return net;
         }
         return null;
     }
-
 }

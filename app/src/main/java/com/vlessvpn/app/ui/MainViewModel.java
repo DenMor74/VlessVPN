@@ -11,6 +11,7 @@ import androidx.lifecycle.MutableLiveData;
 
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.service.BackgroundMonitorService;
+import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.StatusBus;
 
@@ -19,24 +20,28 @@ import java.util.concurrent.Executors;
 
 public class MainViewModel extends AndroidViewModel {
 
-    private final ServerRepository repository;
+    private final ServerRepository        repository;
     private final LiveData<List<VlessServer>> allServers;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    // VPN статус
+    private final MutableLiveData<Boolean>     isConnected       = new MutableLiveData<>(false);
+    private final MutableLiveData<VlessServer> connectedServer   = new MutableLiveData<>(null);
+
     // Статус сканирования и трафик
-    private final MutableLiveData<String> lastStatusMessage = new MutableLiveData<>("");
+    private final MutableLiveData<String>      lastStatusMessage = new MutableLiveData<>("");
     // IP результат — отдельная LiveData, не перезаписывается другими сообщениями
-    private final MutableLiveData<String> lastIpResult = new MutableLiveData<>("");
+    private final MutableLiveData<String>      lastIpResult = new MutableLiveData<>("");
 
     public MainViewModel(@NonNull Application application) {
         super(application);
         repository = new ServerRepository(application);
         allServers = repository.getTopServersLiveData();
 
-        // ⚠️ ВАЖНО: Вся логика статуса подключения (isConnected, connectedServer)
-        // теперь находится в VpnController и наблюдается напрямую из MainActivity!
+        // Слушаем изменения VPN состояния
+        VpnTunnelService.registerConnectionListener(application, this::setConnected);
 
-        // Слушаем StatusBus (только для вывода текстов скорости, пинга и IP)
+        // Слушаем StatusBus — IP результаты в отдельную LiveData
         StatusBus.get().observeForever(event -> {
             if (event != null && event.message != null && !event.message.isEmpty()) {
                 if (event.message.startsWith("🔬")) {
@@ -46,17 +51,33 @@ public class MainViewModel extends AndroidViewModel {
                 }
             }
         });
+
+        // Инициализируем текущий статус
+        setConnected(VpnTunnelService.isRunning);
     }
 
     // ── Серверы ───────────────────────────────────────────────────────────────
 
     public LiveData<List<VlessServer>> getAllServers() { return allServers; }
 
-    // ── Тексты и статусы ──────────────────────────────────────────────────────
+    // ── VPN статус ────────────────────────────────────────────────────────────
 
-    public LiveData<String> getLastStatusMessage() { return lastStatusMessage; }
-    public LiveData<String> getLastIpResult()      { return lastIpResult; }
+    public LiveData<Boolean>     getIsConnected()      { return isConnected; }
+    public LiveData<String>      getLastStatusMessage() { return lastStatusMessage; }
+    public LiveData<String>      getLastIpResult()      { return lastIpResult; }
     public void clearIpResult() { lastIpResult.postValue(""); }
+    public LiveData<VlessServer> getConnectedServer() { return connectedServer; }
+
+    private void setConnected(boolean connected) {
+        isConnected.postValue(connected);
+        connectedServer.postValue(connected ? VpnTunnelService.getCurrentServer() : null);
+    }
+
+    public void refreshVpnStatus() {
+        boolean connected = VpnTunnelService.isRunning;
+        isConnected.postValue(connected);
+        connectedServer.postValue(connected ? VpnTunnelService.getCurrentServer() : null);
+    }
 
     // ── Действия ─────────────────────────────────────────────────────────────
 

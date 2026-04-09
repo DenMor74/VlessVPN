@@ -4,10 +4,8 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.os.Build;
 import android.system.Os;
 import android.system.OsConstants;
-import android.system.StructTimeval;
 
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.service.VpnTunnelService;
@@ -16,8 +14,6 @@ import com.vlessvpn.app.util.FileLogger;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.InetAddress;
-import java.net.Socket;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,12 +21,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.net.InetSocketAddress;
 import java.net.URL;
-
-import javax.net.SocketFactory;
-
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 
 /**
  * ServerTester — два типа проверок:
@@ -44,7 +34,7 @@ import okhttp3.Response;
 public class ServerTester {
 
     private static final String TAG      = "ServerTester";
-    private static final int TIMEOUT_MS  = 5000;// таймаут для пинга через сокеты
+    private static final int TIMEOUT_MS  = 10_000;
     private static final int REPEAT      = 2;
     private static final String[] CHECK_URLS = {
             "http://speed.cloudflare.com/__down?bytes=512",
@@ -67,17 +57,16 @@ public class ServerTester {
 
     // ── 1. TCP пинг ────────────────────────────────────────────────────────
 
+// ── 1. TCP пинг ────────────────────────────────────────────────────────
 
+    /**
+     * Перегрузка: явная передача сети для теста (используется в ScanWorker)
+     */
     public static TestResult tcpTest(Context ctx, VlessServer server, Network bindNet) {
         TestResult r = new TestResult();
         long best = -1;
 
-        // ====================================================================
-        // САМЫЕ ЖЁСТКИЕ ОПТИМАЛЬНЫЕ ТАЙМАУТЫ ДЛЯ СКОРОСТИ
-        // ====================================================================
-        //final int CONNECT_TIMEOUT_MS = 3800;   // быстро отсекаем мёртвых
-        final int REPEAT = 2;                  // 2 попытки — золотая середина
-
+        // Если сеть задана — используем только её
         if (bindNet != null) {
             for (int i = 0; i < REPEAT; i++) {
                 long ms = socketConnect(ctx, server.host, server.port, bindNet);
@@ -86,9 +75,11 @@ public class ServerTester {
                     r.networkType = getNetworkTypeName(bindNet, ctx);
                 }
             }
-        } else {
-            // Сначала LTE
+        }
+        // Если сеть не задана — авто-выбор (старая логика)
+        else {
             Network cellular = getCellularNetwork(ctx);
+
             if (cellular != null) {
                 for (int i = 0; i < REPEAT; i++) {
                     long ms = socketConnect(ctx, server.host, server.port, cellular);
@@ -99,29 +90,26 @@ public class ServerTester {
                 }
             }
 
-            // Fallback только если LTE вообще нет и ничего не получилось
+            // Fallback на WiFi только если LTE сети нет совсем
             if (best < 0 && cellular == null) {
                 Network wifi = getWifiNetwork(ctx);
-                if (wifi != null) {
-                    for (int i = 0; i < REPEAT; i++) {
-                        long ms = socketConnect(ctx, server.host, server.port, wifi);
-                        if (ms >= 0 && (best < 0 || ms < best)) {
-                            best = ms;
-                            r.networkType = "WiFi";
-                        }
+                for (int i = 0; i < REPEAT; i++) {
+                    long ms = socketConnect(ctx, server.host, server.port, wifi);
+                    if (ms >= 0 && (best < 0 || ms < best)) {
+                        best = ms;
+                        r.networkType = "WiFi";
                     }
                 }
             }
         }
 
         if (best >= 0) {
-            r.pingMs = best;
+            r.pingMs    = best;
             r.trafficOk = true;
         } else {
             r.errorMessage = "недоступен";
-            r.networkType = bindNet != null ? getNetworkTypeName(bindNet, ctx) : "unknown";
+            r.networkType  = bindNet != null ? getNetworkTypeName(bindNet, ctx) : "unknown";
         }
-
         return r;
     }
 
@@ -223,28 +211,19 @@ public class ServerTester {
                     FileLogger.d(TAG, "bindSocket: нет прав BIND_NETWORK — используем process-bound");
 
                 } catch (IOException e) {
-                    if (!e.getMessage().contains("EPERM")) {
-                        FileLogger.w(TAG, "bindSocket IO error: " + e.getMessage());
-                    }
+                    // Сетевая ошибка привязки
+                    FileLogger.w(TAG, "bindSocket IO error: " + e.getMessage());
+
                 } catch (Exception e) {
                     // Любая другая ошибка — не критична
                     FileLogger.d(TAG, "bindSocket skipped: " + e.getMessage());
                 }
-
             }
 
-
-            InetAddress addr = InetAddress.getByName(host);
-            StructTimeval tv = null;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                tv = StructTimeval.fromMillis(TIMEOUT_MS);
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, tv);
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, tv);
-            }
+            java.net.InetAddress addr = java.net.InetAddress.getByName(host);
+            android.system.StructTimeval tv = android.system.StructTimeval.fromMillis(TIMEOUT_MS);
+            Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, tv);
+            Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, tv);
 
             long start = System.currentTimeMillis();
             Os.connect(fd, addr, port);

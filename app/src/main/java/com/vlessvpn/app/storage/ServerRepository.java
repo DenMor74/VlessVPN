@@ -14,7 +14,6 @@ import androidx.lifecycle.Transformations;
 import com.google.gson.Gson;
 import com.vlessvpn.app.model.ConfigUrlItem;
 import com.vlessvpn.app.model.VlessServer;
-import com.vlessvpn.app.network.ServerTester;
 import com.vlessvpn.app.service.VpnTunnelService;
 import com.vlessvpn.app.util.FileLogger;
 
@@ -28,8 +27,6 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 public class ServerRepository {
 
     private final ServerDao dao;
@@ -467,55 +464,4 @@ public class ServerRepository {
         // AndroidX выбросит ClassCastException
         prefs.edit().putString(PREF_SOCKS_PORT, String.valueOf(port)).apply();
     }
-
-    public void triggerImmediateScan(Context context, Runnable onComplete) {
-        new Thread(() -> {
-            try {
-                FileLogger.i(TAG, "Внеочередное сканирование серверов...");
-                List<VlessServer> all = getAllServersSync();
-                if (all.isEmpty()) {
-                    FileLogger.w(TAG, "Нет серверов для сканирования");
-                    if (onComplete != null) onComplete.run();
-                    return;
-                }
-
-                // Тестируем параллельно — как ScanWorker
-                int threads = Math.min(20, all.size());
-                ExecutorService pool = Executors.newFixedThreadPool(threads);
-                CountDownLatch latch = new CountDownLatch(all.size());
-
-                for (VlessServer server : all) {
-                    pool.submit(() -> {
-                        try {
-                            // При активном VPN не пытаемся биндить к cellular — передаём null
-                            Network bindNet = VpnTunnelService.isRunning ? null :
-                                    ServerTester.getCellularNetwork(context);
-                            ServerTester.TestResult result = ServerTester.tcpTest(context, server, bindNet);
-                            server.pingMs = result.pingMs;
-                            server.trafficOk = result.trafficOk;
-                            updateServerSync(server);
-                        } catch (Exception e) {
-                            FileLogger.w(TAG, "Ошибка теста " + server.host + ": " + e.getMessage());
-                        } finally {
-                            latch.countDown();
-                        }
-                    });
-                }
-
-                // Ждём завершения — максимум 60 секунд
-                boolean finished = latch.await(60, TimeUnit.SECONDS);
-                pool.shutdownNow();
-
-                FileLogger.i(TAG, "Сканирование завершено (finished=" + finished +
-                        ", рабочих: " + getWorkingCount() + ")");
-                markScanned();
-
-            } catch (Exception e) {
-                FileLogger.e(TAG, "Ошибка сканирования: " + e.getMessage());
-            } finally {
-                if (onComplete != null) onComplete.run();
-            }
-        }, "emergency-scan-thread").start();
-    }
-
 }

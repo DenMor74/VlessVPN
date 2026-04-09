@@ -3,7 +3,6 @@ package com.vlessvpn.app.service;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -38,13 +37,11 @@ import com.vlessvpn.app.util.StatusBus;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class BackgroundMonitorService extends Service {
@@ -54,17 +51,17 @@ public class BackgroundMonitorService extends Service {
     private static final String WORK_SCAN      = "server_scan";
     private static long lastFinalLogTime = 0;   // защита от двойного финального лога
 
-    // Флаги пропущенных задач
-    private static final String PREFS_MISSED = "monitor_missed_prefs";
-    private static final String KEY_MISSED_DL = "missed_download";
-    private static final String KEY_MISSED_SCAN = "missed_scan";
-
-    private static String[] testUrls = {
+/*    String[] testUrls = {
             "http://cp.cloudflare.com/generate_204",
-            "https://detectportal.firefox.com/success.txt",
+            "http://connectivitycheck.gstatic.com/generate_204",
             "http://www.msftconnecttest.com/connecttest.txt"
-    };
-
+    };*/
+    private static  String[] testUrls = {
+                "http://cp.cloudflare.com/generate_204",
+                "https://detectportal.firefox.com/success.txt",
+                "http://www.msftconnecttest.com/connecttest.txt"
+        };
+    // https://captive.apple.com/hotspot-detect.html
     // ── Планировщики ────────────────────────────────────────────────────────
 
     public static void scheduleDownload(Context ctx, int intervalHours) {
@@ -72,8 +69,6 @@ public class BackgroundMonitorService extends Service {
                 WORK_DOWNLOAD,
                 ExistingPeriodicWorkPolicy.UPDATE,
                 new PeriodicWorkRequest.Builder(DownloadWorker.class, intervalHours, TimeUnit.HOURS)
-                        // НОВОЕ: Требуем интернет. Если интернета нет, система подождет его появления и сразу запустит скачивание
-                        .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                         .addTag(WORK_DOWNLOAD).build());
     }
 
@@ -82,57 +77,23 @@ public class BackgroundMonitorService extends Service {
                 WORK_SCAN,
                 ExistingPeriodicWorkPolicy.UPDATE,
                 new PeriodicWorkRequest.Builder(ScanWorker.class, intervalMinutes, TimeUnit.MINUTES)
-                        .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                        .setConstraints(new Constraints.Builder()
+                                .setRequiredNetworkType(NetworkType.CONNECTED).build())
                         .addTag(WORK_SCAN).build());
     }
 
+    /** Запустить скачивание немедленно (кнопка "Скачать") */
     public static void runDownloadNow(Context ctx) {
         WorkManager.getInstance(ctx).enqueueUniqueWork(
                 WORK_DOWNLOAD + "_manual", ExistingWorkPolicy.REPLACE,
                 new OneTimeWorkRequest.Builder(DownloadWorker.class).build());
     }
 
+    /** Запустить сканирование немедленно (кнопка "Проверить текущий лист") */
     public static void runScanNow(Context ctx) {
         WorkManager.getInstance(ctx).enqueueUniqueWork(
                 WORK_SCAN + "_manual", ExistingWorkPolicy.REPLACE,
                 new OneTimeWorkRequest.Builder(ScanWorker.class).build());
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // НОВОЕ: Обработчик пропущенных задач (Вызывать при отключении VPN)
-    // ════════════════════════════════════════════════════════════════════════
-    public static void scheduleCatchUpTasks(Context ctx) {
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS_MISSED, Context.MODE_PRIVATE);
-        boolean missedDl = prefs.getBoolean(KEY_MISSED_DL, false);
-        boolean missedScan = prefs.getBoolean(KEY_MISSED_SCAN, false);
-
-        Constraints constraints = new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build();
-
-        if (missedDl) {
-            FileLogger.i(TAG, "VPN отключен. Запланировано пропущенное СКАЧИВАНИЕ через 5 минут.");
-            WorkManager.getInstance(ctx).enqueueUniqueWork(
-                    WORK_DOWNLOAD + "_catchup",
-                    ExistingWorkPolicy.REPLACE,
-                    new OneTimeWorkRequest.Builder(DownloadWorker.class)
-                            .setInitialDelay(5, TimeUnit.MINUTES) // Ждем 5 минут (защита от переподключений)
-                            .setConstraints(constraints)
-                            .build()
-            );
-        } else if (missedScan) {
-            FileLogger.i(TAG, "VPN отключен. Запланировано пропущенное СКАНИРОВАНИЕ через 5 минут.");
-            WorkManager.getInstance(ctx).enqueueUniqueWork(
-                    WORK_SCAN + "_catchup",
-                    ExistingWorkPolicy.REPLACE,
-                    new OneTimeWorkRequest.Builder(ScanWorker.class)
-                            .setInitialDelay(5, TimeUnit.MINUTES)
-                            .setConstraints(constraints)
-                            .build()
-            );
-        }
-    }
-
-    private static void setMissedFlag(Context ctx, String key, boolean value) {
-        ctx.getSharedPreferences(PREFS_MISSED, Context.MODE_PRIVATE).edit().putBoolean(key, value).apply();
     }
 
     @Override
@@ -144,6 +105,7 @@ public class BackgroundMonitorService extends Service {
         return START_NOT_STICKY;
     }
 
+    /** Запустить скачивание белого списка немедленно */
     public static void runWhitelistDownloadNow(Context ctx) {
         WorkManager.getInstance(ctx).enqueueUniqueWork(
                 WORK_DOWNLOAD + "_whitelist",
@@ -152,10 +114,11 @@ public class BackgroundMonitorService extends Service {
         );
     }
 
+
     @Override public IBinder onBind(Intent intent) { return null; }
 
     // ════════════════════════════════════════════════════════════════════════
-    // DownloadWorker
+    // DownloadWorker — скачивает списки, затем ВСЕГДА запускает сканирование
     // ════════════════════════════════════════════════════════════════════════
 
     public static class DownloadWorker extends Worker {
@@ -169,14 +132,11 @@ public class BackgroundMonitorService extends Service {
             ServerRepository repo = new ServerRepository(ctx);
 
             if (VpnTunnelService.isRunning) {
-                FileLogger.w(TAG, "Блокировка скачивания листов: VPN активен! Задача отложена до отключения.");
-                setMissedFlag(ctx, KEY_MISSED_DL, true); // Запоминаем, что пропустили
+                FileLogger.w(TAG, "Блокировка скачивания листов: VPN активен!");
                 return Result.success();
             }
 
-            // Если мы дошли сюда, VPN выключен. Сбрасываем флаг пропуска.
-            setMissedFlag(ctx, KEY_MISSED_DL, false);
-
+            // Ночной режим
             if (repo.isNightTime()) {
                 FileLogger.i(W, "Ночное время — пропуск скачивания");
                 StatusBus.post(ctx, "🌙 Ночной режим — скачивание отложено", false);
@@ -231,7 +191,7 @@ public class BackgroundMonitorService extends Service {
                 }
 
                 url = url.trim();
-                FileLogger.i(W, "[✓] Загрузка " + (i + 1) + "/" + urlItems.size() + ": " + url);
+                FileLogger.i(W, "  [✓] Загрузка " + (i + 1) + "/" + urlItems.size() + ": " + url);
                 StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + activeCount, true);
 
                 try {
@@ -316,7 +276,7 @@ public class BackgroundMonitorService extends Service {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // ScanWorker
+    // ScanWorker — КОНВЕЙЕР (Fast TCP Ping + Multiplex VLESS HTTP Test)
     // ════════════════════════════════════════════════════════════════════════
 
     public static class ScanWorker extends Worker {
@@ -329,19 +289,15 @@ public class BackgroundMonitorService extends Service {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
 
-            if (VpnTunnelService.isRunning) {
-                FileLogger.i(W, "VPN работает — пропуск сканирования. Задача отложена до отключения.");
-                StatusBus.post(ctx, "VPN работает — пропуск сканирования", false);
-                setMissedFlag(ctx, KEY_MISSED_SCAN, true); // Запоминаем пропуск
-                return Result.success();
-            }
-
-            // VPN выключен, сбрасываем флаг пропуска
-            setMissedFlag(ctx, KEY_MISSED_SCAN, false);
-
             if (repo.isNightTime()) {
                 FileLogger.i(W, "Ночное время — пропуск сканирования");
                 StatusBus.post(ctx, "🌙 Ночной режим — сканирование отложено", false);
+                return Result.success();
+            }
+
+            if (VpnTunnelService.isRunning) {
+                FileLogger.i(W, "VPN работает — пропуск сканирования");
+                StatusBus.post(ctx, "VPN работает — пропуск сканирования", false);
                 return Result.success();
             }
 
@@ -356,12 +312,16 @@ public class BackgroundMonitorService extends Service {
             }
         }
 
+        /**
+         * Быстрая проверка, поднялось ли ядро V2Ray и открыло ли порт.
+         * Завершается моментально, как только ядро готово (обычно 100-200 мс).
+         */
         private void waitForProxyToStart(int testPort, int maxWaitMs) {
             long start = System.currentTimeMillis();
             while (System.currentTimeMillis() - start < maxWaitMs) {
                 try (Socket s = new Socket()) {
                     s.connect(new InetSocketAddress("127.0.0.1", testPort), 200);
-                    return;
+                    return; // Порт открылся, можно начинать тест!
                 } catch (Exception e) {
                     try { Thread.sleep(50); } catch (InterruptedException ignore) {}
                 }
@@ -372,7 +332,6 @@ public class BackgroundMonitorService extends Service {
         private Result doPipelineScan(Context ctx, ServerRepository repo) {
             if (VpnTunnelService.isRunning) {
                 FileLogger.w(TAG, "Блокировка тестирования листа: VPN уже активен!");
-                setMissedFlag(ctx, KEY_MISSED_SCAN, true);
                 return Result.retry();
             }
             List<VlessServer> allServers = repo.getAllServersSync();
@@ -456,6 +415,7 @@ public class BackgroundMonitorService extends Service {
 
                 for (VlessServer server : allServers) {
                     pingPool.submit(() -> {
+                        // ← ПРЕДОХРАНИТЕЛЬ: Мгновенно убиваем зомби-поток, не давая ему лезть в сеть (обход EPERM)
                         if (!phase1Active.get() || Thread.currentThread().isInterrupted()) {
                             pingLatch.countDown();
                             return;
@@ -487,6 +447,7 @@ public class BackgroundMonitorService extends Service {
                                 StatusBus.postWithProgress(ctx, msg, true, progress);
                             }
                         } catch (Exception e) {
+                            // Игнорируем сетевые сбои при отмене
                         } finally {
                             pingLatch.countDown();
                         }
@@ -494,14 +455,12 @@ public class BackgroundMonitorService extends Service {
                 }
 
                 int batches = (int) Math.ceil((double) total / poolSize);
-                long pingTimeout = Math.min(240, batches * 20L);
+                long pingTimeout = Math.min(240, Math.max(5, batches * 10L));
 
                 try {
-                    boolean finished = pingLatch.await(pingTimeout, TimeUnit.SECONDS);
-                    if (!finished) {
-                        FileLogger.w(W, "Фаза 1: таймаут (" + pingTimeout + " сек). Осталось задач: " + pingLatch.getCount());
-                    }
+                    pingLatch.await(pingTimeout, TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
+                    // ← ПРАВИЛЬНЫЙ ВЫХОД ПРИ ОТМЕНЕ СТАРОЙ ЗАДАЧИ
                     FileLogger.w(W, "Фаза 1 прервана (задача отменена системой)");
                     return Result.success();
                 } finally {
@@ -513,12 +472,14 @@ public class BackgroundMonitorService extends Service {
                 // ЭТАП 2: БАТЧИ V2RAY
                 // ====================================================================
                 if (!tcpSurvived.isEmpty() && !Thread.currentThread().isInterrupted()) {
+                    // ← ФИКС: Делаем независимую копию списка!
+                    // Это защитит от зомби-потоков, которые всё ещё могут дописывать данные в tcpSurvived
                     List<VlessServer> survivedPing;
                     synchronized (tcpSurvived) {
                         survivedPing = new java.util.ArrayList<>(tcpSurvived);
                     }
 
-                    Collections.sort(survivedPing, Comparator.comparingInt(s -> s.tcpPingMs));
+                    Collections.sort(survivedPing, (s1, s2) -> Integer.compare(s1.tcpPingMs, s2.tcpPingMs));
 
                     final int finalSurvivedSize = survivedPing.size();
                     final int BATCH_SIZE = 100;
@@ -530,7 +491,7 @@ public class BackgroundMonitorService extends Service {
                         int endIndex = Math.min(startIndex + BATCH_SIZE, finalSurvivedSize);
                         List<VlessServer> currentBatch = survivedPing.subList(startIndex, endIndex);
 
-                        int basePort = 10900;
+                        int basePort = 10800;
                         V2RayManager.setTestNetworkForMultiplex(finalCellularNet);
 
                         try {
@@ -549,6 +510,7 @@ public class BackgroundMonitorService extends Service {
                                     final int localProxyPort = basePort + i;
 
                                     httpPool.submit(() -> {
+                                        // ← ПРЕДОХРАНИТЕЛЬ: защита от зомби во 2 фазе
                                         if (!phase2Active.get() || Thread.currentThread().isInterrupted()) {
                                             httpLatch.countDown();
                                             return;
@@ -580,6 +542,7 @@ public class BackgroundMonitorService extends Service {
                                                 StatusBus.postWithProgress(ctx, msg, true, currProgress);
                                             }
                                         } catch (Exception e) {
+                                            // игнор при отмене
                                         } finally {
                                             httpLatch.countDown();
                                         }
@@ -587,11 +550,8 @@ public class BackgroundMonitorService extends Service {
                                 }
 
                                 try {
-                                    long httpTimeout = Math.max(180, currentBatch.size());
-                                    boolean finished = httpLatch.await(httpTimeout, TimeUnit.SECONDS);
-                                    if (!finished) {
-                                        FileLogger.w(W, "Фаза 2: таймаут (" + httpTimeout + " сек). Осталось задач: " + httpLatch.getCount());
-                                    }
+                                    long httpTimeout = Math.max(240, currentBatch.size());
+                                    httpLatch.await(httpTimeout, TimeUnit.SECONDS);
                                 } catch (InterruptedException e) {
                                     FileLogger.w(W, "Фаза 2 прервана (задача отменена системой)");
                                     phase2Active.set(false);
@@ -611,6 +571,7 @@ public class BackgroundMonitorService extends Service {
                 }
 
             } catch (Exception e) {
+                // Если ошибка не null, логируем её. NPE (null) больше не должен возникать, т.к. мы отловили InterruptedException выше
                 String errMsg = e.getMessage() != null ? e.getMessage() : e.toString();
                 FileLogger.e(W, "Критическая ошибка конвейера: " + errMsg);
             } finally {
@@ -678,38 +639,44 @@ public class BackgroundMonitorService extends Service {
             StatusBus.post(ctx, "⚠️ 0 рабочих — включено " + enabled + " серверов из базы", true);
         }
 
+        /**
+         * УМНЫЙ ТЕСТ: Запускает параллельно запросы ко всем URL.
+         * Завершается моментально при первом успешном ответе (код 200-399).
+         * Если все падают — сразу возвращает false без долгого ожидания.
+         */
         private boolean testHttpThroughProxy(int proxyPort, ExecutorService fastUrlPool) {
             java.net.Proxy proxy = new java.net.Proxy(
-                    java.net.Proxy.Type.SOCKS,
+                    java.net.Proxy.Type.HTTP,
                     new java.net.InetSocketAddress("127.0.0.1", proxyPort));
 
             CountDownLatch latch = new CountDownLatch(1);
-            AtomicBoolean success = new AtomicBoolean(false);
-            AtomicInteger finishedCount = new AtomicInteger(0);
-            int total = testUrls.length;
+            java.util.concurrent.atomic.AtomicBoolean success = new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.concurrent.atomic.AtomicInteger finishedCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
             for (String urlStr : testUrls) {
                 fastUrlPool.submit(() -> {
                     java.net.HttpURLConnection conn = null;
                     try {
                         conn = (java.net.HttpURLConnection) new java.net.URL(urlStr).openConnection(proxy);
-                        conn.setConnectTimeout(10000);
-                        conn.setReadTimeout(10000);
-                        conn.setRequestMethod("HEAD");
+                        conn.setConnectTimeout(3000);
+                        conn.setReadTimeout(3000);
+                        conn.setRequestMethod("GET"); // Оставляем GET для лучшего прохождения DPI
                         conn.setUseCaches(false);
                         conn.setInstanceFollowRedirects(false);
-                        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
 
                         int code = conn.getResponseCode();
-                        if (code >= 200 && code < 500) {
+                        if (code >= 200 && code < 400) {
+                            // Если мы первые получили успех, меняем флаг и отпускаем защелку
                             if (success.compareAndSet(false, true)) {
                                 latch.countDown();
                             }
                         }
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        // Ошибка (таймаут/разрыв) - игнорируем
                     } finally {
-                        if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
-                        if (finishedCount.incrementAndGet() == total && !success.get()) {
+                        if (conn != null) conn.disconnect();
+                        // Если это был последний URL и все они завершились неудачно, отпускаем защелку
+                        if (finishedCount.incrementAndGet() == testUrls.length) {
                             latch.countDown();
                         }
                     }
@@ -717,7 +684,8 @@ public class BackgroundMonitorService extends Service {
             }
 
             try {
-                latch.await(10500, TimeUnit.MILLISECONDS);
+                // Максимальное время ожидания - чуть больше таймаута коннекта (3.5 сек)
+                latch.await(3500, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -757,6 +725,10 @@ public class BackgroundMonitorService extends Service {
         }
     }
 
+
+// ════════════════════════════════════════════════════════════════
+// WhitelistDownloadWorker — скачивает резервный список + сканирование
+// ════════════════════════════════════════════════════════════════
 
     public static class WhitelistDownloadWorker extends Worker {
         private static final String W = "WhitelistDownloadWorker";

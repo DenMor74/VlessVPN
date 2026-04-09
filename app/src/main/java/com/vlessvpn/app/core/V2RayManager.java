@@ -112,7 +112,7 @@ public class V2RayManager {
                 return false;
             }
 
-           // FileLogger.i(TAG, "v2ray запущен");
+            FileLogger.i(TAG, "v2ray запущен");
             if (callback != null) callback.onStarted(server);
 
             while (coreController != null && coreController.getIsRunning()) {
@@ -123,7 +123,7 @@ public class V2RayManager {
         } catch (InterruptedException e) {
             return true;
         } catch (Exception e) {
-            FileLogger.e(TAG, "Ошибка v2ray", e);
+            FileLogger.e(TAG, "Ошибка v2ray - " + server.toString(), e);
             coreController = null;
             currentServer  = null;
             if (callback != null)

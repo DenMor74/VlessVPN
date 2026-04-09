@@ -36,18 +36,18 @@ public class HevTunnel {
      */
     public void start(ParcelFileDescriptor vpnInterface) {
         if (running) {
-            FileLogger.w(TAG, "hev-socks5-tunnel Уже запущен");
+            FileLogger.w(TAG, "Уже запущен");
             return;
         }
         try {
             String configPath = writeConfig();
             int fd = vpnInterface.getFd();
-           // FileLogger.i(TAG, "hev start: fd=" + fd + ", config=" + configPath);
+            FileLogger.i(TAG, "hev start: fd=" + fd + ", config=" + configPath);
             //FileLogger.i(TAG, "TProxyStartService configPath=" + configPath + " fd=" + fd);
             // Вызываем через stub — JNI ищет методы в com.v2ray.ang.service.TProxyService
             com.v2ray.ang.service.TProxyService.TProxyStartService(configPath, fd);
             running = true;
-            // FileLogger.i(TAG, "hev-socks5-tunnel запущен ✔");
+            FileLogger.i(TAG, "hev-socks5-tunnel запущен ✔");
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка запуска hev-socks5-tunnel", e);
         }
@@ -58,7 +58,7 @@ public class HevTunnel {
         try {
             com.v2ray.ang.service.TProxyService.TProxyStopService();
             running = false;
-           // FileLogger.i(TAG, "hev-socks5-tunnel остановлен");
+            FileLogger.i(TAG, "hev-socks5-tunnel остановлен");
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка остановки hev", e);
         }

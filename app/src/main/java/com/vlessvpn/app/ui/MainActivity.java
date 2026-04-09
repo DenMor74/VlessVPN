@@ -25,6 +25,8 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.WebView;
+import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -41,8 +43,10 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
+import com.google.gson.Gson;
 import com.vlessvpn.app.R;
 import com.vlessvpn.app.model.VlessServer;
+import com.vlessvpn.app.network.ConfigDownloader;
 import com.vlessvpn.app.network.WifiMonitor;
 import com.vlessvpn.app.service.BackgroundMonitorService;
 import com.vlessvpn.app.service.UpdateDownloadService;
@@ -102,7 +106,14 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-    // Оставляем StatusBus для получения прогресса сканирования и пинга серверов
+    // Broadcast Receivers
+    private final BroadcastReceiver vpnReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            refreshStatus();
+        }
+    };
+
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context ctx, Intent intent) {
@@ -115,29 +126,35 @@ public class MainActivity extends AppCompatActivity {
                 int total = intent.getIntExtra(StatusBus.EXTRA_TOTAL, 0);
                 int ok = intent.getIntExtra(StatusBus.EXTRA_OK, 0);
                 int fail = intent.getIntExtra(StatusBus.EXTRA_FAIL, 0);
+
+                // ← ДОБАВЛЕНО: Читаем текущий прогресс (от -1 до 100)
                 int progress = intent.getIntExtra(StatusBus.EXTRA_PROGRESS, -1);
 
                 if (message != null && !message.isEmpty()) {
                     mainHandler.post(() -> {
+                        // Меняем текст
                         if (isRunning) {
                             tvStatusMode.setText("🔍 " + message);
-                        } else if (!VpnController.getInstance(MainActivity.this).isRunning()) {
+                        } else {
                             tvStatusMode.setText("✅ " + message);
                         }
 
+                        // Обновляем счетчики
                         if (total > 0) {
                             tvServerCounts.setText("📊 Всего: " + total + " | ✓ Рабочих: " + ok + " | ✗ Нет связи: " + fail);
                         }
 
+                        // ← ДОБАВЛЕНО: Управляем полосой загрузки
                         if (progressScan != null) {
                             if (isRunning && progress >= 0) {
                                 progressScan.setVisibility(View.VISIBLE);
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                    progressScan.setProgress(progress, true);
+                                    progressScan.setProgress(progress, true); // Плавная анимация
                                 } else {
                                     progressScan.setProgress(progress);
                                 }
                             } else if (!isRunning) {
+                                // Прячем полосу по завершении
                                 progressScan.setVisibility(View.GONE);
                                 progressScan.setProgress(0);
                             }
@@ -187,7 +204,7 @@ public class MainActivity extends AppCompatActivity {
 
         initViews();
         setupRecyclerView();
-        observeData(); // Здесь теперь подписка на VpnController
+        observeData();
 
         updateAutoConnectStatus();
         updateInfoPanel();
@@ -202,7 +219,18 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         updateAutoConnectStatus();
         updateInfoPanel();
+        refreshStatus();
 
+        // VPN Receiver
+        IntentFilter vpnFilter = new IntentFilter("com.vlessvpn.VPN_STATUS_CHANGED");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(vpnReceiver, vpnFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(vpnReceiver, vpnFilter);
+        }
+        receiverRegistered = true;
+
+        // StatusBus Receiver
         IntentFilter statusFilter = new IntentFilter(StatusBus.ACTION_STATUS_CHANGED);
         statusFilter.addAction(StatusBus.ACTION_SERVER_EVENT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -210,16 +238,21 @@ public class MainActivity extends AppCompatActivity {
         } else {
             registerReceiver(statusReceiver, statusFilter);
         }
-        receiverRegistered = true;
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         if (receiverRegistered) {
+            try { unregisterReceiver(vpnReceiver); } catch (Exception ignored) {}
             try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
             receiverRegistered = false;
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
     }
 
     // ================================================
@@ -253,7 +286,7 @@ public class MainActivity extends AppCompatActivity {
         // Speed Test
         if (btnSpeedTest != null) {
             btnSpeedTest.setOnClickListener(v -> {
-                if (VpnController.getInstance(this).isRunning()) {
+                if (VpnTunnelService.isRunning) {
                     btnSpeedTest.setImageResource(R.drawable.ic_hourglass);
                     btnSpeedTest.setImageTintList(android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
                     if (tvSpeedTest != null) tvSpeedTest.setText("Идёт тест скорости...");
@@ -268,7 +301,7 @@ public class MainActivity extends AppCompatActivity {
         // Deep Check
         if (btnDeepCheckRefresh != null) {
             btnDeepCheckRefresh.setOnClickListener(v -> {
-                if (VpnController.getInstance(this).isRunning()) {
+                if (VpnTunnelService.isRunning) {
                     btnDeepCheckRefresh.setImageResource(R.drawable.ic_hourglass);
                     btnDeepCheckRefresh.setImageTintList(android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
                     if (tvLastStatus != null) tvLastStatus.setText("Определяем IP...");
@@ -279,10 +312,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         swipeRefresh.setOnRefreshListener(() -> {
-            VpnController controller = VpnController.getInstance(this);
-            if (controller.isRunning() || controller.getState().getValue() == VpnController.VpnState.CONNECTING) {
+            if (VpnTunnelService.isRunning) {
                 Toast.makeText(this, "Отключаем VPN для проверки...", Toast.LENGTH_SHORT).show();
-                controller.disconnect(true);
+                VpnController.getInstance(this).disconnect(true);
                 mainHandler.postDelayed(() -> {
                     viewModel.forceRefreshServers();
                     swipeRefresh.setRefreshing(false);
@@ -293,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        swipeRefresh.setEnabled(false);
+        swipeRefresh.setEnabled(false); // как было у тебя
     }
 
     private void setupRecyclerView() {
@@ -303,14 +335,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ================================================
-    // Наблюдатели (ОСНОВА АРХИТЕКТУРЫ)
+    // Наблюдатели
     // ================================================
 
     private void observeData() {
-        // Подписка на ЕДИНЫЙ ИСТОЧНИК ПРАВДЫ о VPN
-        VpnController.getInstance(this).getState().observe(this, this::renderVpnState);
-
-        // Список серверов
         viewModel.getAllServers().observe(this, servers -> {
             if (servers != null) {
                 serverAdapter.setServers(servers);
@@ -321,14 +349,28 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        viewModel.getIsConnected().observe(this, this::renderConnectionState);
+
+        viewModel.getConnectedServer().observe(this, server -> {
+            if (server != null) {
+                tvConnectedServer.setText(server.remark.isEmpty() ? server.host : server.remark);
+                serverAdapter.setConnectedServerId(server.id);
+                // Сбрасываем панели при каждом новом сервере
+                resetSpeedAndIpPanels();
+            } else {
+                tvConnectedServer.setText("");
+                serverAdapter.setConnectedServerId(null);
+            }
+        });
+
         viewModel.getLastStatusMessage().observe(this, msg -> {
             if (msg == null || msg.isEmpty()) return;
 
-            if (msg.contains("↑") && msg.contains("↓")) {
-                if (VpnController.getInstance(this).isRunning() && tvTraffic != null) {
+            if (msg.contains("↑") && msg.contains("↓")) { // трафик
+                if (VpnTunnelService.isRunning && tvTraffic != null) {
                     tvTraffic.setText(msg);
                 }
-            } else if (msg.startsWith("⏱")) {
+            } else if (msg.startsWith("⏱")) { // скорость
                 if (tvSpeedTest != null) {
                     tvSpeedTest.setText(msg);
                     boolean ok = msg.contains("✓");
@@ -338,13 +380,16 @@ public class MainActivity extends AppCompatActivity {
                         btnSpeedTest.setImageTintList(android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
                     }
                 }
+            } else if (tvStatusMode != null) {
+                tvStatusMode.setText(VpnTunnelService.isRunning ? msg : "🔍 " + msg);
             }
         });
 
         viewModel.getLastIpResult().observe(this, ip -> {
             if (tvLastStatus == null) return;
+
             if (ip == null || ip.isEmpty()) {
-                if (VpnController.getInstance(this).isRunning()) {
+                if (VpnTunnelService.isRunning && !VpnTunnelService.isIpDetermined) {
                     tvLastStatus.setText("Ждём IP...");
                     tvLastStatus.setTextColor(0xFFFFFFFF);
                 }
@@ -363,126 +408,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ================================================
-    // Логика отрисовки состояний
-    // ================================================
-
-    private void renderVpnState(VpnController.VpnState state) {
-        switch (state) {
-            case CONNECTING:
-                tvStatus.setText("🟡 Подключение...");
-                tvStatus.setTextColor(Color.parseColor("#FFC107"));
-                btnDisconnect.setVisibility(View.VISIBLE); // Можно отменить
-
-                if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.GONE);
-                if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
-
-                resetSpeedAndIpPanels();
-
-                VlessServer connectingServer = VpnController.getInstance(this).getCurrentServer();
-                if (connectingServer != null && tvStatusMode != null) {
-                    tvStatusMode.setText("⏳ Подключение к " + (connectingServer.remark.isEmpty() ? connectingServer.host : connectingServer.remark));
-                }
-                break;
-
-            case CONNECTED:
-                tvStatus.setText("🟢 Подключено");
-                tvStatus.setTextColor(getColor(R.color.color_connected));
-                btnDisconnect.setVisibility(View.VISIBLE);
-
-                if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.VISIBLE);
-                boolean deepEnabled = new ServerRepository(this).isDeepCheckOnConnect();
-                if (panelDeepCheck != null) panelDeepCheck.setVisibility(deepEnabled ? View.VISIBLE : View.GONE);
-                if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
-
-                VlessServer current = VpnController.getInstance(this).getCurrentServer();
-                if (current != null) {
-                    tvConnectedServer.setText(current.remark.isEmpty() ? current.host : current.remark);
-                    serverAdapter.setConnectedServerId(current.id);
-                }
-                break;
-
-            case DISCONNECTING:
-                tvStatus.setText("🟡 Отключение...");
-                tvStatus.setTextColor(Color.parseColor("#FFC107"));
-                btnDisconnect.setVisibility(View.INVISIBLE);
-                break;
-
-            case ERROR:
-                Toast.makeText(this, "❌ Ошибка подключения", Toast.LENGTH_SHORT).show();
-                // проваливаемся в DISCONNECTED для очистки UI
-            case DISCONNECTED:
-                tvStatus.setText("🔴 Отключено");
-                tvStatus.setTextColor(getColor(R.color.color_disconnected));
-                btnDisconnect.setVisibility(View.INVISIBLE);
-                tvConnectedServer.setText("");
-
-                if (tvTraffic != null) tvTraffic.setText(" ");
-                if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
-                if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.GONE);
-                if (tvStatusMode != null) tvStatusMode.setText("Готов к подключению");
-
-                serverAdapter.setConnectedServerId(null);
-                viewModel.clearIpResult();
-                break;
-        }
-    }
-
-    private void resetSpeedAndIpPanels() {
-        if (tvSpeedTest != null) {
-            tvSpeedTest.setText("⏱ Тест скорости");
-            tvSpeedTest.setTextColor(0xFFFFFFFF);
-        }
-        if (btnSpeedTest != null) {
-            btnSpeedTest.setImageResource(R.drawable.ic_play);
-            btnSpeedTest.setImageTintList(android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
-        }
-        if (panelSpeedTest != null) panelSpeedTest.setBackgroundColor(0xFF111827);
-        viewModel.clearIpResult();
-    }
-
-    // ================================================
-    // VPN Управление (через VpnController)
-    // ================================================
-
-    private void onConnectClicked(VlessServer server) {
-        if (server == null) return;
-
-        FileLogger.i(TAG, "onConnectClicked: " + server.host);
-        VpnController controller = VpnController.getInstance(this);
-
-        if (controller.isRunning() || controller.getState().getValue() == VpnController.VpnState.CONNECTING) {
-            VlessServer current = controller.getCurrentServer();
-            boolean isSame = current != null && current.id.equals(server.id);
-
-            if (isSame) {
-                controller.handleDisconnectButton();
-            } else {
-                FileLogger.i(TAG, "Переключаемся на сервер: " + server.host);
-                // ИСПОЛЬЗУЕМ НОВЫЙ МЕТОД
-                controller.reconnect(server, false);
-            }
-            return;
-        }
-
-        Intent perm = VpnService.prepare(this);
-        if (perm != null) {
-            pendingServer = server;
-            vpnPermLauncher.launch(perm);
-        } else {
-            doStartVpn(server);
-        }
-    }
-
-    private void doStartVpn(VlessServer server) {
-        if (server == null) return;
-        FileLogger.i(TAG, "doStartVpn: " + server.host);
-
-        // Вся магия UI теперь отработает автоматом через Observer (состояние CONNECTING)
-        VpnController.getInstance(this).connect(server, false);
-    }
-
-    // ================================================
-    // Вспомогательные методы UI
+    // Вспомогательные методы
     // ================================================
 
     private void updateServerCounts(List<VlessServer> displayedServers) {
@@ -502,14 +428,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateInfoPanel() {
-        if (tvLastUpdate != null) {
-            long ts = new ServerRepository(this).getLastUpdateTimestamp();
-            tvLastUpdate.setText((ts == 0) ? "📥 Обновлено: не обновлялось" : "📥 Обновлено: " + getTimeAgo(ts));
-        }
-        if (tvLastScan != null) {
-            long ts = new ServerRepository(this).getLastScanTimestamp();
-            tvLastScan.setText((ts == 0) ? "🔍 Проверка: не проверялся" : "🔍 Проверка: " + getTimeAgo(ts));
-        }
+        updateLastUpdateTime();
+        updateLastScanTime();
+    }
+
+    private void updateLastUpdateTime() {
+        if (tvLastUpdate == null) return;
+        ServerRepository repo = new ServerRepository(this);
+        long ts = repo.getLastUpdateTimestamp();
+        String text = (ts == 0) ? "📥 Обновлено: не обновлялось" :
+                "📥 Обновлено: " + getTimeAgo(ts);
+        tvLastUpdate.setText(text);
+    }
+
+    private void updateLastScanTime() {
+        if (tvLastScan == null) return;
+        ServerRepository repo = new ServerRepository(this);
+        long ts = repo.getLastScanTimestamp();
+        String text = (ts == 0) ? "🔍 Проверка: не проверялся" :
+                "🔍 Проверка: " + getTimeAgo(ts);
+        tvLastScan.setText(text);
     }
 
     private String getTimeAgo(long timestamp) {
@@ -529,6 +467,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setCustomActionBarTitle() {
         if (getSupportActionBar() == null) return;
+
         getSupportActionBar().setDisplayShowCustomEnabled(true);
         getSupportActionBar().setDisplayShowTitleEnabled(false);
 
@@ -541,16 +480,126 @@ public class MainActivity extends AppCompatActivity {
         getSupportActionBar().setCustomView(customView, params);
 
         try {
-            PackageInfo info = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ?
-                    getPackageManager().getPackageInfo(getPackageName(), PackageManager.PackageInfoFlags.of(0)) :
-                    getPackageManager().getPackageInfo(getPackageName(), 0);
-
+            PackageInfo info = getPackageInfo();
             TextView tvAppName = customView.findViewById(R.id.tv_actionbar_app_name);
             TextView tvVersion = customView.findViewById(R.id.tv_actionbar_version);
             tvAppName.setText(getString(R.string.app_name));
             tvVersion.setText("v" + info.versionName);
         } catch (Exception e) {
             FileLogger.e(TAG, "Ошибка установки заголовка", e);
+        }
+    }
+
+    private PackageInfo getPackageInfo() throws PackageManager.NameNotFoundException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return getPackageManager().getPackageInfo(getPackageName(), PackageManager.PackageInfoFlags.of(0));
+        } else {
+            return getPackageManager().getPackageInfo(getPackageName(), 0);
+        }
+    }
+
+    // ================================================
+    // VPN Управление (через VpnController)
+    // ================================================
+
+    private void onConnectClicked(VlessServer server) {
+        if (server == null) return;
+
+        FileLogger.i(TAG, "onConnectClicked: " + server.host);
+
+        VpnController controller = VpnController.getInstance(this);
+
+        if (VpnTunnelService.isRunning) {
+            VlessServer current = VpnTunnelService.getCurrentServer(); // или connectedServer
+            boolean isSame = current != null && current.id.equals(server.id);
+
+            if (isSame) {
+                controller.handleDisconnectButton();
+            } else {
+                // Переключение на другой сервер
+                FileLogger.i(TAG, "Переключаемся на сервер: " + server.host);
+                controller.disconnect(true);
+                mainHandler.postDelayed(() -> controller.connect(server, false), 1000);
+            }
+            return;
+        }
+
+        // Запрос разрешения VPN
+        Intent perm = VpnService.prepare(this);
+        if (perm != null) {
+            pendingServer = server;
+            vpnPermLauncher.launch(perm);
+        } else {
+            doStartVpn(server);
+        }
+    }
+
+    private void doStartVpn(VlessServer server) {
+        if (server == null) {
+            Toast.makeText(this, "Ошибка: сервер не выбран", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        FileLogger.i(TAG, "doStartVpn: " + server.host);
+
+        if (tvStatusMode != null) {
+            tvStatusMode.setText("⏳ Подключение к " + (server.remark.isEmpty() ? server.host : server.remark));
+        }
+
+        VpnController.getInstance(this).connect(server, false);
+
+        Toast.makeText(this, "⏳ Подключение...", Toast.LENGTH_SHORT).show();
+        mainHandler.postDelayed(this::refreshStatus, 800);
+    }
+
+    private void disconnectVpn() {
+        VpnController.getInstance(this).handleDisconnectButton();
+        renderConnectionState(false);
+    }
+
+    private void refreshStatus() {
+        viewModel.refreshVpnStatus();
+    }
+
+    /** Сбрасывает панели скорости и IP при смене сервера */
+    private void resetSpeedAndIpPanels() {
+        if (tvSpeedTest != null) {
+            tvSpeedTest.setText("⏱ Тест скорости");
+            tvSpeedTest.setTextColor(0xFFFFFFFF);
+        }
+        if (btnSpeedTest != null) {
+            btnSpeedTest.setImageResource(R.drawable.ic_play);
+            btnSpeedTest.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+        }
+        if (panelSpeedTest != null) panelSpeedTest.setBackgroundColor(0xFF111827);
+        // IP — очищаем через ViewModel (отдельная LiveData)
+        viewModel.clearIpResult();
+    }
+
+    private void renderConnectionState(boolean connected) {
+        if (connected) {
+            tvStatus.setText("🟢 Подключено");
+            tvStatus.setTextColor(getColor(R.color.color_connected));
+            btnDisconnect.setVisibility(View.VISIBLE);
+
+            if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.VISIBLE);
+            boolean deepEnabled = new ServerRepository(this).isDeepCheckOnConnect();
+            if (panelDeepCheck != null) panelDeepCheck.setVisibility(deepEnabled ? View.VISIBLE : View.GONE);
+
+            if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
+        } else {
+            tvStatus.setText("🔴 Отключено");
+            tvStatus.setTextColor(getColor(R.color.color_disconnected));
+            btnDisconnect.setVisibility(View.INVISIBLE);
+            tvConnectedServer.setText("");
+            tvTraffic.setText(" ");
+
+            if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
+            if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.GONE);
+
+            if (tvStatusMode != null) tvStatusMode.setText("Готов к подключению");
+            viewModel.clearIpResult();
         }
     }
 
@@ -585,12 +634,14 @@ public class MainActivity extends AppCompatActivity {
             checkUpdateManual();
             return true;
         }
+
         if (id == R.id.action_download_whitelist) {
             showDownloadWhitelistDialog();
             return true;
         }
+
         if (id == R.id.action_scan) {
-            if (VpnController.getInstance(this).isRunning()) {
+            if (VpnTunnelService.isRunning) {
                 Toast.makeText(this, "⚠️ Отключите VPN для сканирования", Toast.LENGTH_SHORT).show();
                 return true;
             }
@@ -623,6 +674,7 @@ public class MainActivity extends AppCompatActivity {
                     .show();
             return true;
         }
+
         if (id == R.id.action_about) {
             showAboutDialog();
             return true;
@@ -630,6 +682,10 @@ public class MainActivity extends AppCompatActivity {
 
         return super.onOptionsItemSelected(item);
     }
+
+// ════════════════════════════════════════════════════════════════
+// В showAboutDialog() — исправить тип
+// ════════════════════════════════════════════════════════════════
 
     private void showAboutDialog() {
         String versionName = "1.0.0";
@@ -640,38 +696,46 @@ public class MainActivity extends AppCompatActivity {
             FileLogger.w(TAG, "Не удалось получить версию: " + e.getMessage());
         }
 
-        String aboutText = "═════════════════════════\n" +
-                "              DenMor VPN v" + versionName + "\n" +
-                "═════════════════════════\n\n" +
-                "📡 ОПИСАНИЕ:\n" +
-                "Авто-подключение VPN с умным переключением серверов. Обход блокировок по белым спискам через Vless Reality" +
-                " протокол с проверкой доступности.\n\n" +
-                "⚙️ ФУНКЦИИ:\n" +
-                "• Авто-подключение при LTE\n" +
-                "• Авто-отключение при WiFi\n" +
-                "• Регулярное скачивание конфигов и их проверка\n" +
-                "• Проверка серверов (Ping + Google IP)\n" +
-                "• Переключение на другой сервер при потере связи\n" +
-                "• Ежеминутный контроль связи при подключении VPN \n" +
-                "• AOD Overlay (статус на экране)\n" +
-                "• Чёрный список приложений мимо VPN\n" +
-                "• Возможность скачать списки конфигов через белый интернет\n\n" +
-                "🔘 КНОПКИ:\n" +
-                "• Проверить текущий список серверов\n" +
-                "• Скачать новый список и проверить\n" +
-                "• Настройки\n" +
-                "🔘 В МЕНЮ:\n" +
-                "• Логи, обновление программы\n" +
-                "• Скачать список через LTE\n" +
-                "📊 ИНДИКАТОРЫ:\n" +
-                "• ↑↓ — скорость трафика\n" +
-                "• 🟢/🔴 — статус сервера\n" +
-                "• 🔬 — проверка IP\n" +
-                "• ⏱ — тест скорости";
+        String aboutText =
+                "═════════════════════════\n" +
+                        "              DenMor VPN v" + versionName + "\n" +
+                        "═════════════════════════\n\n" +
 
-        androidx.appcompat.app.AlertDialog.Builder builder = new androidx.appcompat.app.AlertDialog.Builder(this);
+                        "📡 ОПИСАНИЕ:\n" +
+                        "Авто-подключение VPN с умным переключением серверов. Обход блокировок по белым спискам через Vless Reality" +
+                        " протокол с проверкой доступности.\n\n" +
+
+                        "⚙️ ФУНКЦИИ:\n" +
+                        "• Авто-подключение при LTE\n" +
+                        "• Авто-отключение при WiFi\n" +
+                        "• Регулярное скачивание конфигов и их проверка\n" +
+                        "• Проверка серверов (Ping + Google IP)\n" +
+                        "• Переключение на другой сервер при потере связи\n" +
+                        "• Ежеминутный контроль связи при подключении VPN \n" +
+                        "• AOD Overlay (статус на экране)\n" +
+                        "• Чёрный список приложений мимо VPN\n" +
+                        "• Возможность скачать списки конфигов через белый интернет\n\n" +
+
+                        "🔘 КНОПКИ:\n" +
+                        "• Проверить текущий список серверов\n" +
+                        "• Скачать новый список и проверить\n" +
+                        "• Настройки\n" +
+                        "🔘 В МЕНЮ:\n" +
+                        "• Логи, обновление программы\n" +
+                        "• Скачать список через LTE\n" +
+
+                        "📊 ИНДИКАТОРЫ:\n" +
+                        "• ↑↓ — скорость трафика\n" +
+                        "• 🟢/🔴 — статус сервера\n" +
+                        "• 🔬 — проверка IP\n" +
+                        "• ⏱ — тест скорости";
+
+        androidx.appcompat.app.AlertDialog.Builder builder =
+                new androidx.appcompat.app.AlertDialog.Builder(this);
+
         builder.setTitle("ℹ️ О приложении");
 
+        // ScrollView для длинного текста
         ScrollView scrollView = new ScrollView(this);
         TextView textView = new TextView(this);
         textView.setText(aboutText);
@@ -684,10 +748,19 @@ public class MainActivity extends AppCompatActivity {
         builder.setView(scrollView);
         builder.setPositiveButton("OK", (dialog, which) -> dialog.dismiss());
 
+        // ════════════════════════════════════════════════════════════════
+        // ← ИСПРАВЛЕНО: androidx.appcompat.app.AlertDialog
+        // ════════════════════════════════════════════════════════════════
         androidx.appcompat.app.AlertDialog dialog = builder.create();
         dialog.show();
+
+        // Делаем текст копируемым
         textView.setTextIsSelectable(true);
     }
+
+
+
+
 
     private void showDownloadWhitelistDialog() {
         new androidx.appcompat.app.AlertDialog.Builder(this)
@@ -696,11 +769,20 @@ public class MainActivity extends AppCompatActivity {
                         "Используйте эту функцию если основные списки не работают.\n\n" +
                         "⚠️ Текущие серверы будут заменены!")
                 .setPositiveButton("Скачать", (dialog, which) -> {
-                    BackgroundMonitorService.runWhitelistDownloadNow(this);
-                    Toast.makeText(this, "✅ Загрузка началась", Toast.LENGTH_SHORT).show();
+                    downloadBackupWhitelist();
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    private void downloadBackupWhitelist() {
+        // if (tvStatus != null) {
+        //    tvStatus.setText("📥 Скачивание белого списка...");
+        //}
+
+        BackgroundMonitorService.runWhitelistDownloadNow(this);
+        Toast.makeText(this, "✅ Загрузка началась", Toast.LENGTH_SHORT).show();
+
     }
 
     private void showLogDialog() {
@@ -734,6 +816,10 @@ public class MainActivity extends AppCompatActivity {
 
         dialog.show();
     }
+
+    // ================================================
+    // Обновления приложения
+    // ================================================
 
     private void checkUpdateIfNeeded() {
         if (!UpdateChecker.shouldCheckUpdate(this)) return;

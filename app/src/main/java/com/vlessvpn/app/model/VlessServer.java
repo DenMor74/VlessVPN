@@ -236,7 +236,6 @@ public class VlessServer {
             s.path = obj.optString("path", "/");
             s.fp = obj.optString("fp", "chrome");
             s.alpn = obj.optString("alpn", "");
-
             s.id = s.uuid + "@" + s.host + ":" + s.port;
             s.rawUri = uri;
 

@@ -2,42 +2,25 @@ package com.vlessvpn.app.service;
 
 import android.content.Context;
 import android.content.Intent;
-import android.os.Handler;
-import android.os.Looper;
-
 import androidx.annotation.NonNull;
-import androidx.core.content.ContextCompat;
-import androidx.lifecycle.LiveData;
-import androidx.lifecycle.MutableLiveData;
-
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.List;
-
 import com.google.gson.Gson;
 import com.vlessvpn.app.model.VlessServer;
 import com.vlessvpn.app.storage.ServerRepository;
 import com.vlessvpn.app.util.FileLogger;
 
-public class VpnController {
+import java.util.List;
 
-    public enum VpnState {
-        DISCONNECTED,
-        CONNECTING,
-        CONNECTED,
-        DISCONNECTING,
-        ERROR
-    }
+/**
+ * VpnController — ЕДИНАЯ ТОЧКА УПРАВЛЕНИЯ подключением.
+ * Всё подключение/отключение теперь только через этот класс.
+ */
+public class VpnController {
 
     private static final String TAG = "VpnController";
     private static volatile VpnController instance;
     private final Context appContext;
     private final ServerRepository repository;
-
-    private final MutableLiveData<VpnState> vpnState = new MutableLiveData<>(VpnState.DISCONNECTED);
-
     private volatile boolean userManuallyDisconnected = false;
-    private final AtomicBoolean isConnecting = new AtomicBoolean(false);
-    private VlessServer currentServer = null;
 
     private VpnController(Context context) {
         appContext = context.getApplicationContext();
@@ -51,41 +34,17 @@ public class VpnController {
         return instance;
     }
 
-    public LiveData<VpnState> getState() {
-        return vpnState;
-    }
+    // ================================================
+    // ЕДИНЫЕ МЕТОДЫ ПОДКЛЮЧЕНИЯ / ОТКЛЮЧЕНИЯ
+    // ================================================
 
-    public void updateState(VpnState state) {
-        FileLogger.i(TAG, "VPN State changed to: " + state.name());
-        vpnState.postValue(state);
-
-        if (state == VpnState.DISCONNECTED || state == VpnState.ERROR) {
-            isConnecting.set(false);
-            if (state == VpnState.DISCONNECTED) {
-                currentServer = null;
-            }
-        } else if (state == VpnState.CONNECTED) {
-            isConnecting.set(false);
-        }
-    }
-
-    public void setCurrentServer(VlessServer server) {
-        this.currentServer = server;
-    }
 
     public void disconnect(boolean isUserAction) {
-        VpnState currentState = vpnState.getValue();
-        if (currentState == VpnState.DISCONNECTED || currentState == VpnState.DISCONNECTING) {
-            FileLogger.i(TAG, "disconnect: уже отключено или в процессе отключения.");
-            return;
-        }
-
-        FileLogger.i(TAG, "DISCONNECT (userAction=" + isUserAction + ")");
-        updateState(VpnState.DISCONNECTING);
+        FileLogger.i(TAG, "VpnController → DISCONNECT (userAction=" + isUserAction + ")");
 
         if (isUserAction) {
-            userManuallyDisconnected = true;
-            FileLogger.i(TAG, "VPN отключен вручную.");
+            userManuallyDisconnected = true;   // ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+            FileLogger.i(TAG, "Пользователь вручную отключил VPN — авто-подключение заблокировано до смены сети");
         }
 
         stopAllPendingOperations();
@@ -95,27 +54,14 @@ public class VpnController {
         if (!isUserAction) {
             intent.putExtra("system_cleanup", true);
         }
-
-        // ИСПРАВЛЕНИЕ: Гарантированная доставка интента даже если Android пытается его убить
-        try {
-            ContextCompat.startForegroundService(appContext, intent);
-        } catch (Exception e) {
-            FileLogger.e(TAG, "Ошибка вызова ACTION_DISCONNECT: " + e.getMessage());
-        }
+        appContext.startService(intent);
     }
 
     public void connect(@NonNull VlessServer server, boolean isAutoMode) {
-        VpnState currentState = vpnState.getValue();
-        if (currentState == VpnState.CONNECTED || currentState == VpnState.CONNECTING) {
-            FileLogger.i(TAG, "connect: уже подключено или в процессе подключения.");
-            return;
-        }
+        FileLogger.i(TAG, "VpnController → CONNECT " +
+                (isAutoMode ? "(AUTO)" : "(MANUAL)") + ": " + server.host);
 
-        FileLogger.i(TAG, "CONNECT " + (isAutoMode ? "(AUTO)" : "(MANUAL)") + ": " + server.host);
-
-        updateState(VpnState.CONNECTING);
-        setCurrentServer(server);
-
+        // Если пользователь вручную отключил — снимаем блокировку только при ручном подключении
         if (!isAutoMode) {
             userManuallyDisconnected = false;
         }
@@ -126,51 +72,46 @@ public class VpnController {
         intent.setAction(VpnTunnelService.ACTION_CONNECT);
         intent.putExtra(VpnTunnelService.EXTRA_SERVER, new Gson().toJson(server));
         intent.putExtra(VpnTunnelService.EXTRA_AUTO_CONNECT, isAutoMode);
-
-        try {
-            ContextCompat.startForegroundService(appContext, intent);
-        } catch (Exception e) {
-            FileLogger.e(TAG, "Ошибка вызова ACTION_CONNECT: " + e.getMessage());
-            updateState(VpnState.ERROR);
-        }
+        appContext.startService(intent);
     }
 
-    public void reconnect(@NonNull VlessServer newServer, boolean isAutoMode) {
-        FileLogger.i(TAG, "RECONNECT к: " + newServer.host);
-        disconnect(false);
-
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            connect(newServer, isAutoMode);
-        }, 1000);
-    }
-
+    // Новый метод — будет использоваться в WifiMonitor
     public boolean isUserManuallyDisconnected() {
         return userManuallyDisconnected;
     }
 
+    // Сброс флага при смене сети (когда появляется Wi-Fi или меняется тип соединения)
     public void resetManualDisconnectFlag() {
         if (userManuallyDisconnected) {
             userManuallyDisconnected = false;
+            FileLogger.i(TAG, "Сброс флага ручного отключения — разрешено авто-подключение");
         }
     }
 
+    /** Полная остановка ВСЕГО (используется перед любым новым действием) */
     public void stopAllPendingOperations() {
+        FileLogger.i(TAG, "VpnController → stopAllPendingOperations");
         AutoConnectManager.cancelAutoConnect();
+        // Если в будущем добавишь WorkManager-таски — отменяй здесь
     }
 
     public boolean isRunning() {
-        return vpnState.getValue() == VpnState.CONNECTED;
+        return VpnTunnelService.isRunning;
     }
 
     public VlessServer getCurrentServer() {
-        return currentServer;
+        return VpnTunnelService.getCurrentServer();
     }
 
+    // ================================================
+    // Удобные методы
+    // ================================================
+
     public void handleConnectButton(VlessServer server) {
-        if (isRunning() || vpnState.getValue() == VpnState.CONNECTING) {
-            disconnect(true);
+        if (isRunning()) {
+            disconnect(true); // отключить
         } else {
-            connect(server, false);
+            connect(server, false); // manual
         }
     }
 
@@ -179,46 +120,34 @@ public class VpnController {
     }
 
     public void startAutoConnect() {
-        if (isConnecting.getAndSet(true)) {
-            FileLogger.w(TAG, "startAutoConnect: уже идёт подключение, пропускаем");
-            return;
-        }
-        if (isRunning() || vpnState.getValue() == VpnState.CONNECTING) {
-            FileLogger.w(TAG, "startAutoConnect: VPN уже работает или подключается");
-            isConnecting.set(false);
-            return;
-        }
-
+        // Оборачиваем ВСЮ логику работы с БД в фоновый поток (решает проблему краша)
         new Thread(() -> {
             try {
-                final VlessServer lastWorking = repository.getLastWorkingServer();
-                if (lastWorking != null) {
-                    FileLogger.i(TAG, "startAutoConnect: " + lastWorking.host);
-                    new Handler(Looper.getMainLooper()).post(() -> connect(lastWorking, true));
+                VlessServer best = repository.getLastWorkingServer();
+
+                if (best != null) {
+                    FileLogger.i(TAG, "VpnController → startAutoConnect: " + best.host);
+                    // connect() безопасно вызывать из фонового потока, т.к. он стартует Service
+                    connect(best, true);
                     return;
                 }
 
                 FileLogger.i(TAG, "startAutoConnect: нет lastWorkingServer — пробуем топ серверов");
+
                 List<VlessServer> top = repository.getTopServersSync();
                 if (top != null && !top.isEmpty()) {
-                    final VlessServer topServer = top.get(0);
-                    FileLogger.i(TAG, "startAutoConnect: fallback — выбран " + topServer.host + " из топ-" + top.size());
-                    new Handler(Looper.getMainLooper()).post(() -> connect(topServer, true));
+                    best = top.get(0);
+                    FileLogger.i(TAG, "startAutoConnect: fallback — выбран " + best.host + " из топ-" + top.size());
+                    connect(best, true);
                     return;
                 }
 
                 FileLogger.w(TAG, "Нет рабочих серверов для авто-подключения");
-                isConnecting.set(false);
-                updateState(VpnState.DISCONNECTED);
+
             } catch (Exception e) {
                 FileLogger.e(TAG, "Ошибка в startAutoConnect: " + e.getMessage());
-                isConnecting.set(false);
-                updateState(VpnState.ERROR);
             }
         }).start();
     }
 
-    public void onConnectFinished() {
-        isConnecting.set(false);
-    }
 }

@@ -269,10 +269,10 @@ public class RemoteLogger {
         try {
             // Создаём URL из переданного endpoint
             URL url = new URL(endpoint);
-
+            int socksPort = new ServerRepository(ctx).getLocalSocksPort();
             java.net.Proxy proxy = new java.net.Proxy(
                     java.net.Proxy.Type.HTTP,
-                    new java.net.InetSocketAddress("127.0.0.1", 10808));
+                    new java.net.InetSocketAddress("127.0.0.1", socksPort));
 
             conn = (java.net.HttpURLConnection) url.openConnection(proxy);
 

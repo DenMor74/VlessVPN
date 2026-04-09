@@ -35,12 +35,6 @@ public class V2RayConfigBuilder {
             fakednsObj.put("ipPool", "198.18.0.0/15");
             fakednsObj.put("poolSize", 65535);
             fakednsArray.put(fakednsObj);
-            // ДОБАВИТЬ IPv6
-//            JSONObject fakednsIp6 = new JSONObject();
-//            fakednsIp6.put("ipPool", "fc00::/18");
-//            fakednsIp6.put("poolSize", 65535);
-//            fakednsArray.put(fakednsIp6);
-
             config.put("fakedns", fakednsArray);
 
             // ── DNS (ОБНОВЛЕНО) ──────────────────────────────────────────────
@@ -279,14 +273,6 @@ public class V2RayConfigBuilder {
             log.put("loglevel", "warning");
             config.put("log", log);
 
-            JSONObject dns = new JSONObject();
-            JSONArray dnsServers = new JSONArray();
-            dnsServers.put("8.8.8.8");
-            dnsServers.put("1.1.1.1");
-            dns.put("servers", dnsServers);
-            dns.put("queryStrategy", "UseIPv4");
-            config.put("dns", dns);
-
             JSONArray inbounds = new JSONArray();
             JSONArray outbounds = new JSONArray();
             JSONArray rules = new JSONArray();
@@ -315,21 +301,22 @@ public class V2RayConfigBuilder {
                     }
                 }
 
+
                 if (server.security != null && server.security.equals("reality")) {
                     if (server.pbk == null || server.pbk.isEmpty()) {
-                        FileLogger.w(TAG, "Пропуск сервера " + server.host + " — нет publicKey (pbk)");
+                        FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-"  + server.host + " — нет publicKey (pbk)");
                         skippedNoPublicKey++;
                         continue;
                     }
                     if (server.sni == null || server.sni.isEmpty()) {
-                        FileLogger.w(TAG, "Пропуск сервера " + server.host + " — нет serverName (sni)");
+                        FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-"  + server.host + " — нет serverName (sni)");
                         skippedNoSni++;
                         continue;
                     }
                 }
 
                 if ("http".equalsIgnoreCase(server.networkType)) {
-                    FileLogger.w(TAG, "Пропуск сервера " + server.host + " — HTTP transport устарел");
+                    FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-" + server.host + " — HTTP transport устарел");
                     skippedHttpTransport++;
                     continue;
                 }
@@ -337,7 +324,7 @@ public class V2RayConfigBuilder {
                 String net = server.networkType != null ? server.networkType.trim().toLowerCase() : "tcp";
                 if (!net.equals("tcp") && !net.equals("ws") && !net.equals("grpc") && !net.equals("xhttp") &&
                         !net.equals("kcp") && !net.equals("quic") && !net.equals("h2")) {
-                    FileLogger.w(TAG, "Пропуск сервера " + server.host + " — мусор в networkType: " + net);
+                    FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-" + server.host + " — мусор в networkType: " + net);
                     skippedOther++;
                     continue;
                 }
@@ -356,13 +343,9 @@ public class V2RayConfigBuilder {
                 inbound.put("tag", inTag);
                 inbound.put("port", localPort);
                 inbound.put("listen", "127.0.0.1");
-                //inbound.put("protocol", "http");
-                inbound.put("protocol", "socks"); // <--- БЫЛО "http"
-
+                inbound.put("protocol", "http");
                 JSONObject inSettings = new JSONObject();
                 inSettings.put("timeout", 0);
-                inSettings.put("auth", "noauth");
-                inSettings.put("udp", false); // UDP для пинга не нужен
                 inbound.put("settings", inSettings);
                 inbounds.put(inbound);
 

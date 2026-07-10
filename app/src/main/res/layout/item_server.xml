@@ -23,6 +23,16 @@
             android:src="@drawable/ic_server_idle"
             android:scaleType="fitCenter"/>
 
+        <ImageButton
+            android:id="@+id/btn_favorite"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_star_outline"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:scaleType="centerInside"
+            android:padding="6dp"/>
+
         <!-- Host + описание -->
         <LinearLayout
             android:layout_width="0dp"

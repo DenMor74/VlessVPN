@@ -23,13 +23,25 @@ public class UpdateChecker {
 
     // ════════════════════════════════════════════════════════════════
     // ← Ссылка на ваш output-metadata.json
+    //
+    // ⚠️ БЕЗОПАСНОСТЬ: раньше оба URL были на http:// (без TLS). Метаданные
+    // об обновлении и сам APK передавались открытым текстом, поэтому любой
+    // на пути сети (публичный Wi-Fi, взломанный роутер, недобросовестный
+    // провайдер — то есть ровно те условия, ради которых люди ставят VPN)
+    // мог подменить ответ и подсунуть вместо обновления вредоносный APK,
+    // который UpdateDownloadReceiver затем сам установит. Переключено на
+    // https — обязательно проверь, что хостинг реально отдаёт этот путь
+    // по HTTPS. Но даже по HTTPS этого недостаточно: ниже (см. downloadUpdate)
+    // по-прежнему нет проверки контрольной суммы/подписи скачанного файла
+    // ПЕРЕД установкой — это стоит добавить отдельным шагом (например,
+    // публиковать sha256 в output-metadata.json и сверять его после закачки).
     // ════════════════════════════════════════════════════════════════
-    private static final String VERSION_URL = "http://www.orel.ru/~moroz/Denmor_vpn/output-metadata.json";
+    private static final String VERSION_URL = "https://www.orel.ru/~moroz/Denmor_vpn/output-metadata.json";
 
     // ════════════════════════════════════════════════════════════════
     // ← Базовый URL для скачивания APK (папка где лежат APK файлы)
     // ════════════════════════════════════════════════════════════════
-    private static final String APK_BASE_URL = "http://www.orel.ru/~moroz/Denmor_vpn/";
+    private static final String APK_BASE_URL = "https://www.orel.ru/~moroz/Denmor_vpn/";
 
     private final Context context;
     private final OnUpdateCheckListener listener;

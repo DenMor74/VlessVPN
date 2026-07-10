@@ -43,6 +43,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BackgroundMonitorService extends Service {
 
@@ -50,6 +51,20 @@ public class BackgroundMonitorService extends Service {
     private static final String WORK_DOWNLOAD  = "server_download";
     private static final String WORK_SCAN      = "server_scan";
     private static long lastFinalLogTime = 0;   // защита от двойного финального лога
+
+    // ← НОВОЕ: глобальные (на весь процесс) флаги-мьютексы. periodic-задача
+    // (scheduleScan/scheduleDownload) и ручная (runScanNow/runDownloadNow)
+    // регистрируются в WorkManager под РАЗНЫМИ уникальными именами
+    // ("server_scan" и "server_scan_manual"), поэтому сам WorkManager их
+    // друг от друга не защищает и может честно выполнять оба Worker'а
+    // параллельно. Это и есть причина "непонятных" самопроизвольных проверок
+    // (сработал периодический таймер, пока пользователь или сам процесс
+    // скачивания уже что-то тестируют) и удвоенной нагрузки на больших
+    // списках. Флаги ниже гарантируют, что в процессе одновременно выполняется
+    // не более одного сканирования и не более одного скачивания, независимо
+    // от того, что именно их запустило.
+    private static final AtomicBoolean scanRunning     = new AtomicBoolean(false);
+    private static final AtomicBoolean downloadRunning = new AtomicBoolean(false);
 
 /*    String[] testUrls = {
             "http://cp.cloudflare.com/generate_204",
@@ -96,6 +111,27 @@ public class BackgroundMonitorService extends Service {
                 new OneTimeWorkRequest.Builder(ScanWorker.class).build());
     }
 
+    /**
+     * ← НОВОЕ: скачать списки и запустить сканирование ГАРАНТИРОВАННО ПОСЛЕ
+     * завершения скачивания, а не параллельно с ним. Раньше кнопка "Обновить"
+     * (см. MainViewModel.forceRefreshServers) вызывала runDownloadNow() и
+     * runScanNow() почти одновременно двумя независимыми enqueueUniqueWork —
+     * сканирование стартовало на ещё СТАРОМ списке серверов прямо в момент,
+     * когда DownloadWorker уже чистит (deleteAllServersSync) и заново
+     * заполняет ту же таблицу. Здесь используется штатная связка WorkManager
+     * beginUniqueWork(...).then(...), которая запускает scanReq только после
+     * успешного завершения downloadReq.
+     */
+    public static void runDownloadThenScanNow(Context ctx) {
+        OneTimeWorkRequest downloadReq = new OneTimeWorkRequest.Builder(DownloadWorker.class).build();
+        OneTimeWorkRequest scanReq     = new OneTimeWorkRequest.Builder(ScanWorker.class).build();
+
+        WorkManager.getInstance(ctx)
+                .beginUniqueWork(WORK_SCAN + "_manual", ExistingWorkPolicy.REPLACE, downloadReq)
+                .then(scanReq)
+                .enqueue();
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         ServerRepository repo = new ServerRepository(this);
@@ -128,6 +164,21 @@ public class BackgroundMonitorService extends Service {
 
         @Override
         public Result doWork() {
+            // ← НОВОЕ: не даём периодическому и ручному скачиванию (или двум ручным
+            // подряд) выполняться параллельно — оба иначе могут одновременно звать
+            // deleteAllServersSync()/insertAll() по одной и той же таблице.
+            if (!downloadRunning.compareAndSet(false, true)) {
+                FileLogger.w(W, "Скачивание уже выполняется в другом потоке — пропуск дубликата запуска");
+                return Result.success();
+            }
+            try {
+                return doDownload();
+            } finally {
+                downloadRunning.set(false);
+            }
+        }
+
+        private Result doDownload() {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
 
@@ -169,9 +220,7 @@ public class BackgroundMonitorService extends Service {
             FileLogger.i(W, "Всего URL: " + urlItems.size() + ", Активных (с галочкой): " + activeCount);
 
             if (activeCount > 0) {
-                FileLogger.i(W, "Очищаем базу данных перед загрузкой...");
-                repo.deleteAllServersSync();
-                StatusBus.post(ctx, "🗑️ Очистка базы...", true);
+                FileLogger.i(W, "Начинаем загрузку без удаления существующих (чтобы сохранить избранное)...");
             }
 
             int totalDownloaded = 0;
@@ -210,8 +259,14 @@ public class BackgroundMonitorService extends Service {
                     if (!fresh.isEmpty()) {
                         VlessServer connectedServer = VpnTunnelService.connectedServer;
 
-                        repo.deleteBySourceUrlSync(url);
-                        repo.insertAll(fresh);
+                        // ВАЖНО: Больше НЕ удаляем серверы по URL, так как это стирает 'isFavorite'.
+                        // repo.deleteBySourceUrlSync(url); 
+                        
+                        // Метод updateServerSync в репозитории сам проверит существование 
+                        // и сохранит статус избранного.
+                        for (VlessServer s : fresh) {
+                            repo.updateServerSync(s);
+                        }
 
                         if (connectedServer != null && VpnTunnelService.isRunning) {
                             boolean foundInFresh = false;
@@ -301,14 +356,35 @@ public class BackgroundMonitorService extends Service {
                 return Result.success();
             }
 
+            // ← НОВОЕ: не даём двум сканированиям (периодическому и ручному, или двум
+            // ручным подряд) выполняться параллельно. Именно отсутствие этой защиты
+            // было причиной "непонятных" проверок серверов (срабатывал фоновый
+            // периодический запуск, пока шло другое сканирование) и удвоения нагрузки
+            // на потоки/сокеты/нативное ядро V2Ray на больших списках.
+            if (!scanRunning.compareAndSet(false, true)) {
+                FileLogger.w(W, "Сканирование уже выполняется в другом потоке — пропуск дубликата запуска");
+                StatusBus.post(ctx, "⏳ Проверка уже выполняется...", false);
+                return Result.success();
+            }
+
+            // ← НОВОЕ: раньше вейклок всегда брался на фиксированные 5 минут, хотя
+            // обе фазы сканирования суммарно могут занимать намного дольше на больших
+            // списках (до 300 сек на этап 1 + до нескольких минут на каждый батч
+            // этапа 2). Теперь время удержания CPU растёт вместе с числом серверов
+            // (с потолком в 20 минут, чтобы не держать WakeLock бесконечно, если
+            // где-то в конвейере всё же произошло зависание).
+            int total = repo.getAllServersSync().size();
+            long wakeMs = Math.min(20 * 60 * 1000L, Math.max(5 * 60 * 1000L, total * 150L));
+
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VlessVPN::ScanWorker");
-            wakeLock.acquire(5 * 60 * 1000L); // 5 минут с запасом
+            wakeLock.acquire(wakeMs);
 
             try {
                 return doPipelineScan(ctx, repo);
             } finally {
                 if (wakeLock.isHeld()) wakeLock.release();
+                scanRunning.set(false);
             }
         }
 
@@ -422,7 +498,12 @@ public class BackgroundMonitorService extends Service {
                         }
 
                         try {
-                            ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server, finalCellularNet);
+                            // ← ИЗМЕНЕНО: repeatCount=1 вместо стандартных 2 попыток.
+                            // На массовой первой проверке подавляющее большинство серверов
+                            // из публичных списков — мёртвые, и 2 попытки по 12 сек только
+                            // удваивают и без того большое время этапа 1 на крупных списках,
+                            // а также удлиняют "хвост" зомби-потоков после shutdownNow().
+                            ServerTester.TestResult tcp = ServerTester.tcpTest(ctx, server, finalCellularNet, 1);
                             int currTcp = tcpDone.incrementAndGet();
 
                             if (tcp.trafficOk) {
@@ -487,6 +568,15 @@ public class BackgroundMonitorService extends Service {
 
                     for (int startIndex = 0; startIndex < finalSurvivedSize; startIndex += BATCH_SIZE) {
                         if (Thread.currentThread().isInterrupted() || !phase2Active.get()) break;
+
+                        // ← НОВОЕ: реальное подключение важнее фонового теста. Если
+                        // пользователь запустил VPN, пока конвейер ещё перебирает батчи,
+                        // прерываем оставшиеся батчи, а не поднимаем ещё один "тихий"
+                        // инстанс нативного ядра параллельно с боевым соединением.
+                        if (VpnTunnelService.isRunning) {
+                            FileLogger.i(W, "VPN подключился во время сканирования — прерываем оставшиеся батчи");
+                            break;
+                        }
 
                         int endIndex = Math.min(startIndex + BATCH_SIZE, finalSurvivedSize);
                         List<VlessServer> currentBatch = survivedPing.subList(startIndex, endIndex);
@@ -739,6 +829,20 @@ public class BackgroundMonitorService extends Service {
 
         @Override
         public Result doWork() {
+            // ← НОВОЕ: тот же мьютекс, что и у обычного DownloadWorker — оба пишут
+            // в одну и ту же таблицу серверов и не должны пересекаться по времени.
+            if (!downloadRunning.compareAndSet(false, true)) {
+                FileLogger.w(W, "Скачивание уже выполняется в другом потоке — пропуск дубликата запуска");
+                return Result.success();
+            }
+            try {
+                return doWhitelistDownload();
+            } finally {
+                downloadRunning.set(false);
+            }
+        }
+
+        private Result doWhitelistDownload() {
             Context ctx = getApplicationContext();
             ServerRepository repo = new ServerRepository(ctx);
 

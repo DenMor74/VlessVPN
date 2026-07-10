@@ -20,6 +20,9 @@ public interface ServerDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     void insertAll(List<VlessServer> servers);
 
+    @Query("SELECT * FROM servers WHERE id = :id")
+    VlessServer getServerById(String id);
+
     @Update
     void update(VlessServer server);
 
@@ -47,7 +50,7 @@ public interface ServerDao {
     List<VlessServer> getTopNWorkingServersSync(int limit);
 
     /** Все рабочие серверы (без лимита) — для LiveData с внешней обрезкой */
-    @Query("SELECT * FROM servers WHERE trafficOk = 1 ORDER BY pingMs ASC")
+    @Query("SELECT * FROM servers WHERE trafficOk = 1 ORDER BY isFavorite DESC, pingMs ASC")
     LiveData<List<VlessServer>> getAllWorkingServers();
 
     /**
@@ -82,4 +85,7 @@ public interface ServerDao {
      */
     @Query("SELECT COUNT(*) FROM servers WHERE trafficOk = 1")
     int getWorkingCount();
+
+    @Query("UPDATE servers SET isFavorite = :isFav WHERE id = :serverId")
+    void updateFavorite(String serverId, boolean isFav);
 }

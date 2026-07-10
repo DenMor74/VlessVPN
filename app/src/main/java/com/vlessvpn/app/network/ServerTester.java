@@ -46,13 +46,26 @@ public class ServerTester {
     }
 
     // ── 1. TCP пинг ────────────────────────────────────────────────────────
+    //
+    // ← ИСПРАВЛЕНО: добавлен параметр repeatCount + проверка прерывания МЕЖДУ
+    // попытками REPEAT. Раньше при shutdownNow() пула поток мог успеть начать
+    // 2-ю попытку (ещё TIMEOUT_MS секунд) уже после того, как фаза сканирования
+    // формально завершилась — это и есть "зомби-потоки", которые продолжают
+    // стучаться в сеть и в БД после того, как сканирование должно было закончиться.
+    // Теперь после первой попытки поток проверяет флаг прерывания и не начинает
+    // следующую, если пул уже остановлен.
 
     public static TestResult tcpTest(Context ctx, VlessServer server, Network bindNet) {
+        return tcpTest(ctx, server, bindNet, REPEAT);
+    }
+
+    public static TestResult tcpTest(Context ctx, VlessServer server, Network bindNet, int repeatCount) {
         TestResult r = new TestResult();
         long best = -1;
 
         if (bindNet != null) {
-            for (int i = 0; i < REPEAT; i++) {
+            for (int i = 0; i < repeatCount; i++) {
+                if (i > 0 && Thread.currentThread().isInterrupted()) break;
                 long ms = socketConnect(ctx, server.host, server.port, bindNet);
                 if (ms >= 0 && (best < 0 || ms < best)) {
                     best = ms;
@@ -62,7 +75,8 @@ public class ServerTester {
         } else {
             Network cellular = getCellularNetwork(ctx);
             if (cellular != null) {
-                for (int i = 0; i < REPEAT; i++) {
+                for (int i = 0; i < repeatCount; i++) {
+                    if (i > 0 && Thread.currentThread().isInterrupted()) break;
                     long ms = socketConnect(ctx, server.host, server.port, cellular);
                     if (ms >= 0 && (best < 0 || ms < best)) {
                         best = ms;
@@ -70,9 +84,10 @@ public class ServerTester {
                     }
                 }
             }
-            if (best < 0) {
+            if (best < 0 && !Thread.currentThread().isInterrupted()) {
                 Network wifi = getWifiNetwork(ctx);
-                for (int i = 0; i < REPEAT; i++) {
+                for (int i = 0; i < repeatCount; i++) {
+                    if (i > 0 && Thread.currentThread().isInterrupted()) break;
                     long ms = socketConnect(ctx, server.host, server.port, wifi);
                     if (ms >= 0 && (best < 0 || ms < best)) {
                         best = ms;
@@ -93,7 +108,7 @@ public class ServerTester {
     }
 
     public static TestResult tcpTest(Context ctx, VlessServer server) {
-        return tcpTest(ctx, server, null);
+        return tcpTest(ctx, server, null, REPEAT);
     }
 
     private static String getNetworkTypeName(Network net, Context ctx) {

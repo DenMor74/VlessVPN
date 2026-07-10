@@ -143,54 +143,43 @@ public class ServerRepository {
 
 
     // ---------------- YC LOG GROUP ----------------
+    //
+    // ← КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ БЕЗОПАСНОСТИ: раньше здесь прямо в исходном коде,
+    // закоммиченном в публичный GitHub-репозиторий, лежал полный приватный RSA-ключ
+    // сервисного аккаунта Yandex Cloud вместе с serviceAccountId/keyId/logGroupId.
+    // Любой человек, склонировавший репозиторий, мог аутентифицироваться от имени
+    // этого сервисного аккаунта. Раз ключ уже был опубликован — его необходимо
+    // немедленно ОТОЗВАТЬ/ПЕРЕВЫПУСТИТЬ в консоли Yandex Cloud (IAM → Сервисные
+    // аккаунты → Авторизованные ключи), простого удаления из кода недостаточно,
+    // т.к. старые коммиты с ключом остаются в истории git навсегда.
+    //
+    // Теперь значения читаются из BuildConfig, которые Gradle подставляет из
+    // local.properties (файл НЕ коммитится, уже в .gitignore). Смотри
+    // local.properties.example — впиши туда СВОЙ НОВЫЙ (перевыпущенный) ключ.
+    // Если значения не заданы — функция удалённого логирования в Yandex Cloud
+    // просто не будет работать (fallback на пустую строку), приложение при этом
+    // не падает.
 
     public String getRemoteLogGroupId() {
-        return "e23jflosv9phmehl5fcs";   // <-- вставь свой logGroupId
+        return com.vlessvpn.app.BuildConfig.YC_LOG_GROUP_ID;
     }
 
     // ---------------- SERVICE ACCOUNT ----------------
 
     public String getYcServiceAccountId() {
-        return "ajepbp52cgkrmcg6tfh4";     // <-- service_account_id из JSON
+        return com.vlessvpn.app.BuildConfig.YC_SERVICE_ACCOUNT_ID;
     }
 
     // ---------------- KEY ID ----------------
 
     public String getYcKeyId() {
-        return "ajefuqpvvdrm39bu6euj";      // <-- key_id из JSON
+        return com.vlessvpn.app.BuildConfig.YC_KEY_ID;
     }
 
     // ---------------- PRIVATE KEY ----------------
 
     public String getYcPrivateKey() {
-        return "-----BEGIN PRIVATE KEY-----\n" +
-                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDmHMVqa3fw5mlG\n" +
-                "duEdG8ruSRvIgVvPHB5CLDGBlOU3E7bHLqahZwZtICDX9wHM4QjEEGrLyi75mmq4\n" +
-                "hy3czk+gyJFGk6yo1+L5BscvuiYu5hmTVJeo8qLBY3NECynokrrRlwjl4VdM/S7M\n" +
-                "N/7yyea+oUDWTfYEFyQMX40Fyp5qiRR8kFbSBfa+7DrC0pJC8joTTxwIXnpE3qBp\n" +
-                "ddcW+3s45QYEmtH87fNSTd4CbWp3c3Pfe+4uICSme8a3mkUQ+L5CftvUI4NWAGdV\n" +
-                "VXEzEZj5HquLuUD66eEXXxs3vw1zA7SlycC+FC+FIOdP7KcPxEi3iHLOBky6QXL+\n" +
-                "wQ9hjaCjAgMBAAECggEAbY83QyLl2VGqv/zr03MfHHK8gqtsbeCCW5k0/PBKbf25\n" +
-                "4X3JokEuIxjP6mNVfRmLleYHIv4hfX/S3gamhGHKMdAsswCujTk0fMKIZaXodh3i\n" +
-                "AW6eQrc7XH4gLD5wdqYdwpp5hxHSAfrtpBfpD+mnLg4Sk7ZMssfdxvJbb214HVo9\n" +
-                "wuqFY1cnrzZ9jTfR6FMYxJ402hd8jUkEFqQCEm9Ec66fKgi4SV3i/bb2/QeCWZiJ\n" +
-                "2dhK2vznFvnRYL25yGdFcrKNjj2bZdx4PJPJ8eulFB+JZ45HLrtgs48do9+JnAYj\n" +
-                "eEUJCtwoE2YusiwR608tqawRNZlGjr7oW/0V/5F00QKBgQDx6pKEz8CP57w3PbUQ\n" +
-                "IOgb3mj9LDFJYTcnE8ZwJSZPvj8fqMJ8SyCRtjoxXiHlScyP+67bRu8dkze9c+Ea\n" +
-                "93cGRRwDOGOJ+vVsh2TSQVLvEIhQ7SLgt5v6SPxYMgrX7PKSjjXo9B/Ac6sqS86R\n" +
-                "YRb2P0BXb1wMMD/cgkHEg+1lWQKBgQDzgkchv3u7DAFypnAwzVqzQ/Ik7ce/Szq0\n" +
-                "uo6FgI+QrhaxwV/s29kcTXzjpuRGEdcSE779THv5QH8+dxCxN0FVD+c+5MJMgLXI\n" +
-                "+I2U/q2dducneQ4e2YE3VyuHT6ojbbO9N2XjSs9/moT9S075PjP0oT1tA49hsVFM\n" +
-                "4tOI4poqWwKBgQCAKWW2NtotYvezzF1ATi6plQrKFb+GwJoXecKHZycE2CVZAG8I\n" +
-                "qkR27bOms9gBQTe+j/fy84F6iaPeGqYHQ1MrXzGYAye40dtzw8cGHNVzEa8mMHtp\n" +
-                "0dwwnLoTf29/NWjNe8nTwIGR07W6kq69FlKz4o6Tw8tgKa+rgtaU5c+/AQKBgALv\n" +
-                "cRgRDNbGYEYXh4avEwbSLNsRGrVNnNmM3ibx08k0sAVYhWV/iPB0Zqr/2gSWNnd7\n" +
-                "UXQQNfZdNqt0F/lq5xi1Zl41t7ngW1Ce3mYLY+BgDI1HQkpQ6OPX4yhwZ2ah7ea8\n" +
-                "AjhpMHMjU7MR81PB0jKCtxDXWCUfVBGPMmmWAbG9AoGASIef9QmYtQlSE7+zBZ67\n" +
-                "UKqIYzzy2xf1tbbWsHBhDx1mDgMpkCCXEskVdt3FAww34EscVSQKwvJWsE0yNLdP\n" +
-                "RdtgLaZju5XpWkJFpZtoeEEylYNjpO/kL8tEG3AUXaIBWUn8R3TB7y8xKMGbAnqr\n" +
-                "9CZcb5seVW6d/2zWZa+yyfM=" +
-                "-----END PRIVATE KEY-----";
+        return com.vlessvpn.app.BuildConfig.YC_PRIVATE_KEY.replace("\\n", "\n");
     }
 
     // ── Чтение серверов ────────────────────────────────────────────────────
@@ -233,7 +222,23 @@ public class ServerRepository {
     public void insertAll(List<VlessServer> servers) { dao.insertAll(servers); }
 
     public void updateServer(VlessServer server)  { dao.update(server); }
-    public void updateServerSync(VlessServer s)   { dao.updateServer(s); }
+    public void updateServerSync(VlessServer s)   {
+        VlessServer existing = dao.getServerById(s.id);
+        if (existing != null) {
+            s.isFavorite = existing.isFavorite;
+            dao.update(s);
+        } else {
+            dao.insert(s);
+        }
+    }
+
+    public void toggleFavorite(VlessServer server) {
+        executor.execute(() -> {
+            boolean newVal = !server.isFavorite;
+            server.isFavorite = newVal;
+            dao.updateFavorite(server.id, newVal);
+        });
+    }
 
     public void deleteBySourceUrl(String url)     { dao.deleteBySourceUrl(url); }
     public void deleteBySourceUrlSync(String url) { dao.deleteBySourceUrl(url); }

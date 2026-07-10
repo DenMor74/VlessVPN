@@ -1,31 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- ========== РАЗРЕШЕНИЯ ========== -->
-    <uses-permission android:name="android.permission.BIND_NETWORK" />
+    <!-- ========== РАЗРЕШЕНИЯ ==========
+         ← ПОЧИЩЕНО: список ниже был продублирован (INTERNET и FOREGROUND_SERVICE
+         встречались по 4 раза, SYSTEM_ALERT_WINDOW и REQUEST_INSTALL_PACKAGES —
+         по 3, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — 2). Дубли не ломают сборку
+         (мёрджер манифеста и PackageManager сами схлопывают повторы), но затрудняют
+         чтение и наводят на мысль, что часть блока копировалась вслепую при
+         добавлении новых функций. Также убран android.permission.BIND_NETWORK —
+         такого разрешения не существует в модели разрешений Android, это, судя по
+         всему, опечатка/остаток от какой-то другой попытки; система его просто
+         молча игнорирует, реального эффекта у него нет. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION"/>
     <queries>
         <!-- Все приложения -->
@@ -121,17 +120,15 @@
             android:exported="false"
             android:process=":crash" />
 
-        <!-- FileProvider — нужен для отправки лог файла через Telegram/email -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.provider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_provider_paths" />
-        </provider>
-
+        <!-- FileProvider — нужен для отправки лог файла через Telegram/email
+             ← ИСПРАВЛЕНО: этот <provider> был продублирован два раза подряд с
+             одинаковым android:authorities="${applicationId}.provider". Мёрджер
+             манифеста Android Gradle Plugin считает повторное объявление того же
+             провайдера с тем же authorities конфликтом атрибутов и падает с
+             ошибкой сборки ("Element provider#androidx.core.content.FileProvider
+             ... is also present at ..."), либо (в зависимости от версии AGP)
+             тихо оставляет только один экземпляр — в обоих случаях второй блок
+             был чистым мусором. Оставлен один. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

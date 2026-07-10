@@ -48,19 +48,46 @@
 
         </LinearLayout>
 
-        <!-- Подключённый сервер — всегда одна строка -->
-        <TextView
-            android:id="@+id/tv_connected_server"
+        <!-- Подключённый сервер и иконки доступности -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="13sp"
-            android:textColor="@color/text_secondary"
-            android:gravity="start"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginStart="45dp"
-            android:layout_marginTop="-25dp"
-            android:singleLine="true"
-            android:ellipsize="end"/>
+            android:layout_marginEnd="68dp"
+            android:layout_marginTop="-25dp">
+
+            <TextView
+                android:id="@+id/tv_connected_server"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text=""
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:layout_marginEnd="8dp"/>
+
+            <ImageView
+                android:id="@+id/iv_tg_status"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginEnd="8dp"
+                android:src="@drawable/ic_telegram"
+                android:tint="#A0A0A0"
+                android:visibility="gone"/>
+
+            <ImageView
+                android:id="@+id/iv_yt_status"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:src="@drawable/ic_youtube"
+                android:tint="#A0A0A0"
+                android:visibility="gone" />
+
+        </LinearLayout>
 
         <!-- Трафик — всегда одна строка, просто пустая когда не подключено -->
         <TextView

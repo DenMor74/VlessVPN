@@ -88,7 +88,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvLastUpdate;
     private TextView tvLastScan;
     private ProgressBar progressScan;
+    private android.widget.ImageView ivTgStatus;
+    private android.widget.ImageView ivYtStatus;
 
+    private String lastConnectedServerId = null;
     private VlessServer pendingServer = null;
     private boolean receiverRegistered = false;
     private UpdateChecker updateChecker;
@@ -163,6 +166,20 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
+            if (StatusBus.ACTION_SERVICE_STATUS.equals(action)) {
+                boolean tgOk = intent.getBooleanExtra(StatusBus.EXTRA_TG_OK, false);
+                boolean ytOk = intent.getBooleanExtra(StatusBus.EXTRA_YT_OK, false);
+                viewModel.setServiceStatus(tgOk, ytOk);
+            }
+
+            if (StatusBus.ACTION_PING_RESULT.equals(action)) {
+                String service = intent.getStringExtra("service");
+                boolean ok = intent.getBooleanExtra("ok", false);
+
+                // Просто пересылаем в StatusBus, если нужно (хотя VpnTunnelService уже должен был это сделать)
+                // Но главное, что StatusBus.postPingResult сам обновит LiveData в ViewModel
+            }
+
             if (StatusBus.ACTION_SERVER_EVENT.equals(action)) {
                 String serverId = intent.getStringExtra(StatusBus.EXTRA_SERVER_ID);
                 String host = intent.getStringExtra(StatusBus.EXTRA_HOST);
@@ -233,6 +250,8 @@ public class MainActivity extends AppCompatActivity {
         // StatusBus Receiver
         IntentFilter statusFilter = new IntentFilter(StatusBus.ACTION_STATUS_CHANGED);
         statusFilter.addAction(StatusBus.ACTION_SERVER_EVENT);
+        statusFilter.addAction(StatusBus.ACTION_SERVICE_STATUS);
+        statusFilter.addAction(StatusBus.ACTION_PING_RESULT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statusReceiver, statusFilter, Context.RECEIVER_EXPORTED);
         } else {
@@ -280,6 +299,8 @@ public class MainActivity extends AppCompatActivity {
         tvServerCounts = findViewById(R.id.tv_server_counts);
         tvLastUpdate = findViewById(R.id.tv_last_update);
         tvLastScan = findViewById(R.id.tv_last_scan);
+        ivTgStatus = findViewById(R.id.iv_tg_status);
+        ivYtStatus = findViewById(R.id.iv_yt_status);
 
         btnDisconnect.setOnClickListener(v -> VpnController.getInstance(this).handleDisconnectButton());
 
@@ -329,7 +350,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupRecyclerView() {
-        serverAdapter = new ServerAdapter(this::onConnectClicked);
+        serverAdapter = new ServerAdapter(new ServerAdapter.OnConnectListener() {
+            @Override
+            public void onConnect(VlessServer server) {
+                onConnectClicked(server);
+            }
+
+            @Override
+            public void onToggleFavorite(VlessServer server) {
+                viewModel.toggleFavorite(server);
+            }
+        });
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(serverAdapter);
     }
@@ -349,17 +380,43 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        viewModel.getServiceStatus().observe(this, status -> {
+            if (status != null) {
+                if (ivTgStatus != null) {
+                    ivTgStatus.setImageTintList(android.content.res.ColorStateList.valueOf(status.tgOk ? 0xFF4CAF50 : 0xFF808080));
+                }
+                if (ivYtStatus != null) {
+                    ivYtStatus.setImageTintList(android.content.res.ColorStateList.valueOf(status.ytOk ? 0xFF4CAF50 : 0xFF808080));
+                }
+            }
+        });
+
         viewModel.getIsConnected().observe(this, this::renderConnectionState);
+
+        viewModel.getLastIpResult().observe(this, res -> {
+            if (res != null && !res.isEmpty()) {
+                if (tvLastStatus != null) tvLastStatus.setText(res);
+                if (btnDeepCheckRefresh != null) {
+                    btnDeepCheckRefresh.setImageResource(R.drawable.ic_refresh);
+                    btnDeepCheckRefresh.setImageTintList(android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+                }
+            }
+        });
 
         viewModel.getConnectedServer().observe(this, server -> {
             if (server != null) {
                 tvConnectedServer.setText(server.remark.isEmpty() ? server.host : server.remark);
                 serverAdapter.setConnectedServerId(server.id);
-                // Сбрасываем панели при каждом новом сервере
-                resetSpeedAndIpPanels();
+                
+                // Сбрасываем панели ТОЛЬКО если сервер действительно сменился
+                if (lastConnectedServerId == null || !lastConnectedServerId.equals(server.id)) {
+                    lastConnectedServerId = server.id;
+                    resetSpeedAndIpPanels();
+                }
             } else {
                 tvConnectedServer.setText("");
                 serverAdapter.setConnectedServerId(null);
+                lastConnectedServerId = null;
             }
         });
 
@@ -382,27 +439,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             } else if (tvStatusMode != null) {
                 tvStatusMode.setText(VpnTunnelService.isRunning ? msg : "🔍 " + msg);
-            }
-        });
-
-        viewModel.getLastIpResult().observe(this, ip -> {
-            if (tvLastStatus == null) return;
-
-            if (ip == null || ip.isEmpty()) {
-                if (VpnTunnelService.isRunning && !VpnTunnelService.isIpDetermined) {
-                    tvLastStatus.setText("Ждём IP...");
-                    tvLastStatus.setTextColor(0xFFFFFFFF);
-                }
-                return;
-            }
-
-            tvLastStatus.setText(ip);
-            boolean ok = ip.contains("✓");
-            tvLastStatus.setTextColor(ok ? 0xFF4CAF50 : 0xFFFF5252);
-
-            if (btnDeepCheckRefresh != null) {
-                btnDeepCheckRefresh.setImageResource(R.drawable.ic_refresh);
-                btnDeepCheckRefresh.setImageTintList(android.content.res.ColorStateList.valueOf(ok ? 0xFF4CAF50 : 0xFFFF5252));
             }
         });
     }
@@ -561,7 +597,7 @@ public class MainActivity extends AppCompatActivity {
         viewModel.refreshVpnStatus();
     }
 
-    /** Сбрасывает панели скорости и IP при смене сервера */
+    /** Сбрасывает панели скорости, IP и иконки YT/TG при смене сервера */
     private void resetSpeedAndIpPanels() {
         if (tvSpeedTest != null) {
             tvSpeedTest.setText("⏱ Тест скорости");
@@ -573,8 +609,11 @@ public class MainActivity extends AppCompatActivity {
                     android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
         }
         if (panelSpeedTest != null) panelSpeedTest.setBackgroundColor(0xFF111827);
+        
         // IP — очищаем через ViewModel (отдельная LiveData)
         viewModel.clearIpResult();
+        // Сбрасываем статус сервисов через ViewModel/StatusBus
+        StatusBus.postServiceStatus(this, false, false);
     }
 
     private void renderConnectionState(boolean connected) {
@@ -587,6 +626,9 @@ public class MainActivity extends AppCompatActivity {
             boolean deepEnabled = new ServerRepository(this).isDeepCheckOnConnect();
             if (panelDeepCheck != null) panelDeepCheck.setVisibility(deepEnabled ? View.VISIBLE : View.GONE);
 
+            if (ivTgStatus != null) ivTgStatus.setVisibility(View.VISIBLE);
+            if (ivYtStatus != null) ivYtStatus.setVisibility(View.VISIBLE);
+
             if (tvStatusMode != null) tvStatusMode.setText("🟢 VPN активен");
         } else {
             tvStatus.setText("🔴 Отключено");
@@ -594,6 +636,9 @@ public class MainActivity extends AppCompatActivity {
             btnDisconnect.setVisibility(View.INVISIBLE);
             tvConnectedServer.setText("");
             tvTraffic.setText(" ");
+
+            if (ivTgStatus != null) ivTgStatus.setVisibility(View.GONE);
+            if (ivYtStatus != null) ivYtStatus.setVisibility(View.GONE);
 
             if (panelDeepCheck != null) panelDeepCheck.setVisibility(View.GONE);
             if (panelSpeedTest != null) panelSpeedTest.setVisibility(View.GONE);

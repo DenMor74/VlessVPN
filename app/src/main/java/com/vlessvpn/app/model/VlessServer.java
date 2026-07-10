@@ -40,7 +40,7 @@ public class VlessServer {
     public String sid = "";
     public String host2 = "";
     public String remark = "";
-    private String spiderX = "/";   // по умолчанию "/"
+    public String spiderX = "/";   // по умолчанию "/"
     // ════════════════════════════════════════════════════════════════
     // ← НОВЫЕ ПОЛЯ для поддержки xhttp и других транспортов
     // ════════════════════════════════════════════════════════════════
@@ -60,6 +60,7 @@ public class VlessServer {
     public boolean trafficOk = false;
     public long lastTestedAt = 0;
     public String sourceUrl = "";
+    public boolean isFavorite = false; // ← НОВОЕ: Метка "избранное"
 
     // ========== СТАТИЧЕСКИЙ ПАРСЕР ==========
 

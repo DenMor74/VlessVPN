@@ -94,6 +94,14 @@ public class V2RayManager {
 
     public boolean start(VlessServer server) {
         stop();
+        // Реальное подключение важнее фонового теста серверов: если в этот момент
+        // BackgroundMonitorService ещё тестирует список через "тихий" мультиплекс-
+        // инстанс (silentCoreController), останавливаем его принудительно. Иначе
+        // два инстанса нативного ядра могут одновременно работать в одном процессе,
+        // что и приводит либо к нативному крашу, либо к тому, что реальное
+        // соединение перехватывает конфиг фонового теста (и наоборот) — со стороны
+        // это выглядит как "приложение само начинает проверять непонятные серверы".
+        stopSilentMultiplexInstance();
         currentServer = server;
         lastTotalTx = TrafficStats.getTotalTxBytes();
         lastTotalRx = TrafficStats.getTotalRxBytes();
@@ -215,12 +223,25 @@ public class V2RayManager {
 
     private static libv2ray.CoreController silentCoreController;
 
+    // ← Общий на класс лок: start/stop "тихого" тестового инстанса и проверка
+    // isSilentMultiplexRunning() теперь всегда выполняются атомарно относительно
+    // друг друга. Раньше silentCoreController был обычным static-полем без
+    // всякой синхронизации — если бы где-то в коде одновременно вызвались два
+    // start (или start и stop), один поток мог получить ссылку на контроллер,
+    // который другой поток уже успел обнулить/остановить, либо оба потока могли
+    // одновременно завладеть нативным ядром. Основной сценарий (два параллельных
+    // ScanWorker) закрыт мьютексом в BackgroundMonitorService, но этот лок —
+    // необходимая защита второго уровня, в том числе от гонки со start() реального
+    // подключения.
+    private static final Object silentLock = new Object();
+
     /**
      * Запускает единый инстанс ядра с мультиплекс-конфигом в "тихом" режиме.
      * Теперь: сокеты привязываются к LTE если задана sTestCellularNetwork.
      */
     public static boolean startSilentMultiplexInstance(Context context, String multiplexConfigJson) {
-        stopSilentMultiplexInstance();
+      synchronized (silentLock) {
+        stopSilentMultiplexInstanceLocked();
         initEnvOnce(context);
 
         try {
@@ -298,9 +319,17 @@ public class V2RayManager {
             silentCoreController = null;
             return false;
         }
+      } // synchronized (silentLock)
     }
 
     public static void stopSilentMultiplexInstance() {
+        synchronized (silentLock) {
+            stopSilentMultiplexInstanceLocked();
+        }
+    }
+
+    /** Вызывать только под silentLock — без собственной синхронизации. */
+    private static void stopSilentMultiplexInstanceLocked() {
         if (silentCoreController != null) {
             try {
                 silentCoreController.stopLoop();
@@ -308,6 +337,13 @@ public class V2RayManager {
                 FileLogger.w(TAG, "stopSilentMultiplexLoop: " + e.getMessage());
             }
             silentCoreController = null;
+        }
+    }
+
+    /** true, если сейчас активен фоновый "тихий" тест-инстанс ядра. */
+    public static boolean isSilentMultiplexRunning() {
+        synchronized (silentLock) {
+            return silentCoreController != null;
         }
     }
 

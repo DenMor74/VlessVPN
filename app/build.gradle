@@ -16,6 +16,32 @@ def getGitHash() {
     }
 }
 
+// ← НОВОЕ: секреты (ключ Yandex Cloud, пароль FTP) больше не хранятся в исходниках.
+// Они читаются из local.properties — этот файл уже перечислен в .gitignore и не
+// попадает в git. Смотри local.properties.example — скопируй его в local.properties
+// и впиши туда СВОИ значения (для Yandex Cloud ключ нужно предварительно
+// ПЕРЕВЫПУСТИТЬ в консоли, т.к. старый уже был опубликован в этом репозитории).
+// Если значение не задано — возвращается defaultValue, и соответствующая функция
+// (удалённое логирование / автозаливка APK на FTP) просто тихо не срабатывает,
+// без падения сборки или приложения.
+def loadLocalProperty(String key, String defaultValue = "") {
+    def propsFile = rootProject.file("local.properties")
+    if (!propsFile.exists()) return defaultValue
+    def props = new Properties()
+    propsFile.withInputStream { props.load(it) }
+    def value = props.getProperty(key)
+    return (value != null && !value.trim().isEmpty()) ? value : defaultValue
+}
+
+// Экранирует строку для безопасной подстановки как Java string-литерал в BuildConfig
+def toJavaStringLiteral(String value) {
+    def escaped = value.replace('\\', '\\\\')
+                       .replace('"', '\\"')
+                       .replace('\n', '\\n')
+                       .replace('\r', '\\r')
+    return "\"${escaped}\""
+}
+
 android {
     namespace 'com.vlessvpn.app'
     compileSdk 34
@@ -24,13 +50,31 @@ android {
         applicationId "com.vlessvpn.app"
         minSdk 26          // Android 8.0 — минимум для нормальной работы VPN API
         targetSdk 34
-        versionCode 99
-        versionName "3.5.0"
+        versionCode 101
+        versionName "4.0.1"
 
         // Поддержка нативных библиотек (libv2ray собран для этих архитектур)
         ndk {
             abiFilters 'arm64-v8a'
         }
+
+        // ← НОВОЕ: секреты Yandex Cloud теперь берутся из local.properties (см. выше),
+        // а не хранятся в коде. Пустая строка по умолчанию = функция удалённого
+        // логирования в Yandex Cloud выключена (не настроена), без падений.
+        buildConfigField "String", "YC_LOG_GROUP_ID",
+                toJavaStringLiteral(loadLocalProperty("yc.logGroupId"))
+        buildConfigField "String", "YC_SERVICE_ACCOUNT_ID",
+                toJavaStringLiteral(loadLocalProperty("yc.serviceAccountId"))
+        buildConfigField "String", "YC_KEY_ID",
+                toJavaStringLiteral(loadLocalProperty("yc.keyId"))
+        buildConfigField "String", "YC_PRIVATE_KEY",
+                toJavaStringLiteral(loadLocalProperty("yc.privateKey"))
+    }
+
+    // ← НОВОЕ: начиная с AGP 8 генерация BuildConfig отключена по умолчанию —
+    // нужно явно её включить, иначе поля buildConfigField выше не сгенерируются.
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
@@ -127,7 +171,23 @@ android.applicationVariants.all { variant ->
 
         variant.assembleProvider.get().doLast {
 
-            def ftpUrl = "ftp://moroz:5y8mJ3h7@ftp.orel.ru/public_html/Denmor_vpn/"
+            // ← КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ БЕЗОПАСНОСТИ: раньше здесь прямо в исходном
+            // коде, закоммиченном в публичный GitHub-репозиторий, лежал логин И ПАРОЛЬ
+            // от FTP того же самого хоста (orel.ru), с которого UpdateChecker.java
+            // скачивает и автоматически УСТАНАВЛИВАЕТ "обновления" приложения. Это не
+            // просто утечка учётки — это прямой рецепт атаки на цепочку поставок: любой,
+            // кто прочитал этот файл в репозитории, мог залить на этот путь свой APK,
+            // и он бы предложился всем пользователям как официальное обновление и
+            // установился без проверки подписи/контрольной суммы (см. правки в
+            // UpdateChecker.java и связанный комментарий). Пароль уже скомпрометирован —
+            // его нужно СРОЧНО сменить на хостинге, здесь лишь убран сам факт хранения
+            // секрета в git. Значение теперь берётся из local.properties (см.
+            // local.properties.example); если не задано — шаг заливки просто пропускается.
+            def ftpUrl = loadLocalProperty("ftp.upload.url", "")
+            if (ftpUrl.isEmpty()) {
+                println "ftp.upload.url не задан в local.properties — автозагрузка APK на сервер пропущена"
+                return
+            }
 
             def apkDir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
             def metaFile = layout.buildDirectory.file("outputs/apk/release/output-metadata.json").get().asFile

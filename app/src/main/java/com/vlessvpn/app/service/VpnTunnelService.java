@@ -547,22 +547,23 @@ public class VpnTunnelService extends VpnService {
         if (connectivityManager == null) return -1;
         HttpURLConnection conn = null;
         try {
-            Network active = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ?
-                    connectivityManager.getActiveNetwork() : null;
-
-            if (active == null) {
-                for (Network net : connectivityManager.getAllNetworks()) {
-                    NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
-                    if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                            && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                        active = net;
+            Network targetNetwork = null;
+            // Ищем сеть, которая НЕ является VPN
+            for (Network net : connectivityManager.getAllNetworks()) {
+                NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
+                if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    targetNetwork = net;
+                    // Если нашли WiFi, он обычно в приоритете
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
                         break;
                     }
                 }
             }
-            if (active == null) return -1;
 
-            conn = (HttpURLConnection) active.openConnection(new URL(urlStr));
+            if (targetNetwork == null) return -1;
+
+            conn = (HttpURLConnection) targetNetwork.openConnection(new URL(urlStr));
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);
             conn.setRequestMethod("HEAD");
@@ -740,18 +741,43 @@ public class VpnTunnelService extends VpnService {
 private void doDeepCheckInternal() {
     if (!isRunning) return;
     if (!isTunnelVerified) return;
-    if (isIpDetermined) return;
 
     if (Looper.myLooper() == Looper.getMainLooper()) {
         safeExecute(this::doDeepCheckInternal);
         return;
     }
 
+    mainHandler.post(() -> {
+        StatusBus.post(this, "🔍 Проверка доступности сервисов...", true);
+        StatusBus.postServiceStatus(this, false, false); // Сбрасываем иконки в серый
+    });
+
+    // Атомарные флаги для статуса сервисов
+    AtomicBoolean tgOk = new AtomicBoolean(false);
+    AtomicBoolean ytOk = new AtomicBoolean(false);
+
+    // 1. ПАРАЛЛЕЛЬНАЯ ПРОВЕРКА TELEGRAM
+    safeExecute(() -> {
+        boolean ok = checkUrlStatusThroughProxy("https://t.me/favicon.ico", 5000);
+        tgOk.set(ok);
+        StatusBus.postPingResult(getApplicationContext(), "tg", ok);
+        FileLogger.i(TAG, "TG check done: " + ok);
+        updateConnectedMessage(tgOk.get(), ytOk.get());
+    });
+
+    // 2. ПАРАЛЛЕЛЬНАЯ ПРОВЕРКА YOUTUBE
+    safeExecute(() -> {
+        boolean ok = checkUrlStatusThroughProxy("https://www.youtube.com/favicon.ico", 5000);
+        ytOk.set(ok);
+        StatusBus.postPingResult(getApplicationContext(), "yt", ok);
+        FileLogger.i(TAG, "YT check done: " + ok);
+        updateConnectedMessage(tgOk.get(), ytOk.get());
+    });
+
+    // 3. ПАРАЛЛЕЛЬНОЕ ОПРЕДЕЛЕНИЕ IP (запускаем сразу все сервисы)
     AodOverlayService.sendStatus(this, true,
             currentServer != null ? currentServer.host : null,
             "Определяем IP...", null);
-
-    mainHandler.post(() -> StatusBus.post(this, "🔍 Определяем внешний IP...", true));
 
     String[][] services = {
             {"http://ip-api.com/json?fields=query,city,countryCode,isp", "ip-api.com (HTTP)"},
@@ -760,27 +786,49 @@ private void doDeepCheckInternal() {
             {"http://ipwhois.app/json/", "ipwhois.app"}
     };
 
-    CountDownLatch latch = new CountDownLatch(1);
-    AtomicBoolean success = new AtomicBoolean(false);
-
     for (String[] service : services) {
         safeExecute(() -> {
-            if (success.get()) return;
             if (isIpDetermined) return;
             if (tryGetIpFromService(service[0], service[1])) {
-                if (success.compareAndSet(false, true)) {
-                    latch.countDown();
-                }
+                FileLogger.i(TAG, "IP determined by " + service[1]);
             }
         });
     }
+}
 
+/**
+ * Вспомогательный метод для обновления сообщения о подключении с учетом статуса сервисов
+ */
+private void updateConnectedMessage(boolean tg, boolean yt) {
+    String remark = (connectedServer != null) ? (connectedServer.remark.isEmpty() ? connectedServer.host : connectedServer.remark) : "";
+    String msg = "✅ Подключено: " + remark;
+    if (!tg || !yt) {
+        msg += " (";
+        if (!tg) msg += "no TG";
+        if (!tg && !yt) msg += ", ";
+        if (!yt) msg += "no YT";
+        msg += ")";
+    }
+    final String finalMsg = msg;
+    mainHandler.post(() -> StatusBus.post(this, finalMsg, true));
+}
+
+private boolean checkUrlStatusThroughProxy(String urlStr, int timeout) {
+    HttpURLConnection conn = null;
     try {
-        boolean gotIp = latch.await(10, TimeUnit.SECONDS);
-        if (!gotIp && !success.get()) {
-            handleDeepCheckRetry("✗ Все сервисы не ответили");
-        }
-    } catch (InterruptedException ignored) {}
+        int socksPort = new ServerRepository(this).getLocalSocksPort();
+        java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS, new java.net.InetSocketAddress("127.0.0.1", socksPort));
+        conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
+        conn.setConnectTimeout(timeout);
+        conn.setReadTimeout(timeout);
+        conn.setRequestMethod("GET");
+        int code = conn.getResponseCode();
+        return code >= 200 && code < 400;
+    } catch (Exception e) {
+        return false;
+    } finally {
+        if (conn != null) conn.disconnect();
+    }
 }
 
 /*    private void doDeepCheckInternal() {

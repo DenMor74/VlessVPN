@@ -25,6 +25,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
 
     public interface OnConnectListener {
         void onConnect(VlessServer server);
+        void onToggleFavorite(VlessServer server);
     }
 
     public enum TestStatus {
@@ -98,6 +99,10 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
 
         h.tvHost.setText(s.host + ":" + s.port);
         h.tvRemark.setText(s.remark.isEmpty() ? s.host : s.remark);
+
+        // Избранное
+        h.btnFavorite.setImageResource(s.isFavorite ? R.drawable.ic_star_filled : R.drawable.ic_star_outline);
+        h.btnFavorite.setOnClickListener(v -> connectListener.onToggleFavorite(s));
 
         // ── Иконка статуса (Material, единый стиль) ──────────
         int iconRes;
@@ -239,7 +244,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
     static class ViewHolder extends RecyclerView.ViewHolder {
         ImageView tvIcon;
         TextView tvHost, tvRemark, tvPing, tvStatus;
-        ImageButton btnConnect;
+        ImageButton btnConnect, btnFavorite;
 
         ViewHolder(View v) {
             super(v);
@@ -249,6 +254,7 @@ public class ServerAdapter extends RecyclerView.Adapter<ServerAdapter.ViewHolder
             tvPing    = v.findViewById(R.id.tv_server_ping);
             tvStatus  = v.findViewById(R.id.tv_server_status);
             btnConnect = v.findViewById(R.id.btn_connect);
+            btnFavorite = v.findViewById(R.id.btn_favorite);
         }
     }
 }

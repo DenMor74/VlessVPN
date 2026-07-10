@@ -222,11 +222,28 @@ public class V2RayConfigBuilder {
         // Транспорт
         switch (net) {
             case "xhttp":
+            case "http":
                 JSONObject xhttpSettings = new JSONObject();
                 xhttpSettings.put("path", server.path != null ? server.path : "/");
                 if (server.host2 != null && !server.host2.isEmpty()) xhttpSettings.put("host", server.host2);
-                xhttpSettings.put("mode", "stream-one");
+                String xmode = (server.mode != null && !server.mode.isEmpty()) ? server.mode : "auto";
+                xhttpSettings.put("mode", xmode);
                 stream.put("xhttpSettings", xhttpSettings);
+                stream.put("network", "xhttp");
+                break;
+
+            case "httpupgrade":
+                JSONObject hupSettings = new JSONObject();
+                hupSettings.put("path", server.path != null ? server.path : "/");
+                if (server.host2 != null && !server.host2.isEmpty()) hupSettings.put("host", server.host2);
+                stream.put("httpupgradeSettings", hupSettings);
+                break;
+
+            case "splithttp":
+                JSONObject splitSettings = new JSONObject();
+                splitSettings.put("path", server.path != null ? server.path : "/");
+                if (server.host2 != null && !server.host2.isEmpty()) splitSettings.put("host", server.host2);
+                stream.put("splithttpSettings", splitSettings);
                 break;
 
             case "ws":
@@ -304,27 +321,22 @@ public class V2RayConfigBuilder {
 
                 if (server.security != null && server.security.equals("reality")) {
                     if (server.pbk == null || server.pbk.isEmpty()) {
-                        FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-"  + server.host + " — нет publicKey (pbk)");
+                        FileLogger.w(TAG, "Пропуск [" + server.remark + "] — нет publicKey (pbk) | URI: " + server.rawUri);
                         skippedNoPublicKey++;
                         continue;
                     }
                     if (server.sni == null || server.sni.isEmpty()) {
-                        FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-"  + server.host + " — нет serverName (sni)");
-                        skippedNoSni++;
-                        continue;
+                        server.sni = server.host;
                     }
                 }
 
-                if ("http".equalsIgnoreCase(server.networkType)) {
-                    FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-" + server.host + " — HTTP transport устарел");
-                    skippedHttpTransport++;
-                    continue;
-                }
-
                 String net = server.networkType != null ? server.networkType.trim().toLowerCase() : "tcp";
+                if (net.equals("raw")) net = "tcp";
+
                 if (!net.equals("tcp") && !net.equals("ws") && !net.equals("grpc") && !net.equals("xhttp") &&
-                        !net.equals("kcp") && !net.equals("quic") && !net.equals("h2")) {
-                    FileLogger.w(TAG, "Пропуск сервера " + server.protocol + "-" + server.host + " — мусор в networkType: " + net);
+                        !net.equals("kcp") && !net.equals("quic") && !net.equals("h2") &&
+                        !net.equals("http") && !net.equals("httpupgrade") && !net.equals("splithttp")) {
+                    FileLogger.w(TAG, "Пропуск [" + server.remark + "] — мусор в networkType: " + net + " | URI: " + server.rawUri);
                     skippedOther++;
                     continue;
                 }

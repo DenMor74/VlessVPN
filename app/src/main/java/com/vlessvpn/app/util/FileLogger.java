@@ -49,6 +49,17 @@ public class FileLogger {
     private static final SimpleDateFormat sdf =
             new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
 
+    // ← ИСПРАВЛЕНО: раньше write() открывал и закрывал FileWriter НА КАЖДЫЙ вызов
+    // лога под единой synchronized-блокировкой на весь класс. Во время сканирования
+    // это дергается одновременно из 150+ пингующих потоков + пула из 40 HTTP-потоков —
+    // каждый вызов лога сериализовался и заново открывал файловый дескриптор, что при
+    // больших списках серверов превращалось в серьёзный узкий момент (тормоза,
+    // повышенный расход файловых дескрипторов ровно тогда, когда их и так не хватает
+    // из-за сотен одновременных сокетов). Теперь дескриптор открывается один раз и
+    // переиспользуется; flush() после каждой записи сохраняет прежнюю надёжность
+    // (лог не теряется при падении процесса).
+    private static java.io.Writer logWriter = null;
+
     /**
      * Инициализация. Вызывать в VpnApplication.onCreate() первой строкой.
      * Использует context.getFilesDir() — всегда доступно, разрешения не нужны.
@@ -101,9 +112,26 @@ public class FileLogger {
 
     private static synchronized void write(String text) {
         if (logFile == null) return;
-        try (FileWriter fw = new FileWriter(logFile, true)) {
-            fw.write(text + "\n");
-        } catch (Exception ignored) {}
+        try {
+            if (logWriter == null) {
+                logWriter = new java.io.BufferedWriter(new FileWriter(logFile, true));
+            }
+            logWriter.write(text);
+            logWriter.write("\n");
+            logWriter.flush();
+        } catch (Exception ignored) {
+            // Файл могли удалить/пересоздать снаружи — закрываем и пробуем
+            // переоткрыть на следующем вызове, а не остаёмся навсегда сломанными.
+            closeWriterQuietly();
+        }
+    }
+
+    /** Вызывать только под synchronized (this.class) — закрывает и обнуляет кэш-writer. */
+    private static void closeWriterQuietly() {
+        if (logWriter != null) {
+            try { logWriter.close(); } catch (Exception ignore) {}
+            logWriter = null;
+        }
     }
 
     public static String getLogPath() {
@@ -169,7 +197,11 @@ public class FileLogger {
     /**
      * Полностью очищает файл лога (удаляет все записи)
      */
-    public static void clearLog() {
+    public static synchronized void clearLog() {
+        // ← Обязательно закрываем закэшированный writer ПЕРЕД удалением файла,
+        // иначе он продолжит держать открытым старый (уже удалённый) инод,
+        // и новые записи будут уходить "в никуда" вместо нового файла.
+        closeWriterQuietly();
         if (logFile != null && logFile.exists()) {
             if (logFile.delete()) {
                 try {
@@ -212,7 +244,11 @@ public class FileLogger {
     /**
      * Ротация лог файла — оставляет последние N байт.
      */
-    private static void rotateLogFile(long targetSize) {
+    private static synchronized void rotateLogFile(long targetSize) {
+        // ← Закрываем закэшированный append-writer перед тем как открыть файл в
+        // режиме перезаписи ниже — иначе после ротации старый writer продолжит
+        // писать поверх уже урезанного файла со сдвинутой позицией курсора.
+        closeWriterQuietly();
         try {
             // Читаем весь файл
             BufferedReader reader = new BufferedReader(new FileReader(logFile));

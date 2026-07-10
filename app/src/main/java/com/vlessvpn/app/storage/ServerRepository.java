@@ -61,6 +61,18 @@ public class ServerRepository {
     public static final int DEFAULT_TOP_COUNT    = 30;
     public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
 
+    // ← НОВОЕ: лимит числа серверов, которые реально пингуются/проверяются за один
+    // проход сканирования. Списки из публичных подписок (по умолчанию их 6 в
+    // приложении) суммарно легко превышают несколько тысяч записей — тестирование
+    // всех разом создаёт сотни параллельных сокетов/потоков и было основной причиной
+    // падений на больших списках. Отбор кандидатов идёт через
+    // ServerDao.getServersForTestingSync(): сначала избранные (isFavorite DESC),
+    // затем давно не тестировавшиеся (lastTestedAt ASC) — так за несколько
+    // последовательных сканирований список постепенно проверяется весь целиком,
+    // а не залипает на одной случайной тысяче.
+    public static final String PREF_MAX_SERVERS_PER_SCAN = "max_servers_per_scan";
+    public static final int DEFAULT_MAX_SERVERS_PER_SCAN = 500;
+
     // Добавьте новые ключи SharedPreferences
     public static final String PREF_CONFIG_URLS_JSON = "config_urls_json";
     public static final String PREF_CONFIG_URLS_ENABLED = "config_urls_enabled";
@@ -194,6 +206,16 @@ public class ServerRepository {
 
     public List<VlessServer> getAllServersSync() { return dao.getAllServersSync(); }
 
+    /**
+     * ← НОВОЕ: список-кандидат для сканирования, ограниченный getMaxServersPerScan().
+     * Приоритет отбора (см. ServerDao.getServersForTestingSync): избранные, затем
+     * давно не тестировавшиеся. Если реальных серверов меньше лимита — вернутся
+     * все, поведение не отличается от getAllServersSync().
+     */
+    public List<VlessServer> getServersForTestingSync(int limit) {
+        return dao.getServersForTestingSync(limit);
+    }
+
     /** Топ-N рабочих серверов для AutoConnect и switchToNextServer */
     /** Все рабочие серверы (без лимита топ-N) — для перебора при переключении */
     public List<VlessServer> getAllWorkingServersSync() {
@@ -267,6 +289,15 @@ public class ServerRepository {
 
     public void saveScanIntervalMinutes(int minutes) {
         prefs.edit().putInt(PREF_SCAN_INTERVAL, Math.max(10, Math.min(1440, minutes))).apply();
+    }
+
+    /** Сколько серверов максимум тестируется за один проход сканирования (см. doPipelineScan). */
+    public int getMaxServersPerScan() {
+        return prefs.getInt(PREF_MAX_SERVERS_PER_SCAN, DEFAULT_MAX_SERVERS_PER_SCAN);
+    }
+
+    public void saveMaxServersPerScan(int count) {
+        prefs.edit().putInt(PREF_MAX_SERVERS_PER_SCAN, Math.max(50, count)).apply();
     }
 
     // ── Настройки: количество серверов ────────────────────────────────────

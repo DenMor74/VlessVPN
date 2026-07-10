@@ -377,9 +377,10 @@ public class BackgroundMonitorService extends Service {
             // обе фазы сканирования суммарно могут занимать намного дольше на больших
             // списках (до 300 сек на этап 1 + до нескольких минут на каждый батч
             // этапа 2). Теперь время удержания CPU растёт вместе с числом серверов
-            // (с потолком в 20 минут, чтобы не держать WakeLock бесконечно, если
-            // где-то в конвейере всё же произошло зависание).
-            int total = repo.getCount();
+            // (с потолком в 20 минут). Берём min(count, maxServersPerScan), т.к. именно
+            // столько реально будет протестировано за этот проход — см. лимит в
+            // doPipelineScan().
+            int total = Math.min(repo.getCount(), repo.getMaxServersPerScan());
             long wakeMs = Math.min(20 * 60 * 1000L, Math.max(5 * 60 * 1000L, total * 150L));
 
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
@@ -416,14 +417,37 @@ public class BackgroundMonitorService extends Service {
                 FileLogger.w(TAG, "Блокировка тестирования листа: VPN уже активен!");
                 return Result.retry();
             }
-            List<VlessServer> allServers = repo.getAllServersSync();
+
+            // ← НОВОЕ: если в базе больше repo.getMaxServersPerScan() (по умолчанию 1000)
+            // серверов, за один проход берём только ограниченное подмножество вместо
+            // всего списка целиком. Публичные подписки (их 6 по умолчанию) суммарно
+            // легко дают несколько тысяч записей — тестирование всех разом поднимает
+            // сотни параллельных сокетов/потоков и было основной причиной падений на
+            // больших списках. getServersForTestingSync() отбирает сначала избранные,
+            // затем давно не тестировавшиеся — при следующих сканированиях будут
+            // выбраны уже другие серверы, и за несколько проходов проверяется весь
+            // список, а не одна и та же тысяча.
+            int totalInDb = repo.getCount();
+            if (totalInDb == 0) {
+                StatusBus.done(ctx, "⚠️ Нет серверов в базе");
+                return Result.retry();
+            }
+
+            int maxPerScan = repo.getMaxServersPerScan();
+            boolean limited = totalInDb > maxPerScan;
+            List<VlessServer> allServers = limited
+                    ? repo.getServersForTestingSync(maxPerScan)
+                    : repo.getAllServersSync();
+
             if (allServers.isEmpty()) {
                 StatusBus.done(ctx, "⚠️ Нет серверов в базе");
                 return Result.retry();
             }
 
             int total = allServers.size();
-            StatusBus.post(ctx, "🔍 Подготовка к тесту " + total + " серверов...", true);
+            StatusBus.post(ctx, limited
+                    ? "🔍 Подготовка к тесту " + total + " из " + totalInDb + " серверов (лимит за проход)..."
+                    : "🔍 Подготовка к тесту " + total + " серверов...", true);
             StatusBus.setWorking(ctx, true);
 
             AtomicInteger tcpDone = new AtomicInteger(0);

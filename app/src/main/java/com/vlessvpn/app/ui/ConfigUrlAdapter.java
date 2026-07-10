@@ -38,8 +38,15 @@ public class ConfigUrlAdapter extends RecyclerView.Adapter<ConfigUrlAdapter.View
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         ConfigUrlItem item = items.get(position);
 
+        holder.checkBox.setOnCheckedChangeListener(null);
         holder.checkBox.setChecked(item.isEnabled());
-        holder.editText.setText(item.getUrl());
+
+        // Отображаем упрощенное имя, если нет фокуса
+        if (holder.editText.hasFocus()) {
+            holder.editText.setText(item.getUrl());
+        } else {
+            holder.editText.setText(getSimplifiedName(item.getUrl()));
+        }
 
         holder.checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
             item.setEnabled(isChecked);
@@ -47,18 +54,68 @@ public class ConfigUrlAdapter extends RecyclerView.Adapter<ConfigUrlAdapter.View
         });
 
         holder.editText.setOnFocusChangeListener((v, hasFocus) -> {
-            if (!hasFocus) {
-                item.setUrl(holder.editText.getText().toString().trim());
-                if (listener != null) listener.onUrlChanged();
+            if (hasFocus) {
+                // При получении фокуса показываем полный URL для редактирования
+                holder.editText.setText(item.getUrl());
+            } else {
+                // При потере фокуса сохраняем изменения и возвращаем упрощенный вид
+                String newUrl = holder.editText.getText().toString().trim();
+                if (!newUrl.isEmpty() && !newUrl.equals(getSimplifiedName(item.getUrl()))) {
+                    item.setUrl(newUrl);
+                    if (listener != null) listener.onUrlChanged();
+                }
+                holder.editText.setText(getSimplifiedName(item.getUrl()));
             }
         });
 
         holder.btnDelete.setOnClickListener(v -> {
-            items.remove(position);
-            notifyItemRemoved(position);
-            notifyItemRangeChanged(position, items.size());
-            if (listener != null) listener.onUrlChanged();
+            int currentPos = holder.getBindingAdapterPosition();
+            if (currentPos != RecyclerView.NO_POSITION) {
+                items.remove(currentPos);
+                notifyItemRemoved(currentPos);
+                notifyItemRangeChanged(currentPos, items.size());
+                if (listener != null) listener.onUrlChanged();
+            }
         });
+    }
+
+    private String getSimplifiedName(String url) {
+        if (url == null || url.isEmpty() || url.equals("https://")) return url;
+        try {
+            // Обработка Yandex Translate оберток
+            if (url.contains("translate.yandex.ru/translate?url=")) {
+                android.net.Uri uri = android.net.Uri.parse(url);
+                String wrappedUrl = uri.getQueryParameter("url");
+                if (wrappedUrl != null) {
+                    return "Yandex: " + getSimplifiedName(wrappedUrl);
+                }
+            }
+
+            // Специальная обработка для GitHub
+            if (url.contains("github")) {
+                String clean = url.replace("https://", "").replace("http://", "");
+                String[] parts = clean.split("/");
+                if (parts.length >= 2) {
+                    // parts[0] - хост, parts[1] - пользователь
+                    String user = parts[1];
+                    String rawFilename = parts[parts.length - 1];
+                    String filename = rawFilename.contains("?") ? rawFilename.substring(0, rawFilename.indexOf("?")) : rawFilename;
+                    return user + " - " + filename;
+                }
+            }
+
+            // Для остальных: хост - последний сегмент пути
+            android.net.Uri uri = android.net.Uri.parse(url);
+            String host = uri.getHost();
+            String path = uri.getLastPathSegment();
+
+            if (host != null && path != null && !host.equals(path)) {
+                return host + " - " + path;
+            } else if (host != null) {
+                return host;
+            }
+        } catch (Exception ignored) {}
+        return url;
     }
 
     @Override

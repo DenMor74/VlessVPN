@@ -121,10 +121,10 @@ public class VlessServer {
             s.uuid = body.substring(0, atIdx);
 
             // ════════════════════════════════════════════════════════════════
-            // ← НОВОЕ: Проверка корректности UUID
+            // ← ИЗМЕНЕНО: Более гибкая проверка ID (некоторые серверы используют ники)
             // ════════════════════════════════════════════════════════════════
-            if (!isValidUuid(s.uuid)) {
-                FileLogger.w("VlessServer", "Неверный UUID: " + s.uuid + " в " + uri.substring(0, Math.min(50, uri.length())));
+            if (!isValidId(s.uuid)) {
+                FileLogger.w("VlessServer", "Невалидный ID: " + s.uuid + " в " + uri.substring(0, Math.min(50, uri.length())));
                 return null;
             }
 
@@ -136,16 +136,29 @@ public class VlessServer {
 
             if (hostPort.startsWith("[")) {
                 int bracketEnd = hostPort.indexOf(']');
-                s.host = hostPort.substring(1, bracketEnd);
-                String portStr = hostPort.substring(bracketEnd + 2);
-                portStr = portStr.replaceAll("[^0-9]", "").trim();
-                s.port = Integer.parseInt(portStr);
+                if (bracketEnd > 0) {
+                    s.host = hostPort.substring(1, bracketEnd);
+                    String after = hostPort.substring(bracketEnd + 1);
+                    int cIdx = after.indexOf(':');
+                    if (cIdx >= 0) {
+                        String portStr = after.substring(cIdx + 1).replaceAll("[^0-9]", "").trim();
+                        if (!portStr.isEmpty()) s.port = Integer.parseInt(portStr);
+                    }
+                }
             } else {
                 int colonIdx = hostPort.lastIndexOf(':');
-                s.host = hostPort.substring(0, colonIdx);
-                String portStr = hostPort.substring(colonIdx + 1);
-                portStr = portStr.replaceAll("[^0-9]", "").trim();
-                s.port = Integer.parseInt(portStr);
+                if (colonIdx >= 0) {
+                    s.host = hostPort.substring(0, colonIdx);
+                    String portStr = hostPort.substring(colonIdx + 1).replaceAll("[^0-9]", "").trim();
+                    if (!portStr.isEmpty()) {
+                        try { s.port = Integer.parseInt(portStr); } catch (Exception ignored) { s.port = 443; }
+                    } else {
+                        s.port = 443;
+                    }
+                } else {
+                    s.host = hostPort;
+                    s.port = 443;
+                }
             }
 
             // QUERY PARAMS
@@ -186,30 +199,26 @@ public class VlessServer {
     }
 
     // ════════════════════════════════════════════════════════════════
-    // ← НОВЫЙ МЕТОД: Проверка корректности UUID
+    // ← НОВЫЙ МЕТОД: Проверка корректности ID/UUID
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * Проверяет что UUID имеет правильный формат (8-4-4-4-12)
-     * Пример: 4b07f679-1fc8-4184-92c9-b87a23d2e700
+     * Проверяет ID (UUID или кастомный ник).
      */
-    private static boolean isValidUuid(String uuid) {
-        if (uuid == null || uuid.isEmpty()) return false;
+    private static boolean isValidId(String id) {
+        if (id == null || id.isEmpty()) return false;
 
-        // UUID формат: 8-4-4-4-12 (36 символов с дефисами)
-        if (uuid.length() != 36) return false;
-
-        // Проверяем что нет @ или : (значит парсинг прошёл правильно)
-        if (uuid.contains("@") || uuid.contains(":") || uuid.contains("/")) {
+        // В VLESS/Trojan ID не может содержать @, /, пробелы или кавычки
+        if (id.contains("@") || id.contains("/") || id.contains(" ") || id.contains("\"")) {
             return false;
         }
 
-        // Проверяем позиции дефисов
-        if (uuid.charAt(8) != '-' || uuid.charAt(13) != '-' ||
-                uuid.charAt(18) != '-' || uuid.charAt(23) != '-') {
-            return false;
+        // Если это не UUID (36 символов), просто проверяем длину
+        if (id.length() != 36) {
+            return id.length() >= 4; // Минимум 4 символа для ника
         }
 
+        // Для 36 символов проверяем формат UUID (опционально, но полезно для логов)
         return true;
     }
 
@@ -277,10 +286,18 @@ public class VlessServer {
             String hostPort = (qIdx > 0) ? body.substring(0, qIdx) : body;
 
             int colonIdx = hostPort.lastIndexOf(':');
-            s.host = hostPort.substring(0, colonIdx);
-            String portStr = hostPort.substring(colonIdx + 1);
-            portStr = portStr.replaceAll("[^0-9]", "").trim();
-            s.port = Integer.parseInt(portStr);
+            if (colonIdx >= 0) {
+                s.host = hostPort.substring(0, colonIdx);
+                String portStr = hostPort.substring(colonIdx + 1).replaceAll("[^0-9]", "").trim();
+                if (!portStr.isEmpty()) {
+                    try { s.port = Integer.parseInt(portStr); } catch (Exception ignored) { s.port = 443; }
+                } else {
+                    s.port = 443;
+                }
+            } else {
+                s.host = hostPort;
+                s.port = 443;
+            }
 
             // ════════════════════════════════════════════════════════════════
             // ← ИСПРАВЛЕНО: Объявляем params перед if

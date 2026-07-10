@@ -71,11 +71,8 @@ public class ServerRepository {
         "https://raw.githubusercontent.com/kort0881/vpn-checker-backend/main/checked/RU_Best/ru_white_part1.txt\r\n" +
         "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt\r\n" +
         "https://gbr.mydan.online/configs\r\n" +
-        "https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vl.txt?filter=.ru";
-
-    //public static final String DEFAULT_CONFIG_URL =
-    // "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt&lang=de-de\r\n" +
-    //  "https://translate.yandex.ru/translate?url=https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt&lang=de-de";
+        "https://raw.githubusercontent.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta6.txt\r\n" +
+        "https://raw.githubusercontent.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta7.txt";
 
     public ServerRepository(Context context) {
         dao   = AppDatabase.getInstance(context).serverDao();
@@ -141,6 +138,11 @@ public class ServerRepository {
         FileLogger.i(TAG, "База данных очищена — удалено всех серверов");
     }
 
+    public void deleteNonFavoritesSync() {
+        dao.deleteNonFavorites();
+        FileLogger.i(TAG, "База данных очищена — удалены все, кроме избранных");
+    }
+
 
     // ---------------- YC LOG GROUP ----------------
     //
@@ -195,26 +197,12 @@ public class ServerRepository {
     /** Топ-N рабочих серверов для AutoConnect и switchToNextServer */
     /** Все рабочие серверы (без лимита топ-N) — для перебора при переключении */
     public List<VlessServer> getAllWorkingServersSync() {
-        List<VlessServer> all = dao.getAllServersSync();
-        List<VlessServer> ready = new ArrayList<>();
-        for (VlessServer s : all) {
-            if (s.pingMs >= 0 && s.trafficOk) ready.add(s);
-        }
-        if (ready.isEmpty()) ready = all;
-        ready.sort((a, b) -> Long.compare(a.pingMs, b.pingMs));
-        return ready;
+        return dao.getAllWorkingServersSync();
     }
 
     public List<VlessServer> getTopServersSync() {
         int limit = getTopCount();
-        List<VlessServer> all = dao.getAllServersSync();
-        List<VlessServer> ready = new ArrayList<>();
-        for (VlessServer s : all) {
-            if (s.pingMs >= 0 && s.trafficOk) ready.add(s);
-        }
-        if (ready.isEmpty()) ready = all;
-        ready.sort((a, b) -> Long.compare(a.pingMs, b.pingMs));
-        return ready.subList(0, Math.min(limit, ready.size()));
+        return dao.getTopNWorkingServersSync(limit);
     }
 
     // ── Запись серверов ────────────────────────────────────────────────────
@@ -222,6 +210,11 @@ public class ServerRepository {
     public void insertAll(List<VlessServer> servers) { dao.insertAll(servers); }
 
     public void updateServer(VlessServer server)  { dao.update(server); }
+
+    public void updateTestResultsSync(VlessServer s) {
+        dao.updateTestResults(s.id, s.pingMs, s.trafficOk, s.lastTestedAt, s.tcpPingMs);
+    }
+
     public void updateServerSync(VlessServer s)   {
         VlessServer existing = dao.getServerById(s.id);
         if (existing != null) {
@@ -245,6 +238,8 @@ public class ServerRepository {
 
     public void resetAllTestTimes()     { executor.execute(dao::resetAllTestTimes); }
     public void resetAllTestTimesSync() { dao.resetAllTestTimes(); }
+
+    public int getCount() { return dao.getCount(); }
 
     public int getWorkingCount() { return dao.getWorkingCount(); }
 

@@ -33,6 +33,13 @@ public interface ServerDao {
     void updateServer(VlessServer server);
 
 
+    /**
+     * Быстрое обновление результатов теста без загрузки всего объекта из БД.
+     * Позволяет сохранить поле 'isFavorite' нетронутым.
+     */
+    @Query("UPDATE servers SET pingMs = :ping, trafficOk = :ok, lastTestedAt = :time, tcpPingMs = :tcpPing WHERE id = :id")
+    void updateTestResults(String id, long ping, boolean ok, long time, int tcpPing);
+
     @Query("SELECT * FROM servers")
     List<VlessServer> getAllServers();
 
@@ -53,6 +60,9 @@ public interface ServerDao {
     @Query("SELECT * FROM servers WHERE trafficOk = 1 ORDER BY isFavorite DESC, pingMs ASC")
     LiveData<List<VlessServer>> getAllWorkingServers();
 
+    @Query("SELECT * FROM servers WHERE trafficOk = 1 ORDER BY isFavorite DESC, pingMs ASC")
+    List<VlessServer> getAllWorkingServersSync();
+
     /**
      * ВСЕ серверы для тестирования — храним весь кэш, не удаляем!
      * Это позволяет при следующем тесте проверить все серверы заново,
@@ -61,11 +71,25 @@ public interface ServerDao {
     @Query("SELECT * FROM servers")
     List<VlessServer> getAllServersSync();
 
+    /**
+     * Возвращает очередь серверов для тестирования.
+     * Приоритет: Избранные → Давно не тестировавшиеся.
+     */
+    @Query("SELECT * FROM servers ORDER BY isFavorite DESC, lastTestedAt ASC LIMIT :limit")
+    List<VlessServer> getServersForTestingSync(int limit);
+
     @Query("SELECT COUNT(*) FROM servers")
     int getCount();
 
     @Query("DELETE FROM servers")
     void deleteAllServers();
+
+    /**
+     * Удалить все серверы, кроме избранных.
+     * Используется перед загрузкой новых списков, чтобы база не раздувалась.
+     */
+    @Query("DELETE FROM servers WHERE isFavorite = 0")
+    void deleteNonFavorites();
 
     /**
      * Сбросить флаги теста → все серверы будут протестированы заново.

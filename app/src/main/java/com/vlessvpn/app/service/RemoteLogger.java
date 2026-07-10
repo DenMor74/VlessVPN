@@ -85,11 +85,8 @@ public class RemoteLogger {
                 return;
             }
 
-            List<com.vlessvpn.app.model.VlessServer> all = repo.getAllServersSync();
-            int total = all.size();
-            int working = 0;
-            for (com.vlessvpn.app.model.VlessServer s : all)
-                if (s.trafficOk) working++;
+            int total = repo.getCount();
+            int working = repo.getWorkingCount();
 
             com.vlessvpn.app.model.VlessServer cur = VpnTunnelService.getCurrentServer();
 

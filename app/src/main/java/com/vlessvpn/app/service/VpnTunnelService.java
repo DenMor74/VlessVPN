@@ -467,9 +467,8 @@ public class VpnTunnelService extends VpnService {
 
         safeExecute(() -> {
             ServerRepository r = new ServerRepository(VpnTunnelService.this);
-            int total = r.getAllServersSync().size();
-            int workingCount = 0;
-            for (VlessServer sv : r.getAllServersSync()) if (sv.trafficOk) workingCount++;
+            int total = r.getCount();
+            int workingCount = r.getWorkingCount();
 
             AodOverlayService.sendStatus(VpnTunnelService.this, true,
                     server.host, "Проверка туннеля...", workingCount + "/" + total);

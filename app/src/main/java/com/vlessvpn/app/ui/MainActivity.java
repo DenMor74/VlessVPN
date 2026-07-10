@@ -450,9 +450,8 @@ public class MainActivity extends AppCompatActivity {
     private void updateServerCounts(List<VlessServer> displayedServers) {
         new Thread(() -> {
             ServerRepository repo = new ServerRepository(this);
-            List<VlessServer> all = repo.getAllServersSync();
-            int total = all.size();
-            int working = (int) all.stream().filter(s -> s.trafficOk).count();
+            int total = repo.getCount();
+            int working = repo.getWorkingCount();
             int failed = total - working;
 
             mainHandler.post(() -> {

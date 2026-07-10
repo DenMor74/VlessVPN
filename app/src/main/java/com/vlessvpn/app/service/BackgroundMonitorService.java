@@ -217,10 +217,16 @@ public class BackgroundMonitorService extends Service {
             for (com.vlessvpn.app.model.ConfigUrlItem item : urlItems) {
                 if (item.isEnabled()) activeCount++;
             }
+
+            if (activeCount > 0) {
+                FileLogger.i(W, "Очистка базы (кроме избранных) перед загрузкой через Yandex...");
+                repo.deleteNonFavoritesSync();
+            }
             FileLogger.i(W, "Всего URL: " + urlItems.size() + ", Активных (с галочкой): " + activeCount);
 
             if (activeCount > 0) {
-                FileLogger.i(W, "Начинаем загрузку без удаления существующих (чтобы сохранить избранное)...");
+                FileLogger.i(W, "Очистка базы (кроме избранных) перед загрузкой...");
+                repo.deleteNonFavoritesSync();
             }
 
             int totalDownloaded = 0;
@@ -304,7 +310,7 @@ public class BackgroundMonitorService extends Service {
                 StatusBus.done(ctx, "⚠️ Нет новых серверов");
             }
 
-            int realInDB = repo.getAllServersSync().size();
+            int realInDB = repo.getCount();
             FileLogger.i(W, "✅ Серверов после дедупликации: " + realInDB
                     + " (из " + totalDownloaded + " скачанных — дубли: " + (totalDownloaded - realInDB) + ")");
 
@@ -373,7 +379,7 @@ public class BackgroundMonitorService extends Service {
             // этапа 2). Теперь время удержания CPU растёт вместе с числом серверов
             // (с потолком в 20 минут, чтобы не держать WakeLock бесконечно, если
             // где-то в конвейере всё же произошло зависание).
-            int total = repo.getAllServersSync().size();
+            int total = repo.getCount();
             long wakeMs = Math.min(20 * 60 * 1000L, Math.max(5 * 60 * 1000L, total * 150L));
 
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
@@ -482,7 +488,10 @@ public class BackgroundMonitorService extends Service {
                 // ЭТАП 1: МАССОВЫЙ ПАРАЛЛЕЛЬНЫЙ ПИНГ
                 // ====================================================================
                 final List<VlessServer> tcpSurvived = new java.util.ArrayList<>();
-                int poolSize = Math.min(150, total);
+                // ← ОГРАНИЧЕНИЕ: Снижаем число потоков со 150 до 64.
+                // 150 потоков потребляют слишком много памяти (стеки + дескрипторы сокетов),
+                // что приводило к OutOfMemoryError на устройствах с лимитом кучи 256МБ.
+                int poolSize = Math.min(64, total);
                 ExecutorService pingPool = Executors.newFixedThreadPool(poolSize);
                 CountDownLatch pingLatch = new CountDownLatch(total);
                 final Network finalCellularNet = cellularNet;
@@ -509,7 +518,7 @@ public class BackgroundMonitorService extends Service {
                             if (tcp.trafficOk) {
                                 server.tcpPingMs = (int) tcp.pingMs;
                                 server.lastTestedAt = System.currentTimeMillis();
-                                repo.updateServerSync(server);
+                                repo.updateTestResultsSync(server);
 
                                 synchronized (tcpSurvived) { tcpSurvived.add(server); }
                                 if (phase1Active.get()) StatusBus.postServer(ctx, server.id, server.host, "pinging", tcp.pingMs, false, "TCP OK");
@@ -518,7 +527,7 @@ public class BackgroundMonitorService extends Service {
                                 server.pingMs = -1;
                                 server.tcpPingMs = (int) tcp.pingMs;
                                 server.lastTestedAt = System.currentTimeMillis();
-                                repo.updateServerSync(server);
+                                repo.updateTestResultsSync(server);
                                 if (phase1Active.get()) StatusBus.postServer(ctx, server.id, server.host, "fail", -1, false, "✗ TCP");
                             }
 
@@ -591,8 +600,11 @@ public class BackgroundMonitorService extends Service {
                             if (coreStarted) {
                                 waitForProxyToStart(basePort, 2000);
 
-                                ExecutorService httpPool = Executors.newFixedThreadPool(40);
-                                ExecutorService fastUrlPool = Executors.newCachedThreadPool();
+                                // ← ОГРАНИЧЕНИЕ: Снижаем число HTTP потоков с 40 до 20.
+                                // Вместе с fastUrlPool это создавало до 160+ потоков одновременно.
+                                ExecutorService httpPool = Executors.newFixedThreadPool(20);
+                                // ← ИЗМЕНЕНО: Ограниченный пул для URL-тестов внутри каждого серверного теста.
+                                ExecutorService fastUrlPool = Executors.newFixedThreadPool(60);
                                 CountDownLatch httpLatch = new CountDownLatch(currentBatch.size());
 
                                 for (int i = 0; i < currentBatch.size(); i++) {
@@ -623,7 +635,7 @@ public class BackgroundMonitorService extends Service {
                                                 server.pingMs = -1;
                                                 if (phase2Active.get()) StatusBus.postServer(ctx, server.id, server.host, "fail", server.tcpPingMs, false, "✗ DPI Блок");
                                             }
-                                            repo.updateServerSync(server);
+                                            repo.updateTestResultsSync(server);
 
                                             if (phase2Active.get()) {
                                                 int currHttp = httpDone.incrementAndGet();
@@ -680,7 +692,7 @@ public class BackgroundMonitorService extends Service {
 
             repo.markScanned();
 
-            int realTotal   = repo.getAllServersSync().size();
+            int realTotal   = repo.getCount();
             int realWorking = repo.getWorkingCount();
 
             long now = System.currentTimeMillis();
@@ -853,27 +865,46 @@ public class BackgroundMonitorService extends Service {
 
             StatusBus.post(ctx, "📥 Скачиваем список через белый сервер...", true);
 
-            String[] configUrls = repo.getConfigUrls();
+            List<com.vlessvpn.app.model.ConfigUrlItem> urlItems = repo.getConfigUrlItems();
+
+            int activeCount = 0;
+            for (com.vlessvpn.app.model.ConfigUrlItem item : urlItems) {
+                if (item.isEnabled()) activeCount++;
+            }
+
+            if (activeCount > 0) {
+                FileLogger.i(W, "Очистка базы (кроме избранных) перед загрузкой через Yandex...");
+                repo.deleteNonFavoritesSync();
+            }
 
             int totalDownloaded = 0;
-            for (int i = 0; i < configUrls.length; i++) {
-                String url = configUrls[i];
+            int processedActive = 0;
+
+            for (int i = 0; i < urlItems.size(); i++) {
+                com.vlessvpn.app.model.ConfigUrlItem item = urlItems.get(i);
+                if (!item.isEnabled()) continue;
+
+                String url = item.getUrl();
                 if (url == null || url.trim().isEmpty()) continue;
 
+                url = url.trim();
+                processedActive++;
                 String wrappedUrl = wrapWithYandexTranslate(url);
 
-                StatusBus.post(ctx, "📥 Загрузка " + (i + 1) + "/" + configUrls.length, true);
+                StatusBus.post(ctx, "📥 Загрузка " + processedActive + "/" + activeCount, true);
 
                 try {
-                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, wrappedUrl, url.trim());
+                    List<VlessServer> fresh = new ConfigDownloader().download(ctx, wrappedUrl, url);
                     if (!fresh.isEmpty()) {
-                        repo.deleteBySourceUrlSync(url.trim());
-                        repo.insertAll(fresh);
+                        // Используем обновление вместо удаления для сохранения избранного
+                        for (VlessServer s : fresh) {
+                            repo.updateServerSync(s);
+                        }
                         totalDownloaded += fresh.size();
-                        FileLogger.i(W, "Загружено " + fresh.size() + " серверов с " + url);
+                        FileLogger.i(W, "Загружено через Yandex " + fresh.size() + " серверов с " + url);
                     }
                 } catch (Exception e) {
-                    FileLogger.w(W, "Ошибка загрузки " + url + ": " + e.getMessage());
+                    FileLogger.w(W, "Ошибка загрузки через Yandex " + url + ": " + e.getMessage());
                 }
             }
 

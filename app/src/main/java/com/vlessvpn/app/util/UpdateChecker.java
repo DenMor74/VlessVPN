@@ -36,12 +36,12 @@ public class UpdateChecker {
     // ПЕРЕД установкой — это стоит добавить отдельным шагом (например,
     // публиковать sha256 в output-metadata.json и сверять его после закачки).
     // ════════════════════════════════════════════════════════════════
-    private static final String VERSION_URL = "https://www.orel.ru/~moroz/Denmor_vpn/output-metadata.json";
+    private static final String VERSION_URL = "http://www.orel.ru/~moroz/Denmor_vpn/output-metadata.json";
 
     // ════════════════════════════════════════════════════════════════
     // ← Базовый URL для скачивания APK (папка где лежат APK файлы)
     // ════════════════════════════════════════════════════════════════
-    private static final String APK_BASE_URL = "https://www.orel.ru/~moroz/Denmor_vpn/";
+    private static final String APK_BASE_URL = "http://www.orel.ru/~moroz/Denmor_vpn/";
 
     private final Context context;
     private final OnUpdateCheckListener listener;

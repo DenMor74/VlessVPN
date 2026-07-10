@@ -36,6 +36,9 @@ public class AodOverlayService extends AccessibilityService {
     public static final String EXTRA_IP           = "ip";
     public static final String EXTRA_SERVERS_STAT = "servers_stat";
     public static final String EXTRA_STATUS_MSG   = "status_msg";
+    public static final String ACTION_SERVICE_STATUS = "com.vlessvpn.app.AOD_SERVICE_STATUS";
+    public static final String EXTRA_TG_OK       = "tg_ok";
+    public static final String EXTRA_YT_OK       = "yt_ok";
 
     public static boolean isRunning = false;
 
@@ -49,6 +52,8 @@ public class AodOverlayService extends AccessibilityService {
     private static final int  COLOR_IP          = 0xFF88EE88;
     private static final int  COLOR_SERVERS     = 0xFFAAAAAA;
     private static final int  COLOR_STATUS      = 0xFF6699BB;
+    private static final int  COLOR_SERVICE_OK  = 0xFF4CAF50;
+    private static final int  COLOR_SERVICE_FAIL= 0xFF888888;
     private static final int  COLOR_BG          = 0xFF000000;
     private static final int  COLOR_BORDER      = 0x55FFFFFF;
     private static final int  PADDING_DP        = 20;
@@ -61,6 +66,9 @@ public class AodOverlayService extends AccessibilityService {
     private TextView      tvIp;
     private TextView      tvServers;
     private TextView      tvStatus;
+    private LinearLayout  layoutServices;
+    private TextView      tvTg;
+    private TextView      tvYt;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -72,6 +80,8 @@ public class AodOverlayService extends AccessibilityService {
     private String lastIp     = null;
     private String lastStat   = null;
     private String lastStatus = null;
+    private boolean lastTgOk  = false;
+    private boolean lastYtOk  = false;
     private String shownServer = "", shownIp = "", shownStat = "", shownStatus = "";
 
     private int burnStep = 0;
@@ -150,6 +160,14 @@ public class AodOverlayService extends AccessibilityService {
         }
     };
 
+    private final BroadcastReceiver serviceReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context ctx, Intent intent) {
+            lastTgOk = intent.getBooleanExtra(EXTRA_TG_OK, false);
+            lastYtOk = intent.getBooleanExtra(EXTRA_YT_OK, false);
+            if (inAod) updateIfChanged();
+        }
+    };
+
     private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context ctx, Intent intent) {
             if (Intent.ACTION_USER_PRESENT.equals(intent.getAction())) {
@@ -221,6 +239,12 @@ public class AodOverlayService extends AccessibilityService {
         else
             registerReceiver(screenReceiver, screenFilter);
 
+        IntentFilter serviceFilter = new IntentFilter(ACTION_SERVICE_STATUS);
+        if (android.os.Build.VERSION.SDK_INT >= 33)
+            registerReceiver(serviceReceiver, serviceFilter, Context.RECEIVER_NOT_EXPORTED);
+        else
+            registerReceiver(serviceReceiver, serviceFilter);
+
         handler.postDelayed(burnRunnable, 60_000L);
     }
 
@@ -281,6 +305,7 @@ public class AodOverlayService extends AccessibilityService {
         if (!vpnActive) {
             if (tvVpn    != null) tvVpn.setText("🔴 VPN");
             if (tvIp     != null) tvIp.setVisibility(View.GONE);
+            if (layoutServices != null) layoutServices.setVisibility(View.GONE);
             if (tvServers != null) {
                 tvServers.setText(!stat.isEmpty() ? "Серверов: " + stat : "");
                 tvServers.setVisibility(!stat.isEmpty() ? View.VISIBLE : View.GONE);
@@ -298,6 +323,12 @@ public class AodOverlayService extends AccessibilityService {
             tvServers.setVisibility(!stat.isEmpty() ? View.VISIBLE : View.GONE); }
         if (tvStatus  != null) { tvStatus.setText(status);
             tvStatus.setVisibility(!status.isEmpty() ? View.VISIBLE : View.GONE); }
+
+        if (layoutServices != null) {
+            layoutServices.setVisibility(View.VISIBLE);
+            if (tvTg != null) tvTg.setTextColor(lastTgOk ? COLOR_SERVICE_OK : COLOR_SERVICE_FAIL);
+            if (tvYt != null) tvYt.setTextColor(lastYtOk ? COLOR_SERVICE_OK : COLOR_SERVICE_FAIL);
+        }
     }
 
     private WindowManager.LayoutParams makeParams() {
@@ -335,7 +366,8 @@ public class AodOverlayService extends AccessibilityService {
     private void buildViews() {
         overlay = new LinearLayout(this);
         overlay.setOrientation(LinearLayout.VERTICAL);
-        overlay.setPadding(dp(PADDING_DP), dp(PADDING_DP-4), dp(PADDING_DP), dp(PADDING_DP-4));
+        overlay.setPadding(dp(PADDING_DP), dp(PADDING_DP - 4), dp(PADDING_DP), dp(PADDING_DP - 4));
+        overlay.setMinimumWidth(dp(220)); // Добавляем минимальную ширину, чтобы оверлей не "схлопывался"
 
         android.graphics.drawable.GradientDrawable bg =
                 new android.graphics.drawable.GradientDrawable();
@@ -349,9 +381,29 @@ public class AodOverlayService extends AccessibilityService {
         tvServers = makeText(TEXT_SERVERS_SP, false, COLOR_SERVERS);
         tvStatus  = makeText(TEXT_STATUS_SP,  false, COLOR_STATUS);
 
-        for (TextView tv : new TextView[]{tvVpn, tvIp, tvServers, tvStatus}) {
-            tv.setMaxWidth(dp(380));
-            overlay.addView(tv);
+        layoutServices = new LinearLayout(this);
+        layoutServices.setOrientation(LinearLayout.HORIZONTAL);
+        layoutServices.setGravity(Gravity.START);
+        layoutServices.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
+        layoutServices.setPadding(0, dp(2), 0, dp(2));
+
+        tvTg = makeText(TEXT_STATUS_SP, true, COLOR_SERVICE_FAIL);
+        tvTg.setText("TG ");
+        tvYt = makeText(TEXT_STATUS_SP, true, COLOR_SERVICE_FAIL);
+        tvYt.setText("YT");
+
+        layoutServices.addView(tvTg);
+        layoutServices.addView(tvYt);
+
+        // Убеждаемся, что все элементы занимают всю ширину родителя для корректного отображения
+        for (View v : new View[]{tvVpn, tvIp, layoutServices, tvServers, tvStatus}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            v.setLayoutParams(lp);
+            
+            if (v instanceof TextView) ((TextView)v).setMaxWidth(dp(MAX_WIDTH_DP));
+            overlay.addView(v);
         }
     }
 
@@ -383,6 +435,14 @@ public class AodOverlayService extends AccessibilityService {
         android.util.Log.d("AodOverlay", "sendStatusMsg: vpnRunning=" + vpnRunning + " msg=" + msg);
     }
 
+    public static void sendServiceStatus(Context ctx, boolean tgOk, boolean ytOk) {
+        Intent intent = new Intent(ACTION_SERVICE_STATUS);
+        intent.putExtra(EXTRA_TG_OK, tgOk);
+        intent.putExtra(EXTRA_YT_OK, ytOk);
+        intent.setPackage(ctx.getPackageName());
+        ctx.sendBroadcast(intent);
+    }
+
     private TextView makeText(int sp, boolean bold, int color) {
         TextView tv = new TextView(this);
         tv.setTextSize(sp);
@@ -406,6 +466,7 @@ public class AodOverlayService extends AccessibilityService {
         handler.removeCallbacks(burnRunnable);
         try { unregisterReceiver(vpnReceiver);  } catch (Exception ignored) {}
         try { unregisterReceiver(screenReceiver);} catch (Exception ignored) {}
+        try { unregisterReceiver(serviceReceiver);} catch (Exception ignored) {}
         removeOverlayNow();
         super.onDestroy();
     }

@@ -750,6 +750,7 @@ private void doDeepCheckInternal() {
     mainHandler.post(() -> {
         StatusBus.post(this, "🔍 Проверка доступности сервисов...", true);
         StatusBus.postServiceStatus(this, false, false); // Сбрасываем иконки в серый
+        AodOverlayService.sendServiceStatus(this, false, false);
     });
 
     // Атомарные флаги для статуса сервисов
@@ -761,6 +762,7 @@ private void doDeepCheckInternal() {
         boolean ok = checkUrlStatusThroughProxy("https://t.me/favicon.ico", 5000);
         tgOk.set(ok);
         StatusBus.postPingResult(getApplicationContext(), "tg", ok);
+        AodOverlayService.sendServiceStatus(this, tgOk.get(), ytOk.get());
         FileLogger.i(TAG, "TG check done: " + ok);
         updateConnectedMessage(tgOk.get(), ytOk.get());
     });
@@ -770,6 +772,7 @@ private void doDeepCheckInternal() {
         boolean ok = checkUrlStatusThroughProxy("https://www.youtube.com/favicon.ico", 5000);
         ytOk.set(ok);
         StatusBus.postPingResult(getApplicationContext(), "yt", ok);
+        AodOverlayService.sendServiceStatus(this, tgOk.get(), ytOk.get());
         FileLogger.i(TAG, "YT check done: " + ok);
         updateConnectedMessage(tgOk.get(), ytOk.get());
     });

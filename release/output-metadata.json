@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "com.vlessvpn.app",
+  "variantName": "release",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 101,
+      "versionName": "4.0.1",
+      "outputFile": "DenMor_VPN_4.0.1_release_10-07-2026.apk"
+    }
+  ],
+  "elementType": "File"
+}

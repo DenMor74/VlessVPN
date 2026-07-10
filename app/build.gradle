@@ -50,8 +50,8 @@ android {
         applicationId "com.vlessvpn.app"
         minSdk 26          // Android 8.0 — минимум для нормальной работы VPN API
         targetSdk 34
-        versionCode 101
-        versionName "4.0.1"
+        versionCode 112
+        versionName "4.0.3"
 
         // Поддержка нативных библиотек (libv2ray собран для этих архитектур)
         ndk {

@@ -56,6 +56,9 @@ public class SettingsActivity extends AppCompatActivity {
     private SeekBar   seekScanInterval;
     private TextView  tvScanIntervalValue;
 
+    private SeekBar seekMaxServers;
+    private TextView tvMaxServersValue;
+
     private void updateAodStatus() {
         android.view.accessibility.AccessibilityManager am =
             (android.view.accessibility.AccessibilityManager)
@@ -168,12 +171,25 @@ public class SettingsActivity extends AppCompatActivity {
         seekScanInterval = findViewById(R.id.seek_scan_interval);
         tvScanIntervalValue = findViewById(R.id.tv_scan_interval_value);
 
+        seekMaxServers = findViewById(R.id.seek_max_servers);
+        tvMaxServersValue = findViewById(R.id.tv_max_servers_value);
+
+        if (seekMaxServers != null) {
+            seekMaxServers.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    int count = (progress + 1) * 50;
+                    tvMaxServersValue.setText("Лимит ответивших серверов: " + count);
+                }
+            });
+        }
+
         if (seekScanInterval != null && tvScanIntervalValue != null) {
-            seekScanInterval.setMax(5);  // 0..143 → 10..1440 минут (шаг 10 мин)
+            seekScanInterval.setMax(11);  // 0..143 → 10..1440 минут (шаг 10 мин)
             seekScanInterval.setOnSeekBarChangeListener(new SimpleSeekBarListener() {
                 @Override
                 public void onProgressChanged(SeekBar s, int p, boolean u) {
-                    int minutes = (p + 1) * 10;  // 10, 20, 30... 1440
+                    int minutes = (p + 1) * 60; // 10, 20, 30... 1440
                     tvScanIntervalValue.setText("Проверять лист: каждые " + formatInterval(minutes));
                 }
             });
@@ -264,8 +280,14 @@ public class SettingsActivity extends AppCompatActivity {
         // ════════════════════════════════════════════════════════════════
         if (seekScanInterval != null && tvScanIntervalValue != null) {
             int scanMinutes = repository.getScanIntervalMinutes();
-            seekScanInterval.setProgress((scanMinutes / 10) - 1);
+            seekScanInterval.setProgress((scanMinutes / 60) - 1);
             tvScanIntervalValue.setText("Проверять лист: каждые " + formatInterval(scanMinutes));
+        }
+
+        if (seekMaxServers != null && tvMaxServersValue != null) {
+            int maxServers = repository.getMaxServersPerScan();
+            seekMaxServers.setProgress((maxServers / 50) - 1);
+            tvMaxServersValue.setText("Лимит ответивших серверов: " + maxServers);
         }
         // ← НОВОЕ: Ночной режим
         switchDisableNightCheck.setChecked(repository.isDisableNightCheck());
@@ -313,8 +335,13 @@ public class SettingsActivity extends AppCompatActivity {
         // ════════════════════════════════════════════════════════════════
         int newScanInterval = 30;  // по умолчанию
         if (seekScanInterval != null) {
-            newScanInterval = (seekScanInterval.getProgress() + 1) * 10;
+            newScanInterval = (seekScanInterval.getProgress() + 1) * 60;
             repository.saveScanIntervalMinutes(newScanInterval);
+        }
+
+        if (seekMaxServers != null) {
+            int maxServers = (seekMaxServers.getProgress() + 1) * 50;
+            repository.saveMaxServersPerScan(maxServers);
         }
         // ← НОВОЕ: Сохранить ночной режим
         repository.saveDisableNightCheck(switchDisableNightCheck.isChecked());

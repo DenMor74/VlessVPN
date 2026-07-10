@@ -72,11 +72,10 @@ public class BackgroundMonitorService extends Service {
             "http://www.msftconnecttest.com/connecttest.txt"
     };*/
     private static  String[] testUrls = {
-                "http://cp.cloudflare.com/generate_204",
-                "https://detectportal.firefox.com/success.txt",
-                "http://www.msftconnecttest.com/connecttest.txt"
+                "https://www.youtube.com/generate_204",
+                "http://httpbin.org/status/204"
         };
-    // https://captive.apple.com/hotspot-detect.html
+    // "https://wikipedia.org",
     // ── Планировщики ────────────────────────────────────────────────────────
 
     public static void scheduleDownload(Context ctx, int intervalHours) {
@@ -128,6 +127,17 @@ public class BackgroundMonitorService extends Service {
 
         WorkManager.getInstance(ctx)
                 .beginUniqueWork(WORK_SCAN + "_manual", ExistingWorkPolicy.REPLACE, downloadReq)
+                .then(scanReq)
+                .enqueue();
+    }
+
+    /** ← НОВОЕ: скачать БЕЛЫЙ список и запустить сканирование */
+    public static void runWhitelistDownloadThenScanNow(Context ctx) {
+        OneTimeWorkRequest downloadReq = new OneTimeWorkRequest.Builder(WhitelistDownloadWorker.class).build();
+        OneTimeWorkRequest scanReq     = new OneTimeWorkRequest.Builder(ScanWorker.class).build();
+
+        WorkManager.getInstance(ctx)
+                .beginUniqueWork(WORK_SCAN + "_recovery", ExistingWorkPolicy.REPLACE, downloadReq)
                 .then(scanReq)
                 .enqueue();
     }
@@ -434,9 +444,12 @@ public class BackgroundMonitorService extends Service {
             }
 
             int maxPerScan = repo.getMaxServersPerScan();
-            boolean limited = totalInDb > maxPerScan;
+            // ← УВЕЛИЧЕНО: Берем больше серверов из базы (до 2000), чтобы найти достаточно работающих
+            // до достижения лимита maxPerScan.
+            int fetchLimit = Math.max(2000, maxPerScan * 2);
+            boolean limited = totalInDb > fetchLimit;
             List<VlessServer> allServers = limited
-                    ? repo.getServersForTestingSync(maxPerScan)
+                    ? repo.getServersForTestingSync(fetchLimit)
                     : repo.getAllServersSync();
 
             if (allServers.isEmpty()) {
@@ -544,7 +557,14 @@ public class BackgroundMonitorService extends Service {
                                 server.lastTestedAt = System.currentTimeMillis();
                                 repo.updateTestResultsSync(server);
 
-                                synchronized (tcpSurvived) { tcpSurvived.add(server); }
+                                synchronized (tcpSurvived) {
+                                    tcpSurvived.add(server);
+                                    // ← НОВОЕ: Лимит применить во время пинга
+                                    if (tcpSurvived.size() >= maxPerScan && phase1Active.get()) {
+                                        FileLogger.i(W, "Достигнут лимит ответивших серверов (" + maxPerScan + "). Остановка пинга.");
+                                        phase1Active.set(false);
+                                    }
+                                }
                                 if (phase1Active.get()) StatusBus.postServer(ctx, server.id, server.host, "pinging", tcp.pingMs, false, "TCP OK");
                             } else {
                                 server.trafficOk = false;

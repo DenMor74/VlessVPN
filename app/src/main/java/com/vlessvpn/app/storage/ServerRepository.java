@@ -59,7 +59,7 @@ public class ServerRepository {
     public  static final String PREF_REMOTE_LOG_URL     = "remote_log_url";
 
     public static final int DEFAULT_TOP_COUNT    = 30;
-    public static final int DEFAULT_SCAN_INTERVAL = 30; // минут
+    public static final int DEFAULT_SCAN_INTERVAL = 180; // минут
 
     // ← НОВОЕ: лимит числа серверов, которые реально пингуются/проверяются за один
     // проход сканирования. Списки из публичных подписок (по умолчанию их 6 в
@@ -79,7 +79,6 @@ public class ServerRepository {
 
     public static final String DEFAULT_CONFIG_URL =
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt\r\n" +
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt\r\n" +
         "https://raw.githubusercontent.com/kort0881/vpn-checker-backend/main/checked/RU_Best/ru_white_part1.txt\r\n" +
         "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt\r\n" +
         "https://gbr.mydan.online/configs\r\n" +

@@ -118,7 +118,7 @@ public class VlessServer {
             // UUID
             int atIdx = body.indexOf('@');
             if (atIdx < 0) return null;
-            s.uuid = body.substring(0, atIdx);
+            s.uuid = body.substring(0, atIdx).trim();
 
             // ════════════════════════════════════════════════════════════════
             // ← ИЗМЕНЕНО: Более гибкая проверка ID (некоторые серверы используют ники)
@@ -165,15 +165,17 @@ public class VlessServer {
             if (qIdx > 0) {
                 Map<String, String> params = parseQueryParams(body.substring(qIdx + 1));
 
-                s.security     = params.getOrDefault("security", "none");
-                s.networkType  = params.getOrDefault("type", "tcp");
-                s.sni          = params.getOrDefault("sni", s.host);
-                s.pbk          = params.getOrDefault("pbk", "");
-                s.fp           = params.getOrDefault("fp", "chrome");
-                s.flow         = params.getOrDefault("flow", "");
-                s.path         = params.getOrDefault("path", "/");
-                s.sid          = params.getOrDefault("sid", "");
-                s.host2        = params.getOrDefault("host", "");
+                s.security     = params.getOrDefault("security", "none").trim();
+                s.networkType  = params.getOrDefault("type", "tcp").trim();
+                s.sni          = params.getOrDefault("sni", s.host).trim();
+                s.pbk          = params.getOrDefault("pbk", "").trim();
+                if (s.pbk.contains(" ")) s.pbk = s.pbk.replace(" ", "+");
+
+                s.fp           = params.getOrDefault("fp", "chrome").trim();
+                s.flow         = params.getOrDefault("flow", "").trim();
+                s.path         = params.getOrDefault("path", "/").trim();
+                s.sid          = params.getOrDefault("sid", "").trim();
+                s.host2        = params.getOrDefault("host", "").trim();
 
                 // ════════════════════════════════════════════════════════════════
                 // ← НОВОЕ: Поддержка xhttp параметров
@@ -235,17 +237,17 @@ public class VlessServer {
 
             VlessServer s = new VlessServer();
             s.protocol = "vmess";
-            s.uuid = obj.getString("id");
-            s.host = obj.getString("add");
+            s.uuid = obj.getString("id").trim();
+            s.host = obj.getString("add").trim();
             s.port = obj.getInt("port");
-            s.remark = obj.optString("ps", s.host + ":" + s.port);
-            s.networkType = obj.optString("net", "tcp");
-            s.security = obj.optString("tls", "none");
-            s.sni = obj.optString("sni", s.host);
-            s.host2 = obj.optString("host", "");
-            s.path = obj.optString("path", "/");
-            s.fp = obj.optString("fp", "chrome");
-            s.alpn = obj.optString("alpn", "");
+            s.remark = obj.optString("ps", s.host + ":" + s.port).trim();
+            s.networkType = obj.optString("net", "tcp").trim();
+            s.security = obj.optString("tls", "none").trim();
+            s.sni = obj.optString("sni", s.host).trim();
+            s.host2 = obj.optString("host", "").trim();
+            s.path = obj.optString("path", "/").trim();
+            s.fp = obj.optString("fp", "chrome").trim();
+            s.alpn = obj.optString("alpn", "").trim();
             s.id = s.uuid + "@" + s.host + ":" + s.port;
             s.rawUri = uri;
 
@@ -278,7 +280,7 @@ public class VlessServer {
             // PASSWORD@HOST:PORT
             int atIdx = body.indexOf('@');
             if (atIdx < 0) return null;
-            s.uuid = body.substring(0, atIdx);  // В Trojan это password
+            s.uuid = body.substring(0, atIdx).trim();  // В Trojan это password
             body = body.substring(atIdx + 1);
 
             // HOST:PORT
@@ -306,10 +308,10 @@ public class VlessServer {
 
             if (qIdx > 0) {
                 params = parseQueryParams(body.substring(qIdx + 1));
-                s.sni = params.getOrDefault("sni", s.host);
-                s.alpn = params.getOrDefault("alpn", "");
-                s.fp = params.getOrDefault("fp", "chrome");
-                s.networkType = params.getOrDefault("type", "tcp");
+                s.sni = params.getOrDefault("sni", s.host).trim();
+                s.alpn = params.getOrDefault("alpn", "").trim();
+                s.fp = params.getOrDefault("fp", "chrome").trim();
+                s.networkType = params.getOrDefault("type", "tcp").trim();
             }
 
             s.security = "tls";  // Trojan всегда использует TLS

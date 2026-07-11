@@ -111,6 +111,8 @@ public class V2RayManager {
             initEnvOnce(context);
             String cfg = V2RayConfigBuilder.build(server, socksPort, -1);
             FileLogger.i(TAG, "start: " + server.host);
+            // DEBUG: Логируем конфиг целиком, чтобы понять причину invalid password
+            FileLogger.d(TAG, "CONFIG JSON: " + cfg);
             coreController = libv2ray.Libv2ray.newCoreController(new VpnCallback(server));
             coreController.startLoop(cfg, 0);
 
@@ -299,6 +301,8 @@ public class V2RayManager {
                 }
             });
 
+            // DEBUG: Логируем мультиплекс конфиг
+            FileLogger.d(TAG, "SILENT CONFIG JSON: " + multiplexConfigJson);
             silentCoreController.startLoop(multiplexConfigJson, 0);
 
             int retries = 0;

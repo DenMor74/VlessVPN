@@ -21,6 +21,25 @@ public class V2RayConfigBuilder {
      */
     public static String build(VlessServer server, int socksPort, int tunFd) {
         sanitizeServer(server);
+
+        // МАКСИМАЛЬНО СТРОГАЯ ПРОВЕРКА ПО ЗАПРОСУ ПОЛЬЗОВАТЕЛЯ:
+        // Если Reality ключ или UUID содержат спецсимволы, на которых падает ядро, мы отменяем сборку.
+        if ("reality".equalsIgnoreCase(server.security)) {
+            String key = server.pbk != null ? server.pbk : "";
+            if (key.length() < 43 || key.contains("+") || key.contains("/") || key.contains("=")) {
+                FileLogger.e(TAG, "Отмена сборки: Несовместимый pbk (спецсимволы или длина) - " + key);
+                return null;
+            }
+        }
+        
+        // Проверка UUID для VLESS
+        if ("vless".equalsIgnoreCase(server.protocol)) {
+            if (server.uuid != null && (server.uuid.contains("+") || server.uuid.contains("/") || server.uuid.contains("=") || server.uuid.contains(" "))) {
+                FileLogger.e(TAG, "Отмена сборки: Несовместимый UUID - " + server.uuid);
+                return null;
+            }
+        }
+
         try {
             JSONObject config = new JSONObject();
 
@@ -86,10 +105,11 @@ public class V2RayConfigBuilder {
             dnsOut.put("protocol", "dns");
             outbounds.put(dnsOut);
 
-            // 2. VLESS proxy
+            // 2. Proxy outbound
+            String protocol = (server.protocol != null) ? server.protocol.toLowerCase() : "vless";
             JSONObject vlessOut = new JSONObject();
             vlessOut.put("tag", "proxy");
-            vlessOut.put("protocol", "vless");
+            vlessOut.put("protocol", protocol);
             JSONObject outSettings = new JSONObject();
             JSONArray vnext = new JSONArray();
             JSONObject serverConf = new JSONObject();
@@ -97,20 +117,38 @@ public class V2RayConfigBuilder {
             serverConf.put("port", server.port);
             JSONArray users = new JSONArray();
             JSONObject user = new JSONObject();
-            user.put("id", server.uuid);
-            user.put("encryption", "none");
-            if (server.security != null && server.security.equalsIgnoreCase("reality")) {
+
+            boolean isReality = "reality".equalsIgnoreCase(server.security);
+
+            if (protocol.equals("trojan")) {
+                user.put("password", server.uuid);
+            } else {
+                user.put("id", server.uuid);
+                user.put("encryption", "none");
+            }
+
+            if (isReality) {
                 user.put("flow", "xtls-rprx-vision");
+                // ГАРАНТИРУЕМ, что поля "password" нет для VLESS/Reality
+                user.remove("password");
             } else if (server.flow != null && !server.flow.isEmpty()) {
                 user.put("flow", server.flow);
             }
-            users.put(user);
-            serverConf.put("users", users);
-            vnext.put(serverConf);
-            outSettings.put("vnext", vnext);
-            vlessOut.put("settings", outSettings);
-            vlessOut.put("streamSettings", buildStreamSettings(server));
-            outbounds.put(vlessOut);
+                users.put(user);
+                serverConf.put("users", users);
+
+                if (protocol.equals("trojan")) {
+                    // Trojan outbound structure uses "servers" array instead of "vnext"
+                    JSONArray serversArr = new JSONArray();
+                    serversArr.put(serverConf);
+                    outSettings.put("servers", serversArr);
+                } else {
+                    vnext.put(serverConf);
+                    outSettings.put("vnext", vnext);
+                }
+                vlessOut.put("settings", outSettings);
+                vlessOut.put("streamSettings", buildStreamSettings(server));
+                outbounds.put(vlessOut);
 
             // 3. Direct
             JSONObject freedom = new JSONObject();
@@ -166,7 +204,9 @@ public class V2RayConfigBuilder {
             routing.put("rules", rules);
             config.put("routing", routing);
 
-            return config.toString(2);
+            // Используем toString() без аргументов для компактности, 
+            // но убеждаемся, что спецсимволы не ломают парсер.
+            return config.toString();
 
         } catch (JSONException e) {
             FileLogger.e(TAG, "Ошибка генерации конфига: " + e.getMessage(), e);
@@ -189,17 +229,27 @@ public class V2RayConfigBuilder {
         String fp = (server.fp != null && !server.fp.isEmpty()) ? server.fp : "chrome";
 
         JSONArray alpn = new JSONArray();
-        alpn.put("h2");
-        alpn.put("http/1.1");
+        if (server.alpn != null && !server.alpn.isEmpty()) {
+            for (String a : server.alpn.split(",")) {
+                if (!a.trim().isEmpty()) alpn.put(a.trim());
+            }
+        } else {
+            alpn.put("h2");
+            alpn.put("http/1.1");
+        }
 
         if (security.equals("reality")) {
             stream.put("security", "reality");
             JSONObject realitySettings = new JSONObject();
             realitySettings.put("serverName", server.sni != null && !server.sni.isEmpty() ? server.sni : server.host);
             realitySettings.put("fingerprint", fp);
+            
+            // ВАЖНО: Используем ключ как есть после sanitizeServer.
+            // Он уже проверен на отсутствие спецсимволов.
             realitySettings.put("publicKey", server.pbk != null ? server.pbk : "");
+            
             realitySettings.put("shortId", server.sid != null ? server.sid : "");
-            realitySettings.put("spiderX", server.getSpiderX());
+            realitySettings.put("spiderX", server.getSpiderX() != null ? server.getSpiderX() : "/");
             realitySettings.put("alpn", alpn);
             stream.put("realitySettings", realitySettings);
 
@@ -228,6 +278,20 @@ public class V2RayConfigBuilder {
                 if (server.host2 != null && !server.host2.isEmpty()) xhttpSettings.put("host", server.host2);
                 String xmode = (server.mode != null && !server.mode.isEmpty()) ? server.mode : "auto";
                 xhttpSettings.put("mode", xmode);
+                
+                // Исправление XHTTP extra: ядро ожидает объект, а не строку
+                if (server.extra != null && !server.extra.isEmpty()) {
+                    try {
+                        // Пытаемся распарсить строку extra как JSON объект
+                        JSONObject extraObj = new JSONObject(server.extra);
+                        xhttpSettings.put("extra", extraObj);
+                    } catch (Exception e) {
+                        // Если это не JSON (например, "null" или просто текст),
+                        // лучше не добавлять вообще, чтобы не сломать конфиг
+                        FileLogger.w(TAG, "Не удалось распарсить extra как JSON для " + server.host);
+                    }
+                }
+
                 stream.put("xhttpSettings", xhttpSettings);
                 stream.put("network", "xhttp");
                 break;
@@ -308,6 +372,7 @@ public class V2RayConfigBuilder {
                 int localPort = basePort + i;
                 String inTag = "in-" + i;
                 String outTag = "proxy-" + i;
+                String protocol = (server.protocol != null) ? server.protocol.toLowerCase() : "vless";
 
                 // Все твои оригинальные фильтры (ничего не удалено)
                 if (server.sid != null && !server.sid.isEmpty()) {
@@ -319,12 +384,16 @@ public class V2RayConfigBuilder {
                 }
 
 
-                if (server.security != null && server.security.equals("reality")) {
-                    if (server.pbk == null || server.pbk.isEmpty()) {
-                        FileLogger.w(TAG, "Пропуск [" + server.remark + "] — нет publicKey (pbk) | URI: " + server.rawUri);
+                if (server.security != null && server.security.equalsIgnoreCase("reality")) {
+                    String key = server.pbk != null ? server.pbk : "";
+                    
+                    // МАКСИМАЛЬНО СТРОГАЯ ФИЛЬТРАЦИЯ: Отсекаем любые спецсимволы в ключе Reality.
+                    if (key.length() < 43 || key.contains("+") || key.contains("/") || key.contains("=")) {
+                        FileLogger.w(TAG, "Пропуск [" + server.remark + "] — несовместимый pbk: " + key);
                         skippedNoPublicKey++;
                         continue;
                     }
+
                     if (server.sni == null || server.sni.isEmpty()) {
                         server.sni = server.host;
                     }
@@ -348,6 +417,15 @@ public class V2RayConfigBuilder {
                     continue;
                 }
 
+                // Дополнительная фильтрация UUID (пароля) от спецсимволов, если это VLESS
+                if ("vless".equalsIgnoreCase(protocol)) {
+                    if (server.uuid.contains("=") || server.uuid.contains("+") || server.uuid.contains("/") || server.uuid.contains(" ")) {
+                        FileLogger.w(TAG, "Пропуск [" + server.remark + "] — несовместимый UUID: " + server.uuid);
+                        skippedOther++;
+                        continue;
+                    }
+                }
+
                 validCount++;
 
                 // Inbound
@@ -364,7 +442,7 @@ public class V2RayConfigBuilder {
                 // Outbound
                 JSONObject vlessOut = new JSONObject();
                 vlessOut.put("tag", outTag);
-                vlessOut.put("protocol", "vless");
+                vlessOut.put("protocol", protocol);
 
                 JSONObject outSettings = new JSONObject();
                 JSONArray vnext = new JSONArray();
@@ -374,20 +452,34 @@ public class V2RayConfigBuilder {
 
                 JSONArray users = new JSONArray();
                 JSONObject user = new JSONObject();
-                user.put("id", server.uuid);
-                user.put("encryption", "none");
+                if (protocol.equals("trojan")) {
+                    user.put("password", server.uuid);
+                } else {
+                    user.put("id", server.uuid);
+                    user.put("encryption", "none");
+                }
 
                 // ← Важное улучшение: Vision flow
+                // КРИТИЧНО: Для REALITY НЕЛЬЗЯ передавать поле "password" в конфиг VLESS/VMess
+                // Xray падает с ошибкой infra/conf: invalid "password"
                 if (server.security != null && server.security.equalsIgnoreCase("reality")) {
                     user.put("flow", "xtls-rprx-vision");
+                    user.remove("password");
                 } else if (server.flow != null && !server.flow.isEmpty()) {
                     user.put("flow", server.flow);
                 }
 
                 users.put(user);
                 serverConf.put("users", users);
-                vnext.put(serverConf);
-                outSettings.put("vnext", vnext);
+                
+                if (protocol.equals("trojan")) {
+                    JSONArray serversArr = new JSONArray();
+                    serversArr.put(serverConf);
+                    outSettings.put("servers", serversArr);
+                } else {
+                    vnext.put(serverConf);
+                    outSettings.put("vnext", vnext);
+                }
                 vlessOut.put("settings", outSettings);
 
                 vlessOut.put("streamSettings", buildStreamSettings(server));  // ← теперь использует новую версию
@@ -484,19 +576,61 @@ public class V2RayConfigBuilder {
     }
 
     private static void sanitizeServer(VlessServer server) {
-        if (server.pbk != null && server.pbk.contains("#"))
-            server.pbk = server.pbk.substring(0, server.pbk.indexOf("#")).trim();
+        if (server == null) return;
 
-        if (server.sid != null && server.sid.contains("#"))
-            server.sid = server.sid.substring(0, server.sid.indexOf("#")).trim();
+        // UUID / Password
+        if (server.uuid != null) {
+            server.uuid = server.uuid.trim();
+            if (server.uuid.contains("#"))
+                server.uuid = server.uuid.substring(0, server.uuid.indexOf("#")).trim();
+        }
 
-        if (server.sni != null && server.sni.contains("#"))
-            server.sni = server.sni.substring(0, server.sni.indexOf("#")).trim();
+        // Reality Public Key
+        if (server.pbk != null) {
+            server.pbk = server.pbk.trim();
+            if (server.pbk.contains("#"))
+                server.pbk = server.pbk.substring(0, server.pbk.indexOf("#")).trim();
+            
+            // НОРМАЛИЗАЦИЯ: В ссылках часто URL-safe Base64 (-/_).
+            // Мы приводим к стандарту (+/), НО ПОТОМ ФИЛЬТРУЕМ ИХ в build/buildMultiplex.
+            server.pbk = server.pbk.replace(" ", "+").replace("-", "+").replace("_", "/");
+            
+            // Удаляем паддинг '=', так как он 100% вызывает ошибку в этом ядре
+            if (server.pbk.contains("=")) {
+                server.pbk = server.pbk.replace("=", "");
+            }
+        }
 
-        if (server.networkType != null && server.networkType.contains("#"))
-            server.networkType = server.networkType.substring(0, server.networkType.indexOf("#")).trim();
+        // Reality Short ID
+        if (server.sid != null) {
+            server.sid = server.sid.trim();
+            if (server.sid.contains("#"))
+                server.sid = server.sid.substring(0, server.sid.indexOf("#")).trim();
+        }
 
-        if (server.security != null && server.security.contains("#"))
-            server.security = server.security.substring(0, server.security.indexOf("#")).trim();
+        // SNI / Server Name
+        if (server.sni != null) {
+            server.sni = server.sni.trim();
+            if (server.sni.contains("#"))
+                server.sni = server.sni.substring(0, server.sni.indexOf("#")).trim();
+        }
+
+        // Network Type
+        if (server.networkType != null) {
+            server.networkType = server.networkType.trim().toLowerCase();
+            if (server.networkType.contains("#"))
+                server.networkType = server.networkType.substring(0, server.networkType.indexOf("#")).trim();
+            
+            // Маппинг нестандартных типов транспорта
+            if (server.networkType.equals("raw")) server.networkType = "tcp";
+            if (server.networkType.equals("h2")) server.networkType = "http";
+        }
+
+        // Security
+        if (server.security != null) {
+            server.security = server.security.trim();
+            if (server.security.contains("#"))
+                server.security = server.security.substring(0, server.security.indexOf("#")).trim();
+        }
     }
 }

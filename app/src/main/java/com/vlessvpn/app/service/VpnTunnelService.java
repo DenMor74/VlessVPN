@@ -226,6 +226,7 @@ public class VpnTunnelService extends VpnService {
         }
 
         updateNotification("Подключение...", server.host);
+        mainHandler.post(() -> StatusBus.post(this, "Подключение...", true));
 
         if (bgExecutor == null || bgExecutor.isShutdown()) {
             bgExecutor = Executors.newSingleThreadExecutor();
@@ -263,6 +264,13 @@ public class VpnTunnelService extends VpnService {
 
         isStopping = false;
         currentServer = server;
+        isIpDetermined = false; // Сбрасываем флаг определения IP
+        isTunnelVerified = false;
+        mainHandler.post(() -> {
+            StatusBus.post(this, "🔬 Определение IP...", true);
+            StatusBus.postServiceStatus(this, false, false);
+            AodOverlayService.sendServiceStatus(this, false, false);
+        });
 
         v2rayThread = new Thread(() -> {
             try {
@@ -547,27 +555,47 @@ public class VpnTunnelService extends VpnService {
         HttpURLConnection conn = null;
         try {
             Network targetNetwork = null;
-            // Ищем сеть, которая НЕ является VPN
-            for (Network net : connectivityManager.getAllNetworks()) {
-                NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
-                if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                        && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                    targetNetwork = net;
-                    // Если нашли WiFi, он обычно в приоритете
-                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                        break;
+
+            // Сначала пробуем получить текущую "активную" сеть по умолчанию
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Network activeNet = connectivityManager.getActiveNetwork();
+                if (activeNet != null) {
+                    NetworkCapabilities activeCaps = connectivityManager.getNetworkCapabilities(activeNet);
+                    if (activeCaps != null && !activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                        targetNetwork = activeNet;
                     }
                 }
             }
 
-            if (targetNetwork == null) return -1;
+            // Если активная сеть — VPN или null, ищем любую физическую сеть с интернетом
+            if (targetNetwork == null) {
+                for (Network net : connectivityManager.getAllNetworks()) {
+                    NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
+                    if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                        targetNetwork = net;
+                        // WiFi в приоритете
+                        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (targetNetwork == null) {
+                FileLogger.w(TAG, "Bypass check: нет подходящей физической сети");
+                return -1;
+            }
 
             conn = (HttpURLConnection) targetNetwork.openConnection(new URL(urlStr));
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);
             conn.setRequestMethod("HEAD");
-            return conn.getResponseCode();
+            int code = conn.getResponseCode();
+            // FileLogger.d(TAG, "Bypass check " + urlStr + " -> " + code);
+            return code;
         } catch (Exception e) {
+            // FileLogger.w(TAG, "Bypass check " + urlStr + " failed: " + e.getMessage());
             return -1;
         } finally {
             if (conn != null) conn.disconnect();
@@ -575,12 +603,12 @@ public class VpnTunnelService extends VpnService {
     }
 
     private boolean checkPhysicalInternetBypassingVpn() {
-        int code = checkUrlBypassingVpn("https://yastatic.net/favicon.ico", 2000);
+        int code = checkUrlBypassingVpn("https://yastatic.net/favicon.ico", 5000);
         return code >= 200 && code < 400;
     }
 
     private boolean checkWhiteInternetBypassingVpn() {
-        int code = checkUrlBypassingVpn("https://cloudpub.ru/", 3000);
+        int code = checkUrlBypassingVpn("https://cloudpub.ru/", 5000);
         FileLogger.i(TAG, "cloudpub.ru - " + code);
         return !(code >= 200 && code < 400); // Инверсия: если Google доступен, значит "не белый (не РФ)" интернет
     }
@@ -750,6 +778,8 @@ public class VpnTunnelService extends VpnService {
             return;
         }
 
+        final long checkConnectId = activeConnectId;
+
         mainHandler.post(() -> {
             StatusBus.post(this, "🔍 Проверка доступности сервисов...", true);
             StatusBus.postServiceStatus(this, false, false); // Сбрасываем иконки в серый
@@ -764,7 +794,9 @@ public class VpnTunnelService extends VpnService {
         // 1. ПАРАЛЛЕЛЬНАЯ ПРОВЕРКА TELEGRAM
         safeExecute(() -> {
             try {
-                boolean ok = checkUrlStatusThroughProxy("https://t.me/favicon.ico", 10000);
+                if (activeConnectId != checkConnectId) return;
+                boolean ok = checkUrlStatusThroughProxy("https://t.me/favicon.ico", 4000);
+                if (activeConnectId != checkConnectId) return;
                 tgOk.set(ok);
                 StatusBus.postPingResult(getApplicationContext(), "tg", ok);
                 FileLogger.i(TAG, "=== Telegram: " + ok);
@@ -776,7 +808,9 @@ public class VpnTunnelService extends VpnService {
         // 2. ПАРАЛЛЕЛЬНАЯ ПРОВЕРКА YOUTUBE
         safeExecute(() -> {
             try {
-                boolean ok = checkUrlStatusThroughProxy("https://www.youtube.com/favicon.ico", 10000);
+                if (activeConnectId != checkConnectId) return;
+                boolean ok = checkUrlStatusThroughProxy("https://www.youtube.com/favicon.ico", 4000);
+                if (activeConnectId != checkConnectId) return;
                 ytOk.set(ok);
                 StatusBus.postPingResult(getApplicationContext(), "yt", ok);
                 FileLogger.i(TAG, "=== Youtube:: " + ok);
@@ -786,8 +820,10 @@ public class VpnTunnelService extends VpnService {
         });
 
         try {
-            latch.await(15, java.util.concurrent.TimeUnit.SECONDS);
+            latch.await(6, java.util.concurrent.TimeUnit.SECONDS);
         } catch (InterruptedException ignored) {}
+
+        if (activeConnectId != checkConnectId) return;
 
         // Обновляем UI один раз после обеих проверок (или таймаута)
         AodOverlayService.sendServiceStatus(this, tgOk.get(), ytOk.get());
@@ -807,8 +843,8 @@ public class VpnTunnelService extends VpnService {
 
         for (String[] service : services) {
             safeExecute(() -> {
-                if (isIpDetermined) return;
-                if (tryGetIpFromService(service[0], service[1])) {
+                if (isIpDetermined || activeConnectId != checkConnectId) return;
+                if (tryGetIpFromService(service[0], service[1], checkConnectId)) {
                     FileLogger.i(TAG, "IP determined by " + service[1]);
                 }
             });
@@ -841,7 +877,7 @@ private void updateConnectedMessage(boolean tg, boolean yt) {
             conn = (HttpURLConnection) new URL(urlStr).openConnection(proxy);
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);
-            conn.setRequestMethod("GET");
+            conn.setRequestMethod("HEAD"); // Быстрее чем GET
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (VlessVPN; Android)");
             int code = conn.getResponseCode();
             return code >= 200 && code < 400;
@@ -931,9 +967,10 @@ private void updateConnectedMessage(boolean tg, boolean yt) {
      * Пытается получить IP через указанный сервис
      * @return true если успешно получил и обработал данные
      */
-    private boolean tryGetIpFromService(String urlStr, String serviceName) {
+    private boolean tryGetIpFromService(String urlStr, String serviceName, long checkConnectId) {
         HttpURLConnection conn = null;
         try {
+            if (activeConnectId != checkConnectId) return false;
 
             int socksPort = new ServerRepository(this).getLocalSocksPort();
             Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", socksPort));
@@ -945,8 +982,8 @@ private void updateConnectedMessage(boolean tg, boolean yt) {
 
             // === КРИТИЧНЫЕ ПАРАМЕТРЫ ===
             conn.setRequestMethod("GET");
-            conn.setConnectTimeout(10000);      // 10 секунд
-            conn.setReadTimeout(10000);
+            conn.setConnectTimeout(5000);      // 5 секунд
+            conn.setReadTimeout(5000);
             conn.setInstanceFollowRedirects(true);
 
             // Заголовки, которые сильно помогают ip-api.com и остальным
@@ -956,8 +993,10 @@ private void updateConnectedMessage(boolean tg, boolean yt) {
 
             long startTime = System.currentTimeMillis();
             int responseCode = conn.getResponseCode();
-            long duration = System.currentTimeMillis() - startTime;
 
+            if (activeConnectId != checkConnectId) return false;
+
+            long duration = System.currentTimeMillis() - startTime;
             FileLogger.i(TAG, "IP → " + serviceName + " ответил: HTTP " + responseCode + " (" + duration + "ms)");
 
             if (responseCode != 200) {
@@ -986,6 +1025,8 @@ private void updateConnectedMessage(boolean tg, boolean yt) {
             if (ip == null || ip.isEmpty()) {
                 ip = extractJson(json, "ipAddress");     // ipinfo.io
             }
+
+            if (activeConnectId != checkConnectId) return false;
 
             String city = extractJson(json, "city");
             String country = extractJson(json, "countryCode");
